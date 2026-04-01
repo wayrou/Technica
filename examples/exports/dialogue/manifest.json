@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "1.0.0",
+  "sourceApp": "Technica",
+  "exportType": "dialogue",
+  "exportedAt": "2026-04-01T00:00:00.000Z",
+  "title": "Village Guide Intro",
+  "description": "Dialogue export containing author source plus normalized branching JSON.",
+  "files": ["manifest.json", "dialogue.json", "dialogue.txt", "README.md"]
+}

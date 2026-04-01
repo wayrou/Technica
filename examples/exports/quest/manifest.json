@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "1.0.0",
+  "sourceApp": "Technica",
+  "exportType": "quest",
+  "exportedAt": "2026-04-01T00:00:00.000Z",
+  "title": "Check the Courier Board",
+  "description": "Quest export containing structured states, objectives, and branching step data.",
+  "files": ["manifest.json", "quest.json", "README.md"]
+}

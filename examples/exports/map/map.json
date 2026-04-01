@@ -1,0 +1,187 @@
+{
+  "schemaVersion": "1.0.0",
+  "sourceApp": "Technica",
+  "id": "map-oak-square",
+  "name": "Oak Square",
+  "width": 12,
+  "height": 10,
+  "tileSize": 48,
+  "tiles": [
+    [
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}},
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}},
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}},
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}},
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}},
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}},
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}},
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}},
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}},
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}},
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}},
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}}
+    ],
+    [
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}}
+    ],
+    [
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}}
+    ],
+    [
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}}
+    ],
+    [
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "road", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "road", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "road", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "road", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "road", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "road", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}}
+    ],
+    [
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}}
+    ],
+    [
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "water", "walkable": false, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "water", "walkable": false, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "water", "walkable": false, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}}
+    ],
+    [
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "water", "walkable": false, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "water", "walkable": false, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "water", "walkable": false, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}}
+    ],
+    [
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "grass", "walkable": true, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "water", "walkable": false, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "water", "walkable": false, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "water", "walkable": false, "wall": false, "floor": true, "metadata": {}},
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}}
+    ],
+    [
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}},
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}},
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}},
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}},
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}},
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}},
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}},
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}},
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}},
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}},
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}},
+      {"terrain": "stone", "walkable": false, "wall": true, "floor": true, "metadata": {}}
+    ]
+  ],
+  "objects": [
+    {
+      "id": "obj-board",
+      "type": "interactive",
+      "sprite": "notice_board",
+      "label": "Courier Board",
+      "action": "open_board",
+      "x": 5,
+      "y": 3,
+      "width": 2,
+      "height": 1,
+      "metadata": {
+        "questHook": "quest-courier-board"
+      }
+    }
+  ],
+  "zones": [
+    {
+      "id": "zone-fountain",
+      "label": "Fountain trigger",
+      "action": "play_fountain_scene",
+      "x": 4,
+      "y": 4,
+      "width": 3,
+      "height": 2,
+      "metadata": {
+        "sceneId": "oak-square-fountain"
+      }
+    }
+  ],
+  "metadata": {
+    "biome": "village",
+    "lighting": "morning"
+  },
+  "createdAt": "2026-04-01T00:00:00.000Z",
+  "updatedAt": "2026-04-01T00:00:00.000Z"
+}

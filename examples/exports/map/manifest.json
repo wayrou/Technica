@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "1.0.0",
+  "sourceApp": "Technica",
+  "exportType": "map",
+  "exportedAt": "2026-04-01T00:00:00.000Z",
+  "title": "Oak Square",
+  "description": "Tile-based map export containing terrain, passability, objects, and interaction zones.",
+  "files": ["manifest.json", "map.json", "README.md"]
+}
