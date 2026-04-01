@@ -1,0 +1,42 @@
+{
+  "schemaVersion": "1.0.0",
+  "sourceApp": "Technica",
+  "sourceAppVersion": "0.1.0",
+  "exportType": "map",
+  "contentType": "map",
+  "targetGame": "chaos-core",
+  "targetSchemaVersion": "field-map.v1",
+  "exportedAt": "2026-04-01T19:34:22.544Z",
+  "contentId": "oak_square",
+  "title": "Oak Square",
+  "description": "Chaos Core runtime field map export.",
+  "entryFile": "oak_square.fieldmap.json",
+  "dependencies": [
+    {
+      "contentType": "quest",
+      "id": "check_the_courier_board",
+      "relation": "object:courier_board-quest"
+    },
+    {
+      "contentType": "dialogue",
+      "id": "village_guide_intro",
+      "relation": "object:courier_board-dialogue"
+    },
+    {
+      "contentType": "quest",
+      "id": "check_the_courier_board",
+      "relation": "interaction:courier_board_interact-quest"
+    },
+    {
+      "contentType": "dialogue",
+      "id": "village_guide_intro",
+      "relation": "interaction:courier_board_interact-dialogue"
+    }
+  ],
+  "files": [
+    "manifest.json",
+    "oak_square.fieldmap.json",
+    "oak_square.source.json",
+    "README.md"
+  ]
+}

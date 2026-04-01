@@ -3,9 +3,10 @@ import { Panel } from "../../components/Panel";
 import { IssueList } from "../../components/IssueList";
 import { sampleDialogueSource } from "../../data/sampleDialogue";
 import { usePersistentState } from "../../hooks/usePersistentState";
+import type { ExportTarget } from "../../types/common";
 import { confirmAction, notify } from "../../utils/dialogs";
 import { parseDialogueSource } from "../../utils/dialogueParser";
-import { buildDialogueBundle, createDraftEnvelope, downloadBundle, downloadDraftFile } from "../../utils/exporters";
+import { buildDialogueBundleForTarget, createDraftEnvelope, downloadBundle, downloadDraftFile } from "../../utils/exporters";
 import { readTextFile } from "../../utils/file";
 import { DialoguePreview } from "./DialoguePreview";
 
@@ -32,11 +33,16 @@ END`;
 
 export function DialogueStudio() {
   const [source, setSource] = usePersistentState("technica.dialogue.source", sampleDialogueSource);
+  const [exportTarget, setExportTarget] = usePersistentState<ExportTarget>("technica.dialogue.exportTarget", "generic");
   const importRef = useRef<HTMLInputElement | null>(null);
   const { document, issues } = parseDialogueSource(source);
 
   async function handleExportBundle() {
-    await downloadBundle(buildDialogueBundle(document));
+    try {
+      await downloadBundle(buildDialogueBundleForTarget(document, exportTarget));
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Could not export the dialogue bundle.");
+    }
   }
 
   async function handleImportFile(event: ChangeEvent<HTMLInputElement>) {
@@ -108,6 +114,13 @@ export function DialogueStudio() {
               <span className="pill">{document.stats.choiceCount} choices</span>
             </div>
             <div className="toolbar">
+              <label className="inline-select">
+                <span>Export target</span>
+                <select value={exportTarget} onChange={(event) => setExportTarget(event.target.value as ExportTarget)}>
+                  <option value="generic">Generic</option>
+                  <option value="chaos-core">Chaos Core</option>
+                </select>
+              </label>
               <button type="button" className="ghost-button" onClick={() => importRef.current?.click()}>
                 Import draft
               </button>

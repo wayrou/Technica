@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "1.0.0",
+  "sourceApp": "Technica",
+  "sourceAppVersion": "0.1.0",
+  "exportType": "dialogue",
+  "contentType": "dialogue",
+  "targetGame": "chaos-core",
+  "targetSchemaVersion": "dialogue.v1",
+  "exportedAt": "2026-04-01T19:34:22.538Z",
+  "contentId": "village_guide_intro",
+  "title": "Village Guide Intro",
+  "description": "Chaos Core runtime dialogue graph export.",
+  "entryFile": "village_guide_intro.dialogue.json",
+  "dependencies": [
+    {
+      "contentType": "scene",
+      "id": "oak_square",
+      "relation": "scene"
+    }
+  ],
+  "files": [
+    "manifest.json",
+    "village_guide_intro.dialogue.json",
+    "village_guide_intro.source.json",
+    "village_guide_intro.dialogue.txt",
+    "README.md"
+  ]
+}

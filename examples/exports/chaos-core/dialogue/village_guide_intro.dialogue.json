@@ -1,0 +1,138 @@
+{
+  "id": "village_guide_intro",
+  "title": "Village Guide Intro",
+  "sceneId": "oak_square",
+  "entryNodeId": "start",
+  "tags": [
+    "onboarding",
+    "village"
+  ],
+  "metadata": {
+    "ambience": "morning_market"
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "line",
+      "speaker": "Guide",
+      "text": "First time in Oak Square? Keep your coin purse close.",
+      "mood": "warm",
+      "portraitKey": "guide_smile",
+      "nextNodeId": "start_choices"
+    },
+    {
+      "id": "start_choices",
+      "type": "choice_set",
+      "choices": [
+        {
+          "id": "ask_about_the_courier_board",
+          "text": "Ask about the courier board",
+          "targetNodeId": "courier_board",
+          "tags": [
+            "quest"
+          ]
+        },
+        {
+          "id": "ask_where_to_rest",
+          "text": "Ask where to rest",
+          "targetNodeId": "inn"
+        },
+        {
+          "id": "leave_politely",
+          "text": "Leave politely",
+          "targetNodeId": "goodbye"
+        }
+      ]
+    },
+    {
+      "id": "courier_board",
+      "type": "line",
+      "speaker": "Guide",
+      "text": "The board near the fountain lists work for travelers.",
+      "mood": "helpful",
+      "nextNodeId": "courier_board_effect_2"
+    },
+    {
+      "id": "courier_board_effect_2",
+      "type": "effect",
+      "effects": [
+        {
+          "type": "set_flag",
+          "key": "learned_courier_board",
+          "value": true
+        }
+      ],
+      "nextNodeId": "courier_board_choices"
+    },
+    {
+      "id": "courier_board_choices",
+      "type": "choice_set",
+      "choices": [
+        {
+          "id": "head_to_the_board",
+          "text": "Head to the board",
+          "targetNodeId": "goodbye",
+          "effects": [
+            {
+              "type": "set_flag",
+              "key": "tracked_board",
+              "value": true
+            }
+          ]
+        },
+        {
+          "id": "ask_about_rewards",
+          "text": "Ask about rewards",
+          "targetNodeId": "rewards"
+        }
+      ]
+    },
+    {
+      "id": "rewards",
+      "type": "line",
+      "speaker": "Guide",
+      "text": "Honest work pays in coin, favors, and the occasional secret.",
+      "mood": "proud",
+      "nextNodeId": "rewards_jump_2"
+    },
+    {
+      "id": "rewards_jump_2",
+      "type": "jump",
+      "targetNodeId": "goodbye"
+    },
+    {
+      "id": "inn",
+      "type": "line",
+      "speaker": "Guide",
+      "text": "The Lantern Inn stays open as long as the lamps are burning.",
+      "portraitKey": "guide_think",
+      "nextNodeId": "inn_choices"
+    },
+    {
+      "id": "inn_choices",
+      "type": "choice_set",
+      "choices": [
+        {
+          "id": "thanks",
+          "text": "Thanks",
+          "targetNodeId": "goodbye"
+        }
+      ]
+    },
+    {
+      "id": "goodbye",
+      "type": "line",
+      "speaker": "Guide",
+      "text": "Good luck out there.",
+      "mood": "calm",
+      "nextNodeId": "goodbye_end"
+    },
+    {
+      "id": "goodbye_end",
+      "type": "end"
+    }
+  ],
+  "source": {
+    "rawSource": "@id village_guide_intro\n@title Village Guide Intro\n@scene oak_square\n@meta ambience=morning_market\n@tag onboarding, village\n\n:start\nGuide [mood=warm portrait=guide_smile]: First time in Oak Square? Keep your coin purse close.\n? Ask about the courier board -> courier_board [tags=quest]\n? Ask where to rest -> inn\n? Leave politely -> goodbye\n\n:courier_board\nGuide [mood=helpful]: The board near the fountain lists work for travelers.\n@set learned_courier_board=true\n? Head to the board -> goodbye [set=tracked_board:true]\n? Ask about rewards -> rewards\n\n:rewards\nGuide [mood=proud]: Honest work pays in coin, favors, and the occasional secret.\n-> goodbye\n\n:inn\nGuide [portrait=guide_think]: The Lantern Inn stays open as long as the lamps are burning.\n? Thanks -> goodbye\n\n:goodbye\nGuide [mood=calm]: Good luck out there.\nEND\n"
+  }
+}

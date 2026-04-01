@@ -3,12 +3,13 @@ import { IssueList } from "../../components/IssueList";
 import { Panel } from "../../components/Panel";
 import { createSampleMap } from "../../data/sampleMap";
 import { usePersistentState } from "../../hooks/usePersistentState";
+import type { ExportTarget } from "../../types/common";
 import type { MapBrushState, MapDocument, MapObject, MapZone } from "../../types/map";
 import { isoNow } from "../../utils/date";
 import { confirmAction, notify } from "../../utils/dialogs";
-import { buildMapBundle, createDraftEnvelope, downloadBundle, downloadDraftFile } from "../../utils/exporters";
+import { buildMapBundleForTarget, createDraftEnvelope, downloadBundle, downloadDraftFile } from "../../utils/exporters";
 import { readTextFile } from "../../utils/file";
-import { createId } from "../../utils/id";
+import { createSequentialId } from "../../utils/id";
 import { parseKeyValueLines, serializeKeyValueLines } from "../../utils/records";
 import { validateMapDocument } from "../../utils/mapValidation";
 import {
@@ -29,9 +30,9 @@ function touchMap(document: MapDocument) {
   };
 }
 
-function createDefaultObject(x: number, y: number): MapObject {
+function createDefaultObject(x: number, y: number, existingIds: string[]): MapObject {
   return {
-    id: createId("object"),
+    id: createSequentialId("object", existingIds),
     type: "interactive",
     sprite: "sprite_key",
     label: "New object",
@@ -44,9 +45,9 @@ function createDefaultObject(x: number, y: number): MapObject {
   };
 }
 
-function createDefaultZone(x: number, y: number, width: number, height: number): MapZone {
+function createDefaultZone(x: number, y: number, width: number, height: number, existingIds: string[]): MapZone {
   return {
-    id: createId("zone"),
+    id: createSequentialId("zone", existingIds),
     label: "New zone",
     action: "trigger_action",
     x,
@@ -59,6 +60,7 @@ function createDefaultZone(x: number, y: number, width: number, height: number):
 
 export function MapEditor() {
   const [map, setMap] = usePersistentState("technica.map.document", createSampleMap());
+  const [exportTarget, setExportTarget] = usePersistentState<ExportTarget>("technica.map.exportTarget", "generic");
   const [tool, setTool] = useState<MapTool>("paint");
   const [brush, setBrush] = useState<MapBrushState>({
     terrain: "grass",
@@ -106,7 +108,7 @@ export function MapEditor() {
       setPanState(null);
       if (zoneDrag) {
         const rect = normalizeRect(zoneDrag.start, zoneDrag.end);
-        const zone = createDefaultZone(rect.x, rect.y, rect.width, rect.height);
+        const zone = createDefaultZone(rect.x, rect.y, rect.width, rect.height, map.zones.map((item) => item.id));
         setMap((current) =>
           touchMap({
             ...current,
@@ -201,7 +203,7 @@ export function MapEditor() {
     }
 
     if (tool === "object") {
-      const object = createDefaultObject(x, y);
+      const object = createDefaultObject(x, y, map.objects.map((item) => item.id));
       patchMap((current) => ({
         ...current,
         objects: [...current.objects, object]
@@ -459,6 +461,13 @@ export function MapEditor() {
               </label>
             </div>
             <div className="toolbar">
+              <label className="inline-select">
+                <span>Export target</span>
+                <select value={exportTarget} onChange={(event) => setExportTarget(event.target.value as ExportTarget)}>
+                  <option value="generic">Generic</option>
+                  <option value="chaos-core">Chaos Core</option>
+                </select>
+              </label>
               <button type="button" className="ghost-button" onClick={handleResizeMap}>
                 Apply size
               </button>
@@ -468,7 +477,17 @@ export function MapEditor() {
               <button type="button" className="ghost-button" onClick={() => downloadDraftFile("map", map.name, map)}>
                 Save draft file
               </button>
-              <button type="button" className="primary-button" onClick={() => downloadBundle(buildMapBundle(map))}>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={async () => {
+                  try {
+                    await downloadBundle(buildMapBundleForTarget(map, exportTarget));
+                  } catch (error) {
+                    notify(error instanceof Error ? error.message : "Could not export the map bundle.");
+                  }
+                }}
+              >
                 Export bundle
               </button>
               <input ref={importRef} hidden type="file" accept=".json" onChange={handleImportFile} />
@@ -595,10 +614,11 @@ export function MapEditor() {
             <article className="item-card">
               <div className="item-card-header">
                 <h3>{selectedObject.label || selectedObject.id}</h3>
-                <button
-                  className="ghost-button danger"
-                  onClick={() => {
-                    if (window.confirm(`Remove object '${selectedObject.id}'?`)) {
+                  <button
+                    type="button"
+                    className="ghost-button danger"
+                    onClick={() => {
+                    if (confirmAction(`Remove object '${selectedObject.id}'?`)) {
                       patchMap((current) => ({
                         ...current,
                         objects: current.objects.filter((item) => item.id !== selectedObject.id)
@@ -736,10 +756,11 @@ export function MapEditor() {
             <article className="item-card">
               <div className="item-card-header">
                 <h3>{selectedZone.label || selectedZone.id}</h3>
-                <button
-                  className="ghost-button danger"
-                  onClick={() => {
-                    if (window.confirm(`Remove zone '${selectedZone.id}'?`)) {
+                  <button
+                    type="button"
+                    className="ghost-button danger"
+                    onClick={() => {
+                    if (confirmAction(`Remove zone '${selectedZone.id}'?`)) {
                       patchMap((current) => ({
                         ...current,
                         zones: current.zones.filter((item) => item.id !== selectedZone.id)

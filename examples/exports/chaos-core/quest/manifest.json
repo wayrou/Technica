@@ -1,0 +1,27 @@
+{
+  "schemaVersion": "1.0.0",
+  "sourceApp": "Technica",
+  "sourceAppVersion": "0.1.0",
+  "exportType": "quest",
+  "contentType": "quest",
+  "targetGame": "chaos-core",
+  "targetSchemaVersion": "quest.v1",
+  "exportedAt": "2026-04-01T19:34:22.542Z",
+  "contentId": "check_the_courier_board",
+  "title": "Check the Courier Board",
+  "description": "Chaos Core runtime quest export.",
+  "entryFile": "check_the_courier_board.quest.json",
+  "dependencies": [
+    {
+      "contentType": "dialogue",
+      "id": "village_guide_intro",
+      "relation": "prerequisite"
+    }
+  ],
+  "files": [
+    "manifest.json",
+    "check_the_courier_board.quest.json",
+    "check_the_courier_board.source.json",
+    "README.md"
+  ]
+}

@@ -7,7 +7,7 @@ import type {
   DialogueLine
 } from "../types/dialogue";
 import { isoNow } from "./date";
-import { createId, slugify } from "./id";
+import { runtimeId, slugify } from "./id";
 import { parseCommaList } from "./records";
 
 function parseAttributeBlock(rawAttributes: string) {
@@ -82,7 +82,7 @@ function createLineEntry(speakerSegment: string, text: string, lineNumber: numbe
   }
 
   return {
-    id: createId(`line-${lineNumber}`),
+    id: `line_${lineNumber}`,
     kind: "line",
     speaker,
     text: text.trim(),
@@ -107,7 +107,7 @@ function createChoiceEntry(rawContent: string, lineNumber: number): DialogueChoi
   const normalized = separateKnownAttributes(attributes);
 
   return {
-    id: createId(`choice-${lineNumber}`),
+    id: `choice_${lineNumber}`,
     kind: "choice",
     text: match[1].trim(),
     target: match[2].trim(),
@@ -248,7 +248,7 @@ export function parseDialogueSource(rawSource: string) {
 
       labelNames.add(labelName);
       currentLabel = {
-        id: createId(`label-${labelName}`),
+        id: `label_${runtimeId(labelName)}`,
         label: labelName,
         entries: []
       };
@@ -267,7 +267,7 @@ export function parseDialogueSource(rawSource: string) {
 
     if (line === "END") {
       currentLabel.entries.push({
-        id: createId(`end-${lineNumber}`),
+        id: `end_${lineNumber}`,
         kind: "end"
       });
       return;
@@ -289,7 +289,7 @@ export function parseDialogueSource(rawSource: string) {
       }
 
       currentLabel.entries.push({
-        id: createId(`set-${lineNumber}`),
+        id: `set_${lineNumber}`,
         kind: "set",
         flag,
         value
@@ -309,7 +309,7 @@ export function parseDialogueSource(rawSource: string) {
       }
 
       currentLabel.entries.push({
-        id: createId(`jump-${lineNumber}`),
+        id: `jump_${lineNumber}`,
         kind: "jump",
         target
       });

@@ -2,17 +2,25 @@ import JSZip from "jszip";
 import {
   TECHNICA_SCHEMA_VERSION,
   TECHNICA_SOURCE_APP,
+  TECHNICA_SOURCE_APP_VERSION,
   type DraftEnvelope,
   type EditorKind,
   type ExportBundle,
-  type ExportManifest
+  type ExportManifest,
+  type ExportTarget
 } from "../types/common";
 import type { DialogueDocument } from "../types/dialogue";
 import type { MapDocument } from "../types/map";
 import type { QuestDocument } from "../types/quest";
+import {
+  buildChaosCoreDialogueBundle,
+  buildChaosCoreMapBundle,
+  buildChaosCoreQuestBundle,
+  createWorkspaceReferenceIndex
+} from "./chaosCoreExport";
 import { isoNow } from "./date";
 import { downloadBlob, downloadText } from "./file";
-import { slugify } from "./id";
+import { runtimeId, slugify } from "./id";
 
 function prettyJson(value: unknown) {
   return JSON.stringify(value, null, 2);
@@ -47,10 +55,17 @@ export function buildDialogueBundle(document: DialogueDocument): ExportBundle {
   const manifest: ExportManifest = {
     schemaVersion: TECHNICA_SCHEMA_VERSION,
     sourceApp: TECHNICA_SOURCE_APP,
+    sourceAppVersion: TECHNICA_SOURCE_APP_VERSION,
     exportType: "dialogue" as const,
+    contentType: "dialogue",
+    targetGame: "generic",
+    targetSchemaVersion: "technica-dialogue.v1",
     exportedAt: isoNow(),
+    contentId: runtimeId(document.id || document.title, "dialogue"),
     title: document.title,
     description: "Dialogue export containing author source plus normalized branching JSON.",
+    entryFile: "dialogue.json",
+    dependencies: [],
     files: ["manifest.json", "dialogue.json", "dialogue.txt", "README.md"]
   };
 
@@ -97,10 +112,17 @@ export function buildQuestBundle(document: QuestDocument): ExportBundle {
   const manifest: ExportManifest = {
     schemaVersion: TECHNICA_SCHEMA_VERSION,
     sourceApp: TECHNICA_SOURCE_APP,
+    sourceAppVersion: TECHNICA_SOURCE_APP_VERSION,
     exportType: "quest" as const,
+    contentType: "quest",
+    targetGame: "generic",
+    targetSchemaVersion: "technica-quest.v1",
     exportedAt: isoNow(),
+    contentId: runtimeId(document.id || document.title, "quest"),
     title: document.title,
     description: "Quest export containing structured states, objectives, and branching step data.",
+    entryFile: "quest.json",
+    dependencies: [],
     files: ["manifest.json", "quest.json", "README.md"]
   };
 
@@ -140,10 +162,17 @@ export function buildMapBundle(document: MapDocument): ExportBundle {
   const manifest: ExportManifest = {
     schemaVersion: TECHNICA_SCHEMA_VERSION,
     sourceApp: TECHNICA_SOURCE_APP,
+    sourceAppVersion: TECHNICA_SOURCE_APP_VERSION,
     exportType: "map" as const,
+    contentType: "map",
+    targetGame: "generic",
+    targetSchemaVersion: "technica-map.v1",
     exportedAt: isoNow(),
+    contentId: runtimeId(document.id || document.name, "map"),
     title: document.name,
     description: "Tile-based map export containing terrain, passability, objects, and interaction zones.",
+    entryFile: "map.json",
+    dependencies: [],
     files: ["manifest.json", "map.json", "README.md"]
   };
 
@@ -177,4 +206,37 @@ Importer notes:
       }
     ]
   };
+}
+
+export function buildDialogueBundleForTarget(document: DialogueDocument, target: ExportTarget) {
+  if (target === "chaos-core") {
+    return buildChaosCoreDialogueBundle(
+      document,
+      createWorkspaceReferenceIndex({ dialogue: document })
+    );
+  }
+
+  return buildDialogueBundle(document);
+}
+
+export function buildQuestBundleForTarget(document: QuestDocument, target: ExportTarget) {
+  if (target === "chaos-core") {
+    return buildChaosCoreQuestBundle(
+      document,
+      createWorkspaceReferenceIndex({ quest: document })
+    );
+  }
+
+  return buildQuestBundle(document);
+}
+
+export function buildMapBundleForTarget(document: MapDocument, target: ExportTarget) {
+  if (target === "chaos-core") {
+    return buildChaosCoreMapBundle(
+      document,
+      createWorkspaceReferenceIndex({ map: document })
+    );
+  }
+
+  return buildMapBundle(document);
 }

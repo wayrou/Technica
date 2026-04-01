@@ -424,6 +424,22 @@ textarea.authoring-editor {
   font-size: 0.84rem;
 }
 
+.inline-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-soft);
+  font-size: 0.84rem;
+}
+
+.inline-select select {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(4, 12, 15, 0.84);
+  color: inherit;
+  padding: 8px 10px;
+}
+
 .map-viewport {
   overflow: auto;
   max-height: 720px;

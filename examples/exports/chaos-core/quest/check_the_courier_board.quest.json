@@ -1,0 +1,58 @@
+{
+  "id": "check_the_courier_board",
+  "title": "Check the Courier Board",
+  "description": "Speak with the guide, inspect the board, and pick up your first local job.",
+  "questType": "exploration",
+  "difficultyTier": 1,
+  "status": "available",
+  "objectives": [
+    {
+      "id": "obj_talk_guide",
+      "type": "talk_to_npc",
+      "target": "village_guide",
+      "current": 0,
+      "required": 1,
+      "description": "Start the conversation with the guide in Oak Square."
+    },
+    {
+      "id": "obj_read_board",
+      "type": "reach_location",
+      "target": "courier_board",
+      "current": 0,
+      "required": 1,
+      "description": "Inspect the courier board near the fountain."
+    },
+    {
+      "id": "obj_ask_rewards",
+      "type": "talk_to_npc",
+      "target": "village_guide",
+      "current": 0,
+      "required": 1,
+      "description": "Optional follow-up to explain why jobs matter."
+    }
+  ],
+  "rewards": {
+    "xp": 50
+  },
+  "metadata": {
+    "summary": "Speak with the guide, inspect the board, and pick up your first local job.",
+    "tags": [
+      "onboarding",
+      "village",
+      "courier"
+    ],
+    "prerequisites": [
+      "dialogue:village_guide_intro"
+    ],
+    "chaosCoreExtensions": {
+      "onComplete": {
+        "setFlags": [
+          {
+            "key": "unlock_village_jobs",
+            "value": true
+          }
+        ]
+      }
+    }
+  }
+}

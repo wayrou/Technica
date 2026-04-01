@@ -1,0 +1,174 @@
+{
+  "schemaVersion": "1.0.0",
+  "sourceApp": "Technica",
+  "id": "village_guide_intro",
+  "title": "Village Guide Intro",
+  "sceneId": "oak_square",
+  "rawSource": "@id village_guide_intro\n@title Village Guide Intro\n@scene oak_square\n@meta ambience=morning_market\n@tag onboarding, village\n\n:start\nGuide [mood=warm portrait=guide_smile]: First time in Oak Square? Keep your coin purse close.\n? Ask about the courier board -> courier_board [tags=quest]\n? Ask where to rest -> inn\n? Leave politely -> goodbye\n\n:courier_board\nGuide [mood=helpful]: The board near the fountain lists work for travelers.\n@set learned_courier_board=true\n? Head to the board -> goodbye [set=tracked_board:true]\n? Ask about rewards -> rewards\n\n:rewards\nGuide [mood=proud]: Honest work pays in coin, favors, and the occasional secret.\n-> goodbye\n\n:inn\nGuide [portrait=guide_think]: The Lantern Inn stays open as long as the lamps are burning.\n? Thanks -> goodbye\n\n:goodbye\nGuide [mood=calm]: Good luck out there.\nEND\n",
+  "metadata": {
+    "ambience": "morning_market"
+  },
+  "tags": [
+    "onboarding",
+    "village"
+  ],
+  "entryLabel": "start",
+  "labels": [
+    {
+      "id": "label_start",
+      "label": "start",
+      "entries": [
+        {
+          "id": "line_8",
+          "kind": "line",
+          "speaker": "Guide",
+          "text": "First time in Oak Square? Keep your coin purse close.",
+          "mood": "warm",
+          "portraitKey": "guide_smile",
+          "tags": [],
+          "metadata": {}
+        },
+        {
+          "id": "choice_9",
+          "kind": "choice",
+          "text": "Ask about the courier board",
+          "target": "courier_board",
+          "tags": [
+            "quest"
+          ],
+          "setFlags": {},
+          "metadata": {}
+        },
+        {
+          "id": "choice_10",
+          "kind": "choice",
+          "text": "Ask where to rest",
+          "target": "inn",
+          "tags": [],
+          "setFlags": {},
+          "metadata": {}
+        },
+        {
+          "id": "choice_11",
+          "kind": "choice",
+          "text": "Leave politely",
+          "target": "goodbye",
+          "tags": [],
+          "setFlags": {},
+          "metadata": {}
+        }
+      ]
+    },
+    {
+      "id": "label_courier_board",
+      "label": "courier_board",
+      "entries": [
+        {
+          "id": "line_14",
+          "kind": "line",
+          "speaker": "Guide",
+          "text": "The board near the fountain lists work for travelers.",
+          "mood": "helpful",
+          "tags": [],
+          "metadata": {}
+        },
+        {
+          "id": "set_15",
+          "kind": "set",
+          "flag": "learned_courier_board",
+          "value": "true"
+        },
+        {
+          "id": "choice_16",
+          "kind": "choice",
+          "text": "Head to the board",
+          "target": "goodbye",
+          "tags": [],
+          "setFlags": {
+            "tracked_board": "true"
+          },
+          "metadata": {}
+        },
+        {
+          "id": "choice_17",
+          "kind": "choice",
+          "text": "Ask about rewards",
+          "target": "rewards",
+          "tags": [],
+          "setFlags": {},
+          "metadata": {}
+        }
+      ]
+    },
+    {
+      "id": "label_rewards",
+      "label": "rewards",
+      "entries": [
+        {
+          "id": "line_20",
+          "kind": "line",
+          "speaker": "Guide",
+          "text": "Honest work pays in coin, favors, and the occasional secret.",
+          "mood": "proud",
+          "tags": [],
+          "metadata": {}
+        },
+        {
+          "id": "jump_21",
+          "kind": "jump",
+          "target": "goodbye"
+        }
+      ]
+    },
+    {
+      "id": "label_inn",
+      "label": "inn",
+      "entries": [
+        {
+          "id": "line_24",
+          "kind": "line",
+          "speaker": "Guide",
+          "text": "The Lantern Inn stays open as long as the lamps are burning.",
+          "portraitKey": "guide_think",
+          "tags": [],
+          "metadata": {}
+        },
+        {
+          "id": "choice_25",
+          "kind": "choice",
+          "text": "Thanks",
+          "target": "goodbye",
+          "tags": [],
+          "setFlags": {},
+          "metadata": {}
+        }
+      ]
+    },
+    {
+      "id": "label_goodbye",
+      "label": "goodbye",
+      "entries": [
+        {
+          "id": "line_28",
+          "kind": "line",
+          "speaker": "Guide",
+          "text": "Good luck out there.",
+          "mood": "calm",
+          "tags": [],
+          "metadata": {}
+        },
+        {
+          "id": "end_29",
+          "kind": "end"
+        }
+      ]
+    }
+  ],
+  "stats": {
+    "labelCount": 5,
+    "lineCount": 5,
+    "choiceCount": 6
+  },
+  "createdAt": "2026-04-01T19:34:22.536Z",
+  "updatedAt": "2026-04-01T19:34:22.536Z"
+}

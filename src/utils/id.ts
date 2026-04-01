@@ -22,3 +22,17 @@ export function runtimeId(value: string, fallback = "untitled") {
 export function createId(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 8)}`;
 }
+
+export function createSequentialId(prefix: string, existingIds: string[]) {
+  const normalizedPrefix = runtimeId(prefix, "item");
+  let counter = 1;
+  let candidate = `${normalizedPrefix}_${counter}`;
+  const existing = new Set(existingIds.map((id) => runtimeId(id)));
+
+  while (existing.has(candidate)) {
+    counter += 1;
+    candidate = `${normalizedPrefix}_${counter}`;
+  }
+
+  return candidate;
+}

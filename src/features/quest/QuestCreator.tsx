@@ -3,12 +3,13 @@ import { IssueList } from "../../components/IssueList";
 import { Panel } from "../../components/Panel";
 import { createSampleQuest } from "../../data/sampleQuest";
 import { usePersistentState } from "../../hooks/usePersistentState";
+import type { ExportTarget } from "../../types/common";
 import type { QuestDocument, QuestObjective, QuestReward, QuestState, QuestStep } from "../../types/quest";
 import { isoNow } from "../../utils/date";
 import { confirmAction, notify } from "../../utils/dialogs";
-import { buildQuestBundle, createDraftEnvelope, downloadBundle, downloadDraftFile } from "../../utils/exporters";
+import { buildQuestBundleForTarget, createDraftEnvelope, downloadBundle, downloadDraftFile } from "../../utils/exporters";
 import { readTextFile } from "../../utils/file";
-import { createId } from "../../utils/id";
+import { createSequentialId } from "../../utils/id";
 import {
   parseCommaList,
   parseKeyValueLines,
@@ -79,6 +80,7 @@ function touchQuest(document: QuestDocument) {
 
 export function QuestCreator() {
   const [quest, setQuest] = usePersistentState("technica.quest.document", createSampleQuest());
+  const [exportTarget, setExportTarget] = usePersistentState<ExportTarget>("technica.quest.exportTarget", "generic");
   const importRef = useRef<HTMLInputElement | null>(null);
   const issues = validateQuestDocument(quest);
 
@@ -294,13 +296,30 @@ export function QuestCreator() {
               <span className="pill">{quest.states.length} states</span>
             </div>
             <div className="toolbar">
+              <label className="inline-select">
+                <span>Export target</span>
+                <select value={exportTarget} onChange={(event) => setExportTarget(event.target.value as ExportTarget)}>
+                  <option value="generic">Generic</option>
+                  <option value="chaos-core">Chaos Core</option>
+                </select>
+              </label>
               <button type="button" className="ghost-button" onClick={() => importRef.current?.click()}>
                 Import draft
               </button>
               <button type="button" className="ghost-button" onClick={() => downloadDraftFile("quest", quest.title, quest)}>
                 Save draft file
               </button>
-              <button type="button" className="primary-button" onClick={() => downloadBundle(buildQuestBundle(quest))}>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={async () => {
+                  try {
+                    await downloadBundle(buildQuestBundleForTarget(quest, exportTarget));
+                  } catch (error) {
+                    notify(error instanceof Error ? error.message : "Could not export the quest bundle.");
+                  }
+                }}
+              >
                 Export bundle
               </button>
               <input ref={importRef} hidden type="file" accept=".json" onChange={handleImportFile} />
@@ -313,6 +332,7 @@ export function QuestCreator() {
           subtitle="Optional reward payloads stay explicit so adapters can translate them later."
           actions={
             <button
+              type="button"
               className="ghost-button"
               onClick={() =>
                 patchQuest((current) => ({
@@ -320,7 +340,7 @@ export function QuestCreator() {
                   rewards: [
                     ...current.rewards,
                     {
-                      id: createId("reward"),
+                      id: createSequentialId("reward", current.rewards.map((item) => item.id)),
                       type: "xp",
                       label: "New reward",
                       amount: 1,
@@ -342,9 +362,10 @@ export function QuestCreator() {
                 <div className="item-card-header">
                   <h3>{reward.label || reward.id}</h3>
                   <button
+                    type="button"
                     className="ghost-button danger"
                     onClick={() => {
-                      if (window.confirm(`Remove reward '${reward.id}'?`)) {
+                      if (confirmAction(`Remove reward '${reward.id}'?`)) {
                         patchQuest((current) => ({
                           ...current,
                           rewards: current.rewards.filter((item) => item.id !== reward.id)
@@ -415,6 +436,7 @@ export function QuestCreator() {
           subtitle="States make success, failure, and branch outcomes easier to inspect."
           actions={
             <button
+              type="button"
               className="ghost-button"
               onClick={() =>
                 patchQuest((current) => ({
@@ -422,7 +444,7 @@ export function QuestCreator() {
                   states: [
                     ...current.states,
                     {
-                      id: createId("state"),
+                      id: createSequentialId("state", current.states.map((item) => item.id)),
                       label: "New state",
                       description: "",
                       terminal: false,
@@ -442,9 +464,10 @@ export function QuestCreator() {
                 <div className="item-card-header">
                   <h3>{state.label || state.id}</h3>
                   <button
+                    type="button"
                     className="ghost-button danger"
                     onClick={() => {
-                      if (window.confirm(`Remove state '${state.id}'?`)) {
+                      if (confirmAction(`Remove state '${state.id}'?`)) {
                         patchQuest((current) => ({
                           ...current,
                           states: current.states.filter((item) => item.id !== state.id)
@@ -502,6 +525,7 @@ export function QuestCreator() {
           subtitle="Objectives are structured so designers can branch and mark optional content without hand-writing JSON."
           actions={
             <button
+              type="button"
               className="ghost-button"
               onClick={() =>
                 patchQuest((current) => ({
@@ -509,7 +533,7 @@ export function QuestCreator() {
                   objectives: [
                     ...current.objectives,
                     {
-                      id: createId("objective"),
+                      id: createSequentialId("objective", current.objectives.map((item) => item.id)),
                       title: "New objective",
                       description: "",
                       type: "custom",
@@ -533,9 +557,10 @@ export function QuestCreator() {
                 <div className="item-card-header">
                   <h3>{objective.title || objective.id}</h3>
                   <button
+                    type="button"
                     className="ghost-button danger"
                     onClick={() => {
-                      if (window.confirm(`Remove objective '${objective.id}'?`)) {
+                      if (confirmAction(`Remove objective '${objective.id}'?`)) {
                         patchQuest((current) => ({
                           ...current,
                           objectives: current.objectives.filter((item) => item.id !== objective.id)
@@ -681,7 +706,7 @@ export function QuestCreator() {
                   steps: [
                     ...current.steps,
                     {
-                      id: createId("step"),
+                      id: createSequentialId("step", current.steps.map((item) => item.id)),
                       title: "New step",
                       summary: "",
                       objectiveIds: [],
@@ -703,6 +728,7 @@ export function QuestCreator() {
                   <h3>{step.title || step.id}</h3>
                   <div className="toolbar">
                     <button
+                      type="button"
                       className="ghost-button"
                       onClick={() =>
                         updateStep(step.id, (item) => ({
@@ -710,7 +736,7 @@ export function QuestCreator() {
                           branches: [
                             ...item.branches,
                             {
-                              id: createId("branch"),
+                              id: createSequentialId("branch", item.branches.map((entry) => entry.id)),
                               label: "New branch",
                               condition: "",
                               note: ""
@@ -722,9 +748,10 @@ export function QuestCreator() {
                       Add branch
                     </button>
                     <button
+                      type="button"
                       className="ghost-button danger"
                       onClick={() => {
-                        if (window.confirm(`Remove step '${step.id}'?`)) {
+                        if (confirmAction(`Remove step '${step.id}'?`)) {
                           patchQuest((current) => ({
                             ...current,
                             steps: current.steps.filter((item) => item.id !== step.id)
@@ -820,6 +847,7 @@ export function QuestCreator() {
                         <div className="item-card-header">
                           <h4>{branch.label || branch.id}</h4>
                           <button
+                            type="button"
                             className="ghost-button danger"
                             onClick={() =>
                               updateStep(step.id, (item) => ({

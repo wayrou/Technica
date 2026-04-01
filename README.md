@@ -8,6 +8,7 @@ Technica is a standalone desktop authoring tool for the Chaos Core project. It i
 - Quest Creator with structured form editing, validation, live JSON preview, local drafts, draft import, and export bundles.
 - Map Editor with tile painting, walkability and wall controls, object placement, interaction zones, zoom, pan, local drafts, draft import, and export bundles.
 - Stable JSON schemas with `schemaVersion`, `sourceApp`, timestamps, and adapter-friendly field names.
+- A `Chaos Core` export target that emits runtime-first JSON bundles plus sidecar source files.
 
 ## Run commands
 
@@ -15,6 +16,7 @@ Technica is a standalone desktop authoring tool for the Chaos Core project. It i
 - Desktop app with Tauri: `npm run dev:desktop`
 - Frontend production build: `npm run build`
 - Desktop production build: `npm run build:desktop`
+- Regenerate bundled Chaos Core examples: `npm run generate:examples`
 
 ## Export bundle layout
 
