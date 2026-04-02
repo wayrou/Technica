@@ -2,10 +2,10 @@
 
 ## Goals
 
-- Keep Technica separate from Chaos Core runtime code.
+- Keep Technica separate from Chaos Core runtime code while still exporting directly into Chaos Core-ready runtime bundles.
 - Optimize for fast authoring and clear exports.
 - Preserve local-first workflows with autosaved drafts and importable draft files.
-- Export stable, explicit JSON that a later adapter can transform safely.
+- Export stable, explicit JSON that Chaos Core can ingest directly with minimal glue.
 
 ## High-level structure
 
@@ -44,4 +44,4 @@
 
 - Richer dialogue graph visualization and node-based editing.
 - More map layers, palette sets, stamps, and multi-tile prefabs.
-- Schema adapters and direct export targets for Chaos Core import pipelines.
+- Expanded direct export targets and richer content coverage for Chaos Core import pipelines.

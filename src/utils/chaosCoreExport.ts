@@ -7,9 +7,15 @@ import {
   type ExportManifest,
   type KeyValueRecord
 } from "../types/common";
+import type { CardDocument } from "../types/card";
+import type { ClassDocument } from "../types/class";
 import type { DialogueChoice, DialogueDocument, DialogueEntry, DialogueLabel, DialogueLine } from "../types/dialogue";
+import type { GearDocument } from "../types/gear";
+import type { ItemDocument } from "../types/item";
 import type { MapDocument, MapObject, MapTile, MapZone, TerrainType } from "../types/map";
+import type { OperationDocument } from "../types/operation";
 import type { QuestDocument, QuestObjective, QuestReward } from "../types/quest";
+import type { UnitDocument } from "../types/unit";
 import { isoNow } from "./date";
 import { runtimeId, slugify } from "./id";
 
@@ -17,6 +23,12 @@ export interface WorkspaceReferenceIndex {
   dialogueIds: Set<string>;
   questIds: Set<string>;
   mapIds: Set<string>;
+  gearIds: Set<string>;
+  itemIds: Set<string>;
+  cardIds: Set<string>;
+  unitIds: Set<string>;
+  operationIds: Set<string>;
+  classIds: Set<string>;
   sceneIds: Set<string>;
   locationIds: Set<string>;
 }
@@ -319,15 +331,34 @@ export function createWorkspaceReferenceIndex(documents?: {
   dialogue?: DialogueDocument;
   quest?: QuestDocument;
   map?: MapDocument;
+  gear?: GearDocument;
+  item?: ItemDocument;
+  card?: CardDocument;
+  unit?: UnitDocument;
+  operation?: OperationDocument;
+  class?: ClassDocument;
 }): WorkspaceReferenceIndex {
   const dialogueDocument = documents?.dialogue ?? readStoredDocument<DialogueDocument>("technica.dialogue.source") ?? null;
   const questDocument = documents?.quest ?? readStoredDocument<QuestDocument>("technica.quest.document") ?? null;
   const mapDocument = documents?.map ?? readStoredDocument<MapDocument>("technica.map.document") ?? null;
+  const gearDocument = documents?.gear ?? readStoredDocument<GearDocument>("technica.gear.document") ?? null;
+  const itemDocument = documents?.item ?? readStoredDocument<ItemDocument>("technica.item.document") ?? null;
+  const cardDocument = documents?.card ?? readStoredDocument<CardDocument>("technica.card.document") ?? null;
+  const unitDocument = documents?.unit ?? readStoredDocument<UnitDocument>("technica.unit.document") ?? null;
+  const operationDocument =
+    documents?.operation ?? readStoredDocument<OperationDocument>("technica.operation.document") ?? null;
+  const classDocument = documents?.class ?? readStoredDocument<ClassDocument>("technica.class.document") ?? null;
   const dialogueId = documents?.dialogue?.id;
 
   const dialogueIds = new Set<string>();
   const questIds = new Set<string>();
   const mapIds = new Set<string>();
+  const gearIds = new Set<string>();
+  const itemIds = new Set<string>();
+  const cardIds = new Set<string>();
+  const unitIds = new Set<string>();
+  const operationIds = new Set<string>();
+  const classIds = new Set<string>();
   const sceneIds = new Set<string>();
   const locationIds = new Set<string>();
 
@@ -345,6 +376,24 @@ export function createWorkspaceReferenceIndex(documents?: {
     sceneIds.add(runtimeId(documents.map.id));
     documents.map.objects.forEach((item) => locationIds.add(runtimeId(item.id)));
     documents.map.zones.forEach((item) => locationIds.add(runtimeId(item.id)));
+  }
+  if (documents?.gear) {
+    gearIds.add(runtimeId(documents.gear.id));
+  }
+  if (documents?.item) {
+    itemIds.add(runtimeId(documents.item.id));
+  }
+  if (documents?.card) {
+    cardIds.add(runtimeId(documents.card.id));
+  }
+  if (documents?.unit) {
+    unitIds.add(runtimeId(documents.unit.id));
+  }
+  if (documents?.operation) {
+    operationIds.add(runtimeId(documents.operation.id));
+  }
+  if (documents?.class) {
+    classIds.add(runtimeId(documents.class.id));
   }
 
   if (typeof window !== "undefined") {
@@ -375,11 +424,35 @@ export function createWorkspaceReferenceIndex(documents?: {
     mapDocument.objects.forEach((item) => locationIds.add(runtimeId(item.id)));
     mapDocument.zones.forEach((item) => locationIds.add(runtimeId(item.id)));
   }
+  if (gearDocument) {
+    gearIds.add(runtimeId(gearDocument.id));
+  }
+  if (itemDocument) {
+    itemIds.add(runtimeId(itemDocument.id));
+  }
+  if (cardDocument) {
+    cardIds.add(runtimeId(cardDocument.id));
+  }
+  if (unitDocument) {
+    unitIds.add(runtimeId(unitDocument.id));
+  }
+  if (operationDocument) {
+    operationIds.add(runtimeId(operationDocument.id));
+  }
+  if (classDocument) {
+    classIds.add(runtimeId(classDocument.id));
+  }
 
   return {
     dialogueIds,
     questIds,
     mapIds,
+    gearIds,
+    itemIds,
+    cardIds,
+    unitIds,
+    operationIds,
+    classIds,
     sceneIds,
     locationIds
   };

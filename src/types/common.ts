@@ -2,7 +2,16 @@ export const TECHNICA_SCHEMA_VERSION = "1.0.0";
 export const TECHNICA_SOURCE_APP = "Technica";
 export const TECHNICA_SOURCE_APP_VERSION = "0.1.0";
 
-export type EditorKind = "dialogue" | "quest" | "map";
+export type EditorKind =
+  | "dialogue"
+  | "quest"
+  | "map"
+  | "gear"
+  | "item"
+  | "card"
+  | "unit"
+  | "operation"
+  | "class";
 export type Severity = "error" | "warning";
 export type KeyValueRecord = Record<string, string>;
 export type ExportTarget = "generic" | "chaos-core";

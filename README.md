@@ -1,6 +1,6 @@
 # Technica
 
-Technica is a standalone desktop authoring tool for the Chaos Core project. It is deliberately separate from the game runtime and exports stable, human-readable content bundles that a later adapter can transform into Chaos Core-specific formats.
+Technica is a standalone desktop authoring tool for the Chaos Core project. It is deliberately separate from the game runtime and exports stable, human-readable content bundles that Chaos Core can import directly.
 
 ## What ships in the MVP
 
@@ -9,6 +9,7 @@ Technica is a standalone desktop authoring tool for the Chaos Core project. It i
 - Map Editor with tile painting, walkability and wall controls, object placement, interaction zones, zoom, pan, local drafts, draft import, and export bundles.
 - Stable JSON schemas with `schemaVersion`, `sourceApp`, timestamps, and adapter-friendly field names.
 - A `Chaos Core` export target that emits runtime-first JSON bundles plus sidecar source files.
+- Chaos Core-ready ZIP bundles that can be dropped into the game's `Import Content` screen.
 
 ## Run commands
 

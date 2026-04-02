@@ -4,14 +4,29 @@ import {
   TECHNICA_SOURCE_APP,
   TECHNICA_SOURCE_APP_VERSION,
   type DraftEnvelope,
+  type ExportBundleFile,
   type EditorKind,
   type ExportBundle,
   type ExportManifest,
   type ExportTarget
 } from "../types/common";
+import type { CardDocument } from "../types/card";
+import type { ClassDocument } from "../types/class";
 import type { DialogueDocument } from "../types/dialogue";
+import type { GearDocument } from "../types/gear";
+import type { ItemDocument } from "../types/item";
 import type { MapDocument } from "../types/map";
+import type { OperationDocument } from "../types/operation";
 import type { QuestDocument } from "../types/quest";
+import type { UnitDocument } from "../types/unit";
+import {
+  buildChaosCoreCardBundle,
+  buildChaosCoreClassBundle,
+  buildChaosCoreGearBundle,
+  buildChaosCoreItemBundle,
+  buildChaosCoreOperationBundle,
+  buildChaosCoreUnitBundle
+} from "./chaosCoreContentExport";
 import {
   buildChaosCoreDialogueBundle,
   buildChaosCoreMapBundle,
@@ -208,6 +223,189 @@ Importer notes:
   };
 }
 
+function buildGenericBundle<TDocument>(
+  document: TDocument,
+  options: {
+    contentType: "gear" | "item" | "card" | "unit" | "operation" | "class";
+    title: string;
+    fallbackId: string;
+    targetSchemaVersion: string;
+    description: string;
+    entryFile: string;
+    readme: string;
+    extraFiles?: ExportBundleFile[];
+  }
+): ExportBundle {
+  const manifest: ExportManifest = {
+    schemaVersion: TECHNICA_SCHEMA_VERSION,
+    sourceApp: TECHNICA_SOURCE_APP,
+    sourceAppVersion: TECHNICA_SOURCE_APP_VERSION,
+    exportType: options.contentType,
+    contentType: options.contentType,
+    targetGame: "generic",
+    targetSchemaVersion: options.targetSchemaVersion,
+    exportedAt: isoNow(),
+    contentId: options.fallbackId,
+    title: options.title,
+    description: options.description,
+    entryFile: options.entryFile,
+    dependencies: [],
+    files: [
+      "manifest.json",
+      options.entryFile,
+      ...(options.extraFiles?.map((file) => file.name) ?? []),
+      "README.md"
+    ]
+  };
+
+  return {
+    bundleName: `${slugify(options.title, options.fallbackId)}-${options.contentType}-export`,
+    manifest,
+    files: [
+      {
+        name: "manifest.json",
+        content: prettyJson(manifest)
+      },
+      {
+        name: options.entryFile,
+        content: prettyJson(document)
+      },
+      ...(options.extraFiles ?? []),
+      {
+        name: "README.md",
+        content: options.readme
+      }
+    ]
+  };
+}
+
+export function buildGearBundle(document: GearDocument): ExportBundle {
+  const contentId = runtimeId(document.id || document.name, "gear");
+  return buildGenericBundle(document, {
+    contentType: "gear",
+    title: document.name,
+    fallbackId: contentId,
+    targetSchemaVersion: "technica-gear.v1",
+    description: "Gear export containing structured equipment, inventory, and loadout metadata.",
+    entryFile: "gear.json",
+    readme: `# Technica Gear Export
+
+Name: ${document.name}
+Id: ${document.id}
+
+Importer notes:
+- Preserve slot, stat, and inventory profile fields exactly.
+- \`cardsGranted\` and \`attachedModules\` are meant to stay stable across downstream adapters.
+- Metadata should be preserved even when the first target does not consume every field.
+`
+  });
+}
+
+export function buildItemBundle(document: ItemDocument): ExportBundle {
+  const contentId = runtimeId(document.id || document.name, "item");
+  return buildGenericBundle(document, {
+    contentType: "item",
+    title: document.name,
+    fallbackId: contentId,
+    targetSchemaVersion: "technica-item.v1",
+    description: "Inventory item export with quantity, weight, bulk, and power metadata.",
+    entryFile: "item.json",
+    readme: `# Technica Item Export
+
+Name: ${document.name}
+Id: ${document.id}
+
+Importer notes:
+- Preserve quantity, stackability, and physical load values during adaptation.
+- Generic imports should retain unknown metadata fields.
+`
+  });
+}
+
+export function buildCardBundle(document: CardDocument): ExportBundle {
+  const contentId = runtimeId(document.id || document.name, "card");
+  return buildGenericBundle(document, {
+    contentType: "card",
+    title: document.name,
+    fallbackId: contentId,
+    targetSchemaVersion: "technica-card.v1",
+    description: "Battle card export with runtime effects plus library metadata.",
+    entryFile: "card.json",
+    readme: `# Technica Card Export
+
+Name: ${document.name}
+Id: ${document.id}
+
+Importer notes:
+- Preserve \`effects\`, \`targetType\`, \`range\`, and source references.
+- Library-facing metadata such as rarity and category should survive adaptation.
+`
+  });
+}
+
+export function buildUnitBundle(document: UnitDocument): ExportBundle {
+  const contentId = runtimeId(document.id || document.name, "unit");
+  return buildGenericBundle(document, {
+    contentType: "unit",
+    title: document.name,
+    fallbackId: contentId,
+    targetSchemaVersion: "technica-unit.v1",
+    description: "Unit export containing recruit profile, stats, loadout, and roster flags.",
+    entryFile: "unit.json",
+    readme: `# Technica Unit Export
+
+Name: ${document.name}
+Id: ${document.id}
+
+Importer notes:
+- Preserve class id, stat block, and loadout references.
+- \`startingInRoster\` and \`deployInParty\` control how adapters stage the unit into a playable save.
+`
+  });
+}
+
+export function buildOperationBundle(document: OperationDocument): ExportBundle {
+  const contentId = runtimeId(document.id || document.codename, "operation");
+  return buildGenericBundle(document, {
+    contentType: "operation",
+    title: document.codename,
+    fallbackId: contentId,
+    targetSchemaVersion: "technica-operation.v1",
+    description: "Operation export with explicit floors, room graph data, and mission metadata.",
+    entryFile: "operation.json",
+    readme: `# Technica Operation Export
+
+Codename: ${document.codename}
+Id: ${document.id}
+
+Importer notes:
+- Room ids, floor ids, and connections should remain stable during adaptation.
+- Preserve optional battle, event, and shop inventory metadata.
+`
+  });
+}
+
+export function buildClassBundle(document: ClassDocument): ExportBundle {
+  const contentId = runtimeId(document.id || document.name, "class");
+  return buildGenericBundle(document, {
+    contentType: "class",
+    title: document.name,
+    fallbackId: contentId,
+    targetSchemaVersion: "technica-class.v1",
+    description: "Class export with base stats, weapon disciplines, and unlock conditions.",
+    entryFile: "class.json",
+    readme: `# Technica Class Export
+
+Name: ${document.name}
+Id: ${document.id}
+
+Importer notes:
+- Preserve class ids and unlock condition references exactly.
+- Weapon disciplines and innate ability text should survive adaptation.
+`
+  });
+}
+
 export function buildDialogueBundleForTarget(document: DialogueDocument, target: ExportTarget) {
   if (target === "chaos-core") {
     return buildChaosCoreDialogueBundle(
@@ -239,4 +437,52 @@ export function buildMapBundleForTarget(document: MapDocument, target: ExportTar
   }
 
   return buildMapBundle(document);
+}
+
+export function buildGearBundleForTarget(document: GearDocument, target: ExportTarget) {
+  if (target === "chaos-core") {
+    return buildChaosCoreGearBundle(document, createWorkspaceReferenceIndex({ gear: document }));
+  }
+
+  return buildGearBundle(document);
+}
+
+export function buildItemBundleForTarget(document: ItemDocument, target: ExportTarget) {
+  if (target === "chaos-core") {
+    return buildChaosCoreItemBundle(document, createWorkspaceReferenceIndex({ item: document }));
+  }
+
+  return buildItemBundle(document);
+}
+
+export function buildCardBundleForTarget(document: CardDocument, target: ExportTarget) {
+  if (target === "chaos-core") {
+    return buildChaosCoreCardBundle(document, createWorkspaceReferenceIndex({ card: document }));
+  }
+
+  return buildCardBundle(document);
+}
+
+export function buildUnitBundleForTarget(document: UnitDocument, target: ExportTarget) {
+  if (target === "chaos-core") {
+    return buildChaosCoreUnitBundle(document, createWorkspaceReferenceIndex({ unit: document }));
+  }
+
+  return buildUnitBundle(document);
+}
+
+export function buildOperationBundleForTarget(document: OperationDocument, target: ExportTarget) {
+  if (target === "chaos-core") {
+    return buildChaosCoreOperationBundle(document, createWorkspaceReferenceIndex({ operation: document }));
+  }
+
+  return buildOperationBundle(document);
+}
+
+export function buildClassBundleForTarget(document: ClassDocument, target: ExportTarget) {
+  if (target === "chaos-core") {
+    return buildChaosCoreClassBundle(document, createWorkspaceReferenceIndex({ class: document }));
+  }
+
+  return buildClassBundle(document);
 }

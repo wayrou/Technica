@@ -4,9 +4,10 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
-    "dev:web": "vite --host 127.0.0.1 --port 1420 --strictPort",
+    "dev": "vite --host 127.0.0.1 --port 1430 --strictPort",
+    "dev:web": "vite --host 127.0.0.1 --port 1430 --strictPort",
     "dev:desktop": "tauri dev",
+    "dev:desktop:attach": "tauri dev --no-dev-server",
     "build": "tsc && vite build",
     "build:desktop": "tauri build",
     "generate:examples": "tsx scripts/generateExampleExports.ts",

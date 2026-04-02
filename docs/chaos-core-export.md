@@ -2,6 +2,8 @@
 
 Technica now supports a dedicated export target named `Chaos Core`.
 
+Chaos Core can import these bundles directly from its `Import Content` screen.
+
 ## Goals
 
 - Produce runtime-first JSON that matches Chaos Core's current subsystems closely.

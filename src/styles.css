@@ -147,7 +147,7 @@ textarea.authoring-editor {
 
 .tab-nav {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
   margin-bottom: 20px;
 }
@@ -189,6 +189,10 @@ textarea.authoring-editor {
 
 .workspace-grid.single-column {
   grid-template-columns: 1fr;
+}
+
+.workspace-grid.blueprint-grid {
+  grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.85fr);
 }
 
 .workspace-column {
@@ -276,6 +280,10 @@ textarea.authoring-editor {
   color: inherit;
   padding: 18px;
   font-size: 0.95rem;
+}
+
+.authoring-editor.compact-editor {
+  min-height: 360px;
 }
 
 .reference-block,
