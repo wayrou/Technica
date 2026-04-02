@@ -1,3 +1,4 @@
+import { ChaosCoreDatabasePanel } from "../../components/ChaosCoreDatabasePanel";
 import { Panel } from "../../components/Panel";
 import { createBlankClass, createSampleClass } from "../../data/sampleClass";
 import { StructuredDocumentStudio } from "../content/StructuredDocumentStudio";
@@ -5,9 +6,11 @@ import type { ExportTarget } from "../../types/common";
 import { classUnlockConditionTypes, type ClassDocument, type ClassUnlockConditionDocument } from "../../types/class";
 import { supportedWeaponTypes } from "../../types/gear";
 import { isoNow } from "../../utils/date";
+import { notify } from "../../utils/dialogs";
 import { buildClassBundleForTarget } from "../../utils/exporters";
 import { validateClassDocument } from "../../utils/contentValidation";
 import { parseCommaList, parseKeyValueLines, serializeCommaList, serializeKeyValueLines } from "../../utils/records";
+import type { LoadedChaosCoreDatabaseEntry } from "../../utils/chaosCoreDatabase";
 
 function touchClass(document: ClassDocument): ClassDocument {
   return {
@@ -35,6 +38,19 @@ function createUnlockCondition(): ClassUnlockConditionDocument {
 }
 
 export function ClassEditor() {
+  function loadDatabaseEntry(entry: LoadedChaosCoreDatabaseEntry, setDocument: (document: ClassDocument) => void) {
+    try {
+      const parsed = JSON.parse(entry.editorContent ?? entry.sourceContent ?? entry.runtimeContent);
+      if (!isClassDocument(parsed)) {
+        notify("That Chaos Core database entry does not match the Technica class format.");
+        return;
+      }
+      setDocument(touchClass(parsed));
+    } catch {
+      notify("Could not load the selected class from the Chaos Core database.");
+    }
+  }
+
   return (
     <StructuredDocumentStudio
       storageKey="technica.class.document"
@@ -50,9 +66,7 @@ export function ClassEditor() {
       touchDocument={touchClass}
       replacePrompt="Replace the current class draft with the imported file?"
       invalidImportMessage="That file does not look like a Technica class draft or export."
-      previewTitle="Class Preview"
-      previewSubtitle="The exported class definition updates live as the form changes."
-      renderWorkspace={({ document, patchDocument, exportTarget, setExportTarget, loadSample, clearDocument, importDraft, saveDraft, exportBundle }) => (
+      renderWorkspace={({ document, setDocument, patchDocument, exportTarget, setExportTarget, loadSample, clearDocument, importDraft, saveDraft, exportBundle }) => (
         <>
           <Panel
             title="Class Setup"
@@ -373,6 +387,14 @@ export function ClassEditor() {
               <option key={weaponType} value={weaponType} />
             ))}
           </datalist>
+
+          <ChaosCoreDatabasePanel
+            contentType="class"
+            currentDocument={document}
+            buildBundle={(current) => buildClassBundleForTarget(current, "chaos-core")}
+            onLoadEntry={(entry) => loadDatabaseEntry(entry, setDocument)}
+            subtitle="Publish class definitions into the Chaos Core repo and reopen those database records here for revision."
+          />
         </>
       )}
     />

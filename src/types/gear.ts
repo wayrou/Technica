@@ -1,4 +1,4 @@
-import type { KeyValueRecord } from "./common";
+import type { ImageAsset, KeyValueRecord } from "./common";
 
 export type SupportedWeaponType =
   | "sword"
@@ -71,6 +71,7 @@ export interface GearDocument {
   attachedModules: string[];
   wear: number;
   inventory: GearInventoryProfile;
+  iconAsset?: ImageAsset;
   metadata: KeyValueRecord;
   createdAt: string;
   updatedAt: string;

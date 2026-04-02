@@ -1,12 +1,16 @@
+import { ChaosCoreDatabasePanel } from "../../components/ChaosCoreDatabasePanel";
+import { ImageAssetField } from "../../components/ImageAssetField";
 import { Panel } from "../../components/Panel";
 import { createBlankGear, createSampleGear } from "../../data/sampleGear";
 import { StructuredDocumentStudio } from "../content/StructuredDocumentStudio";
 import { type ExportTarget } from "../../types/common";
 import { gearSlotTypes, supportedWeaponTypes, type GearDocument } from "../../types/gear";
 import { isoNow } from "../../utils/date";
+import { notify } from "../../utils/dialogs";
 import { buildGearBundleForTarget } from "../../utils/exporters";
 import { validateGearDocument } from "../../utils/contentValidation";
 import { parseCommaList, parseKeyValueLines, serializeCommaList, serializeKeyValueLines } from "../../utils/records";
+import type { LoadedChaosCoreDatabaseEntry } from "../../utils/chaosCoreDatabase";
 
 function touchGear(document: GearDocument): GearDocument {
   return {
@@ -27,6 +31,19 @@ function isGearDocument(value: unknown): value is GearDocument {
 }
 
 export function GearEditor() {
+  function loadDatabaseEntry(entry: LoadedChaosCoreDatabaseEntry, setDocument: (document: GearDocument) => void) {
+    try {
+      const parsed = JSON.parse(entry.editorContent ?? entry.sourceContent ?? entry.runtimeContent);
+      if (!isGearDocument(parsed)) {
+        notify("That Chaos Core database entry does not match the Technica gear format.");
+        return;
+      }
+      setDocument(touchGear(parsed));
+    } catch {
+      notify("Could not load the selected gear from the Chaos Core database.");
+    }
+  }
+
   return (
     <StructuredDocumentStudio
       storageKey="technica.gear.document"
@@ -42,9 +59,7 @@ export function GearEditor() {
       touchDocument={touchGear}
       replacePrompt="Replace the current gear draft with the imported file?"
       invalidImportMessage="That file does not look like a Technica gear draft or export."
-      previewTitle="Gear Preview"
-      previewSubtitle="The exported equipment payload updates live as the form changes."
-      renderWorkspace={({ document, patchDocument, exportTarget, setExportTarget, loadSample, clearDocument, importDraft, saveDraft, exportBundle }) => (
+      renderWorkspace={({ document, setDocument, patchDocument, exportTarget, setExportTarget, loadSample, clearDocument, importDraft, saveDraft, exportBundle }) => (
         <>
           <Panel
             title="Gear Setup"
@@ -77,6 +92,15 @@ export function GearEditor() {
                   onChange={(event) => patchDocument((current) => ({ ...current, description: event.target.value }))}
                 />
               </label>
+              <div className="field full">
+                <ImageAssetField
+                  label="Gear icon"
+                  emptyLabel="No gear icon attached."
+                  hint="Exports as a stable asset file for Chaos Core imports."
+                  asset={document.iconAsset}
+                  onChange={(iconAsset) => patchDocument((current) => ({ ...current, iconAsset }))}
+                />
+              </div>
               <label className="field">
                 <span>Slot</span>
                 <select
@@ -357,9 +381,17 @@ export function GearEditor() {
                 <button type="button" className="primary-button" onClick={() => void exportBundle()}>
                   Export bundle
                 </button>
+                </div>
               </div>
-            </div>
-          </Panel>
+            </Panel>
+
+            <ChaosCoreDatabasePanel
+              contentType="gear"
+              currentDocument={document}
+              buildBundle={(current) => buildGearBundleForTarget(current, "chaos-core")}
+              onLoadEntry={(entry) => loadDatabaseEntry(entry, setDocument)}
+              subtitle="Publish gear runtime JSON and icons straight into the Chaos Core repo, then reload live game entries for balancing."
+            />
         </>
       )}
     />

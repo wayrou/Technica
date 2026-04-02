@@ -1,4 +1,4 @@
-import type { KeyValueRecord } from "./common";
+import type { ImageAsset, KeyValueRecord } from "./common";
 
 export type ItemKind = "resource" | "equipment" | "consumable";
 
@@ -16,6 +16,7 @@ export interface ItemDocument {
   massKg: number;
   bulkBu: number;
   powerW: number;
+  iconAsset?: ImageAsset;
   metadata: KeyValueRecord;
   createdAt: string;
   updatedAt: string;

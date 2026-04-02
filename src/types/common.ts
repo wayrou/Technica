@@ -6,6 +6,7 @@ export type EditorKind =
   | "dialogue"
   | "quest"
   | "map"
+  | "npc"
   | "gear"
   | "item"
   | "card"
@@ -15,6 +16,13 @@ export type EditorKind =
 export type Severity = "error" | "warning";
 export type KeyValueRecord = Record<string, string>;
 export type ExportTarget = "generic" | "chaos-core";
+
+export interface ImageAsset {
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  dataUrl: string;
+}
 
 export interface ExportDependency {
   contentType: EditorKind | "scene";
@@ -49,6 +57,7 @@ export interface ExportManifest {
 export interface ExportBundleFile {
   name: string;
   content: string;
+  encoding?: "utf8" | "base64";
 }
 
 export interface ExportBundle {

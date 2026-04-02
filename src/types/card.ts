@@ -1,4 +1,4 @@
-import type { KeyValueRecord } from "./common";
+import type { ImageAsset, KeyValueRecord } from "./common";
 
 export type CardDocumentType = "core" | "class" | "equipment" | "gambit";
 export type CardDocumentRarity = "common" | "uncommon" | "rare" | "epic" | "legendary";
@@ -51,6 +51,7 @@ export interface CardDocument {
   effects: CardEffectDocument[];
   sourceClassId?: string;
   sourceEquipmentId?: string;
+  artAsset?: ImageAsset;
   metadata: KeyValueRecord;
   createdAt: string;
   updatedAt: string;

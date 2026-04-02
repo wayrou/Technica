@@ -11,10 +11,12 @@ import type { CardDocument } from "../types/card";
 import type { ClassDocument, ClassUnlockConditionDocument } from "../types/class";
 import type { GearDocument } from "../types/gear";
 import type { ItemDocument } from "../types/item";
+import type { NpcDocument } from "../types/npc";
 import type { OperationDocument } from "../types/operation";
 import type { UnitDocument } from "../types/unit";
+import { createImageAssetExport } from "./assets";
 import { isoNow } from "./date";
-import { createWorkspaceReferenceIndex, type WorkspaceReferenceIndex } from "./chaosCoreExport";
+import { createWorkspaceReferenceIndex } from "./chaosCoreExport";
 import { runtimeId, slugify } from "./id";
 
 function prettyJson(value: unknown) {
@@ -153,6 +155,7 @@ export function buildChaosCoreGearBundle(
   const contentId = runtimeId(document.id || document.name, "gear");
   const entryFile = `${contentId}.gear.json`;
   const sourceFile = `${contentId}.source.json`;
+  const iconAsset = document.iconAsset ? createImageAssetExport(contentId, "icon", document.iconAsset) : null;
   const runtimeDocument = pruneEmpty({
     id: contentId,
     name: document.name,
@@ -166,6 +169,7 @@ export function buildChaosCoreGearBundle(
     attachedModules: document.attachedModules,
     wear: document.wear,
     inventory: document.inventory,
+    iconPath: iconAsset?.runtimePath,
     metadata: coerceRecord(document.metadata)
   });
 
@@ -176,7 +180,7 @@ export function buildChaosCoreGearBundle(
     document.name,
     "Chaos Core runtime equipment export.",
     entryFile,
-    ["manifest.json", entryFile, sourceFile, "README.md"],
+    ["manifest.json", entryFile, sourceFile, ...(iconAsset ? [iconAsset.runtimePath] : []), "README.md"],
     buildGearDependencies(document)
   );
 
@@ -188,6 +192,7 @@ Content id: \`${contentId}\`
 Importer notes:
 - Imported gear registers into Chaos Core's equipment pool and base storage when marked as starting owned.
 - Granted card ids are normalized for direct deck and catalog use.
+- Attached gear icons resolve through \`iconPath\` when present.
 - \`${sourceFile}\` preserves the original Technica authoring document.
 `;
 
@@ -198,6 +203,7 @@ Importer notes:
       { name: "manifest.json", content: prettyJson(manifest) },
       { name: entryFile, content: prettyJson(runtimeDocument) },
       { name: sourceFile, content: prettyJson(document) },
+      ...(iconAsset ? [iconAsset.file] : []),
       { name: "README.md", content: readme }
     ]
   };
@@ -210,6 +216,7 @@ export function buildChaosCoreItemBundle(
   const contentId = runtimeId(document.id || document.name, "item");
   const entryFile = `${contentId}.item.json`;
   const sourceFile = `${contentId}.source.json`;
+  const iconAsset = document.iconAsset ? createImageAssetExport(contentId, "icon", document.iconAsset) : null;
   const runtimeDocument = pruneEmpty({
     id: contentId,
     name: document.name,
@@ -220,6 +227,7 @@ export function buildChaosCoreItemBundle(
     massKg: document.massKg,
     bulkBu: document.bulkBu,
     powerW: document.powerW,
+    iconPath: iconAsset?.runtimePath,
     metadata: coerceRecord(document.metadata)
   });
 
@@ -230,7 +238,7 @@ export function buildChaosCoreItemBundle(
     document.name,
     "Chaos Core runtime inventory item export.",
     entryFile,
-    ["manifest.json", entryFile, sourceFile, "README.md"],
+    ["manifest.json", entryFile, sourceFile, ...(iconAsset ? [iconAsset.runtimePath] : []), "README.md"],
     []
   );
 
@@ -242,6 +250,7 @@ Content id: \`${contentId}\`
 Importer notes:
 - Imported items land in Chaos Core base storage using their explicit mass, bulk, and power values.
 - Stackable items preserve quantity.
+- Attached item icons resolve through \`iconPath\` when present.
 - \`${sourceFile}\` preserves the authoring document.
 `;
 
@@ -252,6 +261,105 @@ Importer notes:
       { name: "manifest.json", content: prettyJson(manifest) },
       { name: entryFile, content: prettyJson(runtimeDocument) },
       { name: sourceFile, content: prettyJson(document) },
+      ...(iconAsset ? [iconAsset.file] : []),
+      { name: "README.md", content: readme }
+    ]
+  };
+}
+
+export function buildChaosCoreNpcBundle(
+  document: NpcDocument,
+  references = createWorkspaceReferenceIndex({ npc: document })
+): ExportBundle {
+  if (document.mapId) {
+    assertKnownReference(document.mapId, references.mapIds, "NPC export", "map id");
+  }
+
+  if (document.dialogueId) {
+    assertKnownReference(document.dialogueId, references.dialogueIds, "NPC export", "dialogue id");
+  }
+
+  const contentId = runtimeId(document.id || document.name, "npc");
+  const entryFile = `${contentId}.npc.json`;
+  const sourceFile = `${contentId}.source.json`;
+  const portraitAsset = document.portraitAsset ? createImageAssetExport(contentId, "portrait", document.portraitAsset) : null;
+  const spriteAsset = document.spriteAsset ? createImageAssetExport(contentId, "sprite", document.spriteAsset) : null;
+  const runtimeDocument = pruneEmpty({
+    id: contentId,
+    name: document.name,
+    mapId: runtimeId(document.mapId, "base_camp"),
+    x: document.tileX,
+    y: document.tileY,
+    routeMode: document.routeMode,
+    routePoints: document.routePoints.map((point) => ({
+      id: runtimeId(point.id, "route_point"),
+      x: point.x,
+      y: point.y
+    })),
+    dialogueId: document.dialogueId ? runtimeId(document.dialogueId) : undefined,
+    portraitKey: document.portraitKey || undefined,
+    spriteKey: document.spriteKey || undefined,
+    portraitPath: portraitAsset?.runtimePath,
+    spritePath: spriteAsset?.runtimePath,
+    metadata: coerceRecord(document.metadata)
+  });
+
+  const dependencies: ExportDependency[] = [
+    {
+      contentType: "map",
+      id: runtimeId(document.mapId, "base_camp"),
+      relation: "spawn-map"
+    },
+    ...(document.dialogueId
+      ? [
+          {
+            contentType: "dialogue" as const,
+            id: runtimeId(document.dialogueId),
+            relation: "dialogue"
+          }
+        ]
+      : [])
+  ];
+
+  const manifest = createManifest(
+    "npc",
+    "npc.v1",
+    contentId,
+    document.name,
+    "Chaos Core runtime field NPC export.",
+    entryFile,
+    [
+      "manifest.json",
+      entryFile,
+      sourceFile,
+      ...(portraitAsset ? [portraitAsset.runtimePath] : []),
+      ...(spriteAsset ? [spriteAsset.runtimePath] : []),
+      "README.md"
+    ],
+    dependencies
+  );
+
+  const readme = `# Chaos Core NPC Export
+
+Runtime entry: \`${entryFile}\`
+Content id: \`${contentId}\`
+
+Importer notes:
+- Imported NPCs spawn on their declared map id and can use fixed, random, or no movement routes.
+- Dialogue references use \`dialogueId\` so the Dialogue Editor can reuse speaker names and runtime conversations.
+- Portrait and sprite assets resolve through \`portraitPath\` and \`spritePath\` when present.
+- \`${sourceFile}\` preserves the original Technica NPC document.
+`;
+
+  return {
+    bundleName: `${slugify(document.name, contentId)}-chaos-core-npc-export`,
+    manifest,
+    files: [
+      { name: "manifest.json", content: prettyJson(manifest) },
+      { name: entryFile, content: prettyJson(runtimeDocument) },
+      { name: sourceFile, content: prettyJson(document) },
+      ...(portraitAsset ? [portraitAsset.file] : []),
+      ...(spriteAsset ? [spriteAsset.file] : []),
       { name: "README.md", content: readme }
     ]
   };
@@ -295,6 +403,7 @@ export function buildChaosCoreCardBundle(
   const contentId = runtimeId(document.id || document.name, "card");
   const entryFile = `${contentId}.card.json`;
   const sourceFile = `${contentId}.source.json`;
+  const artAsset = document.artAsset ? createImageAssetExport(contentId, "art", document.artAsset) : null;
   const runtimeDocument = pruneEmpty({
     id: contentId,
     name: document.name,
@@ -309,6 +418,7 @@ export function buildChaosCoreCardBundle(
     effects: document.effects,
     sourceClassId: document.sourceClassId ? runtimeId(document.sourceClassId) : undefined,
     sourceEquipmentId: document.sourceEquipmentId ? runtimeId(document.sourceEquipmentId) : undefined,
+    artPath: artAsset?.runtimePath,
     metadata: coerceRecord(document.metadata)
   });
 
@@ -319,7 +429,7 @@ export function buildChaosCoreCardBundle(
     document.name,
     "Chaos Core runtime battle card export.",
     entryFile,
-    ["manifest.json", entryFile, sourceFile, "README.md"],
+    ["manifest.json", entryFile, sourceFile, ...(artAsset ? [artAsset.runtimePath] : []), "README.md"],
     buildCardDependencies(document)
   );
 
@@ -331,6 +441,7 @@ Content id: \`${contentId}\`
 Importer notes:
 - Imported cards populate both the battle card runtime and Chaos Core's card library metadata.
 - Class and gear source references are normalized when provided.
+- Attached card art resolves through \`artPath\` when present.
 - \`${sourceFile}\` preserves the authoring document.
 `;
 
@@ -341,6 +452,7 @@ Importer notes:
       { name: "manifest.json", content: prettyJson(manifest) },
       { name: entryFile, content: prettyJson(runtimeDocument) },
       { name: sourceFile, content: prettyJson(document) },
+      ...(artAsset ? [artAsset.file] : []),
       { name: "README.md", content: readme }
     ]
   };

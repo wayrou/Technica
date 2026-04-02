@@ -16,6 +16,7 @@ import type { DialogueDocument } from "../types/dialogue";
 import type { GearDocument } from "../types/gear";
 import type { ItemDocument } from "../types/item";
 import type { MapDocument } from "../types/map";
+import type { NpcDocument } from "../types/npc";
 import type { OperationDocument } from "../types/operation";
 import type { QuestDocument } from "../types/quest";
 import type { UnitDocument } from "../types/unit";
@@ -24,6 +25,7 @@ import {
   buildChaosCoreClassBundle,
   buildChaosCoreGearBundle,
   buildChaosCoreItemBundle,
+  buildChaosCoreNpcBundle,
   buildChaosCoreOperationBundle,
   buildChaosCoreUnitBundle
 } from "./chaosCoreContentExport";
@@ -33,6 +35,7 @@ import {
   buildChaosCoreQuestBundle,
   createWorkspaceReferenceIndex
 } from "./chaosCoreExport";
+import { createImageAssetExport } from "./assets";
 import { isoNow } from "./date";
 import { downloadBlob, downloadText } from "./file";
 import { runtimeId, slugify } from "./id";
@@ -59,7 +62,7 @@ export function downloadDraftFile<TPayload>(draftType: EditorKind, title: string
 export async function downloadBundle(bundle: ExportBundle) {
   const archive = new JSZip();
   bundle.files.forEach((file) => {
-    archive.file(file.name, file.content);
+    archive.file(file.name, file.content, file.encoding === "base64" ? { base64: true } : undefined);
   });
 
   const blob = await archive.generateAsync({ type: "blob" });
@@ -279,8 +282,65 @@ function buildGenericBundle<TDocument>(
   };
 }
 
+export function buildNpcBundle(document: NpcDocument): ExportBundle {
+  const contentId = runtimeId(document.id || document.name, "npc");
+  const portraitAsset = document.portraitAsset
+    ? createImageAssetExport(contentId, "portrait", document.portraitAsset)
+    : null;
+  const spriteAsset = document.spriteAsset
+    ? createImageAssetExport(contentId, "sprite", document.spriteAsset)
+    : null;
+
+  const manifest: ExportManifest = {
+    schemaVersion: TECHNICA_SCHEMA_VERSION,
+    sourceApp: TECHNICA_SOURCE_APP,
+    sourceAppVersion: TECHNICA_SOURCE_APP_VERSION,
+    exportType: "npc",
+    contentType: "npc",
+    targetGame: "generic",
+    targetSchemaVersion: "technica-npc.v1",
+    exportedAt: isoNow(),
+    contentId,
+    title: document.name,
+    description: "NPC export containing map placement, route behavior, dialogue link, and art metadata.",
+    entryFile: "npc.json",
+    dependencies: [],
+    files: [
+      "manifest.json",
+      "npc.json",
+      ...(portraitAsset ? [portraitAsset.runtimePath] : []),
+      ...(spriteAsset ? [spriteAsset.runtimePath] : []),
+      "README.md"
+    ]
+  };
+
+  return {
+    bundleName: `${slugify(document.name, contentId)}-npc-export`,
+    manifest,
+    files: [
+      { name: "manifest.json", content: prettyJson(manifest) },
+      { name: "npc.json", content: prettyJson(document) },
+      ...(portraitAsset ? [portraitAsset.file] : []),
+      ...(spriteAsset ? [spriteAsset.file] : []),
+      {
+        name: "README.md",
+        content: `# Technica NPC Export
+
+Name: ${document.name}
+Id: ${document.id}
+
+Importer notes:
+- Preserve map placement, route mode, and dialogue id.
+- Portrait and sprite image assets export to \`assets/\` when present.
+`
+      }
+    ]
+  };
+}
+
 export function buildGearBundle(document: GearDocument): ExportBundle {
   const contentId = runtimeId(document.id || document.name, "gear");
+  const iconAsset = document.iconAsset ? createImageAssetExport(contentId, "icon", document.iconAsset) : null;
   return buildGenericBundle(document, {
     contentType: "gear",
     title: document.name,
@@ -297,12 +357,15 @@ Importer notes:
 - Preserve slot, stat, and inventory profile fields exactly.
 - \`cardsGranted\` and \`attachedModules\` are meant to stay stable across downstream adapters.
 - Metadata should be preserved even when the first target does not consume every field.
-`
+ - Attached gear icons export to \`assets/\` when present.
+`,
+    extraFiles: iconAsset ? [iconAsset.file] : []
   });
 }
 
 export function buildItemBundle(document: ItemDocument): ExportBundle {
   const contentId = runtimeId(document.id || document.name, "item");
+  const iconAsset = document.iconAsset ? createImageAssetExport(contentId, "icon", document.iconAsset) : null;
   return buildGenericBundle(document, {
     contentType: "item",
     title: document.name,
@@ -318,12 +381,15 @@ Id: ${document.id}
 Importer notes:
 - Preserve quantity, stackability, and physical load values during adaptation.
 - Generic imports should retain unknown metadata fields.
-`
+ - Attached item icons export to \`assets/\` when present.
+`,
+    extraFiles: iconAsset ? [iconAsset.file] : []
   });
 }
 
 export function buildCardBundle(document: CardDocument): ExportBundle {
   const contentId = runtimeId(document.id || document.name, "card");
+  const artAsset = document.artAsset ? createImageAssetExport(contentId, "art", document.artAsset) : null;
   return buildGenericBundle(document, {
     contentType: "card",
     title: document.name,
@@ -339,7 +405,9 @@ Id: ${document.id}
 Importer notes:
 - Preserve \`effects\`, \`targetType\`, \`range\`, and source references.
 - Library-facing metadata such as rarity and category should survive adaptation.
-`
+ - Attached card art exports to \`assets/\` when present.
+`,
+    extraFiles: artAsset ? [artAsset.file] : []
   });
 }
 
@@ -485,4 +553,12 @@ export function buildClassBundleForTarget(document: ClassDocument, target: Expor
   }
 
   return buildClassBundle(document);
+}
+
+export function buildNpcBundleForTarget(document: NpcDocument, target: ExportTarget) {
+  if (target === "chaos-core") {
+    return buildChaosCoreNpcBundle(document, createWorkspaceReferenceIndex({ npc: document }));
+  }
+
+  return buildNpcBundle(document);
 }

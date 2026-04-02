@@ -1,12 +1,15 @@
+import { ChaosCoreDatabasePanel } from "../../components/ChaosCoreDatabasePanel";
 import { Panel } from "../../components/Panel";
 import { createBlankUnit, createSampleUnit } from "../../data/sampleUnit";
 import { StructuredDocumentStudio } from "../content/StructuredDocumentStudio";
 import type { ExportTarget } from "../../types/common";
 import type { UnitDocument } from "../../types/unit";
 import { isoNow } from "../../utils/date";
+import { notify } from "../../utils/dialogs";
 import { buildUnitBundleForTarget } from "../../utils/exporters";
 import { validateUnitDocument } from "../../utils/contentValidation";
 import { parseCommaList, parseKeyValueLines, serializeCommaList, serializeKeyValueLines } from "../../utils/records";
+import type { LoadedChaosCoreDatabaseEntry } from "../../utils/chaosCoreDatabase";
 
 function touchUnit(document: UnitDocument): UnitDocument {
   return {
@@ -27,6 +30,19 @@ function isUnitDocument(value: unknown): value is UnitDocument {
 }
 
 export function UnitEditor() {
+  function loadDatabaseEntry(entry: LoadedChaosCoreDatabaseEntry, setDocument: (document: UnitDocument) => void) {
+    try {
+      const parsed = JSON.parse(entry.editorContent ?? entry.sourceContent ?? entry.runtimeContent);
+      if (!isUnitDocument(parsed)) {
+        notify("That Chaos Core database entry does not match the Technica unit format.");
+        return;
+      }
+      setDocument(touchUnit(parsed));
+    } catch {
+      notify("Could not load the selected unit from the Chaos Core database.");
+    }
+  }
+
   return (
     <StructuredDocumentStudio
       storageKey="technica.unit.document"
@@ -42,9 +58,7 @@ export function UnitEditor() {
       touchDocument={touchUnit}
       replacePrompt="Replace the current unit draft with the imported file?"
       invalidImportMessage="That file does not look like a Technica unit draft or export."
-      previewTitle="Unit Preview"
-      previewSubtitle="The exported unit payload updates live as the form changes."
-      renderWorkspace={({ document, patchDocument, exportTarget, setExportTarget, loadSample, clearDocument, importDraft, saveDraft, exportBundle }) => (
+      renderWorkspace={({ document, setDocument, patchDocument, exportTarget, setExportTarget, loadSample, clearDocument, importDraft, saveDraft, exportBundle }) => (
         <>
           <Panel
             title="Unit Setup"
@@ -353,9 +367,17 @@ export function UnitEditor() {
                 <button type="button" className="primary-button" onClick={() => void exportBundle()}>
                   Export bundle
                 </button>
+                </div>
               </div>
-            </div>
-          </Panel>
+            </Panel>
+
+            <ChaosCoreDatabasePanel
+              contentType="unit"
+              currentDocument={document}
+              buildBundle={(current) => buildUnitBundleForTarget(current, "chaos-core")}
+              onLoadEntry={(entry) => loadDatabaseEntry(entry, setDocument)}
+              subtitle="Publish unit definitions into the Chaos Core repo and reopen those records here for balancing work."
+            />
         </>
       )}
     />

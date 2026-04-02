@@ -13,6 +13,7 @@ import type { DialogueChoice, DialogueDocument, DialogueEntry, DialogueLabel, Di
 import type { GearDocument } from "../types/gear";
 import type { ItemDocument } from "../types/item";
 import type { MapDocument, MapObject, MapTile, MapZone, TerrainType } from "../types/map";
+import type { NpcDocument } from "../types/npc";
 import type { OperationDocument } from "../types/operation";
 import type { QuestDocument, QuestObjective, QuestReward } from "../types/quest";
 import type { UnitDocument } from "../types/unit";
@@ -29,6 +30,7 @@ export interface WorkspaceReferenceIndex {
   unitIds: Set<string>;
   operationIds: Set<string>;
   classIds: Set<string>;
+  npcIds: Set<string>;
   sceneIds: Set<string>;
   locationIds: Set<string>;
 }
@@ -337,8 +339,10 @@ export function createWorkspaceReferenceIndex(documents?: {
   unit?: UnitDocument;
   operation?: OperationDocument;
   class?: ClassDocument;
+  npc?: NpcDocument;
 }): WorkspaceReferenceIndex {
-  const dialogueDocument = documents?.dialogue ?? readStoredDocument<DialogueDocument>("technica.dialogue.source") ?? null;
+  const dialogueDocument =
+    documents?.dialogue ?? readStoredDocument<DialogueDocument>("technica.dialogue.document") ?? null;
   const questDocument = documents?.quest ?? readStoredDocument<QuestDocument>("technica.quest.document") ?? null;
   const mapDocument = documents?.map ?? readStoredDocument<MapDocument>("technica.map.document") ?? null;
   const gearDocument = documents?.gear ?? readStoredDocument<GearDocument>("technica.gear.document") ?? null;
@@ -348,6 +352,7 @@ export function createWorkspaceReferenceIndex(documents?: {
   const operationDocument =
     documents?.operation ?? readStoredDocument<OperationDocument>("technica.operation.document") ?? null;
   const classDocument = documents?.class ?? readStoredDocument<ClassDocument>("technica.class.document") ?? null;
+  const npcDocument = documents?.npc ?? readStoredDocument<NpcDocument>("technica.npc.document") ?? null;
   const dialogueId = documents?.dialogue?.id;
 
   const dialogueIds = new Set<string>();
@@ -359,6 +364,7 @@ export function createWorkspaceReferenceIndex(documents?: {
   const unitIds = new Set<string>();
   const operationIds = new Set<string>();
   const classIds = new Set<string>();
+  const npcIds = new Set<string>();
   const sceneIds = new Set<string>();
   const locationIds = new Set<string>();
 
@@ -394,6 +400,9 @@ export function createWorkspaceReferenceIndex(documents?: {
   }
   if (documents?.class) {
     classIds.add(runtimeId(documents.class.id));
+  }
+  if (documents?.npc) {
+    npcIds.add(runtimeId(documents.npc.id));
   }
 
   if (typeof window !== "undefined") {
@@ -442,6 +451,9 @@ export function createWorkspaceReferenceIndex(documents?: {
   if (classDocument) {
     classIds.add(runtimeId(classDocument.id));
   }
+  if (npcDocument) {
+    npcIds.add(runtimeId(npcDocument.id));
+  }
 
   return {
     dialogueIds,
@@ -453,6 +465,7 @@ export function createWorkspaceReferenceIndex(documents?: {
     unitIds,
     operationIds,
     classIds,
+    npcIds,
     sceneIds,
     locationIds
   };

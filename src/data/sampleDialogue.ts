@@ -1,3 +1,7 @@
+import type { DialogueDocument } from "../types/dialogue";
+import { refreshDialogueDocument } from "../utils/dialogueDocument";
+import { parseDialogueSource } from "../utils/dialogueParser";
+
 export const sampleDialogueSource = `@id village_guide_intro
 @title Village Guide Intro
 @scene oak_square
@@ -28,3 +32,7 @@ Guide [portrait=guide_think]: The Lantern Inn stays open as long as the lamps ar
 Guide [mood=calm]: Good luck out there.
 END
 `;
+
+export function createSampleDialogueDocument(): DialogueDocument {
+  return refreshDialogueDocument(parseDialogueSource(sampleDialogueSource).document);
+}

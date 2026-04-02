@@ -1,5 +1,15 @@
 import type { DialogueDocument, DialogueEntry } from "../../types/dialogue";
 
+function renderTargetConnector(target: string) {
+  return (
+    <div className="flow-jump-line" aria-label={`Links to ${target}`}>
+      <span className="flow-jump-stem" />
+      <span className="flow-jump-arrow">↳</span>
+      <span className="flow-target-chip">{target}</span>
+    </div>
+  );
+}
+
 function renderEntry(entry: DialogueEntry) {
   if (entry.kind === "line") {
     return (
@@ -29,8 +39,8 @@ function renderEntry(entry: DialogueEntry) {
         <div className="flow-badge choice">choice</div>
         <div>
           <p>{entry.text}</p>
+          {renderTargetConnector(entry.target)}
           <div className="chip-row">
-            <span className="chip link-chip">to {entry.target}</span>
             {entry.condition ? <span className="chip">if {entry.condition}</span> : null}
             {Object.entries(entry.setFlags).map(([flag, value]) => (
               <span key={flag} className="chip">
@@ -52,7 +62,10 @@ function renderEntry(entry: DialogueEntry) {
     return (
       <div className="flow-row utility-entry">
         <div className="flow-badge jump">jump</div>
-        <p>Continue to {entry.target}</p>
+        <div>
+          <p>Continue conversation</p>
+          {renderTargetConnector(entry.target)}
+        </div>
       </div>
     );
   }
@@ -82,26 +95,28 @@ interface DialoguePreviewProps {
 
 export function DialoguePreview({ document }: DialoguePreviewProps) {
   if (document.labels.length === 0) {
-    return <div className="empty-state">Add a label like <code>:start</code> to begin previewing the flow.</div>;
+    return <div className="empty-state">Add a conversation branch to begin previewing the flow.</div>;
   }
 
   return (
     <div className="flow-grid">
       {document.labels.map((label) => (
-        <article key={label.id} className="flow-card">
-          <header>
+        <details key={label.id} className="flow-card flow-branch" open>
+          <summary className="flow-branch-summary">
             <div>
               <h3>{label.label}</h3>
               <p>{label.entries.length} entries</p>
             </div>
             {label.label === document.entryLabel ? <span className="pill accent">entry</span> : null}
-          </header>
+          </summary>
           <div className="flow-card-body">
             {label.entries.map((entry) => (
-              <div key={entry.id}>{renderEntry(entry)}</div>
+              <div key={entry.id} className="flow-node-shell">
+                {renderEntry(entry)}
+              </div>
             ))}
           </div>
-        </article>
+        </details>
       ))}
     </div>
   );

@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { ChaosCoreDatabasePanel } from "../../components/ChaosCoreDatabasePanel";
 import { Panel } from "../../components/Panel";
 import { createBlankOperation, createSampleOperation } from "../../data/sampleOperation";
 import { StructuredDocumentStudio } from "../content/StructuredDocumentStudio";
@@ -9,6 +10,7 @@ import { buildOperationBundleForTarget } from "../../utils/exporters";
 import { validateOperationDocument } from "../../utils/contentValidation";
 import { notify } from "../../utils/dialogs";
 import { parseKeyValueLines, serializeKeyValueLines } from "../../utils/records";
+import type { LoadedChaosCoreDatabaseEntry } from "../../utils/chaosCoreDatabase";
 
 function touchOperation(document: OperationDocument): OperationDocument {
   return {
@@ -31,6 +33,19 @@ function isOperationDocument(value: unknown): value is OperationDocument {
 export function OperationEditor() {
   const floorJsonRef = useRef<HTMLTextAreaElement | null>(null);
 
+  function loadDatabaseEntry(entry: LoadedChaosCoreDatabaseEntry, setDocument: (document: OperationDocument) => void) {
+    try {
+      const parsed = JSON.parse(entry.editorContent ?? entry.sourceContent ?? entry.runtimeContent);
+      if (!isOperationDocument(parsed)) {
+        notify("That Chaos Core database entry does not match the Technica operation format.");
+        return;
+      }
+      setDocument(touchOperation(parsed));
+    } catch {
+      notify("Could not load the selected operation from the Chaos Core database.");
+    }
+  }
+
   return (
     <StructuredDocumentStudio
       storageKey="technica.operation.document"
@@ -46,9 +61,7 @@ export function OperationEditor() {
       touchDocument={touchOperation}
       replacePrompt="Replace the current operation draft with the imported file?"
       invalidImportMessage="That file does not look like a Technica operation draft or export."
-      previewTitle="Operation Preview"
-      previewSubtitle="The exported operation payload updates live as the form changes."
-      renderWorkspace={({ document, patchDocument, exportTarget, setExportTarget, loadSample, clearDocument, importDraft, saveDraft, exportBundle }) => (
+      renderWorkspace={({ document, setDocument, patchDocument, exportTarget, setExportTarget, loadSample, clearDocument, importDraft, saveDraft, exportBundle }) => (
         <>
             <Panel
               title="Operation Setup"
@@ -176,9 +189,17 @@ export function OperationEditor() {
                 key={document.updatedAt}
                 ref={floorJsonRef}
                 className="authoring-editor compact-editor"
-                defaultValue={JSON.stringify(document.floors, null, 2)}
-              />
-            </Panel>
+              defaultValue={JSON.stringify(document.floors, null, 2)}
+            />
+          </Panel>
+
+          <ChaosCoreDatabasePanel
+            contentType="operation"
+            currentDocument={document}
+            buildBundle={(current) => buildOperationBundleForTarget(current, "chaos-core")}
+            onLoadEntry={(entry) => loadDatabaseEntry(entry, setDocument)}
+            subtitle="Publish operations into the Chaos Core repo and reopen those stored records here for layout and balance revisions."
+          />
         </>
       )}
     />

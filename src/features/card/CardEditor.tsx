@@ -1,3 +1,5 @@
+import { ChaosCoreDatabasePanel } from "../../components/ChaosCoreDatabasePanel";
+import { ImageAssetField } from "../../components/ImageAssetField";
 import { Panel } from "../../components/Panel";
 import { createBlankCard, createSampleCard } from "../../data/sampleCard";
 import { StructuredDocumentStudio } from "../content/StructuredDocumentStudio";
@@ -11,9 +13,11 @@ import {
   type CardEffectDocument
 } from "../../types/card";
 import { isoNow } from "../../utils/date";
+import { notify } from "../../utils/dialogs";
 import { buildCardBundleForTarget } from "../../utils/exporters";
 import { validateCardDocument } from "../../utils/contentValidation";
 import { parseKeyValueLines, serializeKeyValueLines } from "../../utils/records";
+import type { LoadedChaosCoreDatabaseEntry } from "../../utils/chaosCoreDatabase";
 
 function touchCard(document: CardDocument): CardDocument {
   return {
@@ -42,6 +46,19 @@ function createEmptyEffect(): CardEffectDocument {
 }
 
 export function CardEditor() {
+  function loadDatabaseEntry(entry: LoadedChaosCoreDatabaseEntry, setDocument: (document: CardDocument) => void) {
+    try {
+      const parsed = JSON.parse(entry.editorContent ?? entry.sourceContent ?? entry.runtimeContent);
+      if (!isCardDocument(parsed)) {
+        notify("That Chaos Core database entry does not match the Technica card format.");
+        return;
+      }
+      setDocument(touchCard(parsed));
+    } catch {
+      notify("Could not load the selected card from the Chaos Core database.");
+    }
+  }
+
   return (
     <StructuredDocumentStudio
       storageKey="technica.card.document"
@@ -57,9 +74,7 @@ export function CardEditor() {
       touchDocument={touchCard}
       replacePrompt="Replace the current card draft with the imported file?"
       invalidImportMessage="That file does not look like a Technica card draft or export."
-      previewTitle="Card Preview"
-      previewSubtitle="The exported battle card payload updates live as the form changes."
-      renderWorkspace={({ document, patchDocument, exportTarget, setExportTarget, loadSample, clearDocument, importDraft, saveDraft, exportBundle }) => (
+      renderWorkspace={({ document, setDocument, patchDocument, exportTarget, setExportTarget, loadSample, clearDocument, importDraft, saveDraft, exportBundle }) => (
         <>
           <Panel
             title="Card Setup"
@@ -92,6 +107,15 @@ export function CardEditor() {
                   onChange={(event) => patchDocument((current) => ({ ...current, description: event.target.value }))}
                 />
               </label>
+              <div className="field full">
+                <ImageAssetField
+                  label="Card art"
+                  emptyLabel="No card art attached."
+                  hint="Exports as a stable asset file for Chaos Core imports."
+                  asset={document.artAsset}
+                  onChange={(artAsset) => patchDocument((current) => ({ ...current, artAsset }))}
+                />
+              </div>
               <label className="field">
                 <span>Type</span>
                 <select
@@ -382,6 +406,14 @@ export function CardEditor() {
               ))}
             </div>
           </Panel>
+
+          <ChaosCoreDatabasePanel
+            contentType="card"
+            currentDocument={document}
+            buildBundle={(current) => buildCardBundleForTarget(current, "chaos-core")}
+            onLoadEntry={(entry) => loadDatabaseEntry(entry, setDocument)}
+            subtitle="Publish card runtime JSON and card art directly into the Chaos Core repo, then reload the live card database here."
+          />
         </>
       )}
     />

@@ -4,7 +4,7 @@ import { Panel } from "../../components/Panel";
 import { usePersistentState } from "../../hooks/usePersistentState";
 import type { EditorKind, ExportBundle, ExportTarget, ValidationIssue } from "../../types/common";
 import { confirmAction, notify } from "../../utils/dialogs";
-import { createDraftEnvelope, downloadBundle, downloadDraftFile } from "../../utils/exporters";
+import { downloadBundle, downloadDraftFile } from "../../utils/exporters";
 import { readTextFile } from "../../utils/file";
 
 interface StructuredStudioContext<TDocument> {
@@ -34,8 +34,6 @@ interface StructuredDocumentStudioProps<TDocument> {
   touchDocument?: (document: TDocument) => TDocument;
   replacePrompt: string;
   invalidImportMessage: string;
-  previewTitle: string;
-  previewSubtitle: string;
   renderWorkspace: (context: StructuredStudioContext<TDocument>) => ReactNode;
 }
 
@@ -53,8 +51,6 @@ export function StructuredDocumentStudio<TDocument>({
   touchDocument = (next) => next,
   replacePrompt,
   invalidImportMessage,
-  previewTitle,
-  previewSubtitle,
   renderWorkspace
 }: StructuredDocumentStudioProps<TDocument>) {
   const [document, setDocument] = usePersistentState(storageKey, initialDocument);
@@ -130,14 +126,6 @@ export function StructuredDocumentStudio<TDocument>({
       <div className="workspace-column">
         <Panel title="Validation" subtitle="Required fields, duplicate ids, and broken references show up here.">
           <IssueList issues={issues} emptyLabel="No validation issues. This content is ready to export." />
-        </Panel>
-
-        <Panel title={previewTitle} subtitle={previewSubtitle}>
-          <pre className="json-preview tall">{JSON.stringify(document, null, 2)}</pre>
-        </Panel>
-
-        <Panel title="Draft Envelope" subtitle="Draft files can be reimported later without losing Technica metadata.">
-          <pre className="json-preview">{JSON.stringify(createDraftEnvelope(draftType, document), null, 2)}</pre>
         </Panel>
       </div>
     </div>

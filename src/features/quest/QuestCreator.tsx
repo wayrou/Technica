@@ -1,4 +1,5 @@
 import { useRef, type ChangeEvent } from "react";
+import { ChaosCoreDatabasePanel } from "../../components/ChaosCoreDatabasePanel";
 import { IssueList } from "../../components/IssueList";
 import { Panel } from "../../components/Panel";
 import { createSampleQuest } from "../../data/sampleQuest";
@@ -7,8 +8,9 @@ import type { ExportTarget } from "../../types/common";
 import type { QuestDocument, QuestObjective, QuestReward, QuestState, QuestStep } from "../../types/quest";
 import { isoNow } from "../../utils/date";
 import { confirmAction, notify } from "../../utils/dialogs";
-import { buildQuestBundleForTarget, createDraftEnvelope, downloadBundle, downloadDraftFile } from "../../utils/exporters";
+import { buildQuestBundleForTarget, downloadBundle, downloadDraftFile } from "../../utils/exporters";
 import { readTextFile } from "../../utils/file";
+import type { LoadedChaosCoreDatabaseEntry } from "../../utils/chaosCoreDatabase";
 import { createSequentialId } from "../../utils/id";
 import {
   parseCommaList,
@@ -153,6 +155,20 @@ export function QuestCreator() {
   function handleClear() {
     if (confirmAction("Clear the current quest draft and replace it with a blank quest template?")) {
       setQuest(createBlankQuest());
+    }
+  }
+
+  function handleLoadDatabaseEntry(entry: LoadedChaosCoreDatabaseEntry) {
+    try {
+      const parsed = JSON.parse(entry.editorContent ?? entry.sourceContent ?? entry.runtimeContent);
+      const payload = parsed.payload ?? parsed;
+      if (!payload.id || !payload.states || !payload.steps) {
+        notify("That Chaos Core quest entry does not match the Technica quest format.");
+        return;
+      }
+      setQuest(touchQuest(payload as QuestDocument));
+    } catch {
+      notify("Could not load the selected quest from the Chaos Core database.");
     }
   }
 
@@ -517,6 +533,14 @@ export function QuestCreator() {
             ))}
           </div>
         </Panel>
+
+        <ChaosCoreDatabasePanel
+          contentType="quest"
+          currentDocument={quest}
+          buildBundle={(current) => buildQuestBundleForTarget(current, "chaos-core")}
+          onLoadEntry={handleLoadDatabaseEntry}
+          subtitle="Publish quests into the Chaos Core repo and pull live in-game quest data back into this editor for balance passes."
+        />
       </div>
 
       <div className="workspace-column wide">
@@ -963,14 +987,6 @@ export function QuestCreator() {
       <div className="workspace-column">
         <Panel title="Validation" subtitle="Required fields and cross-reference issues appear here.">
           <IssueList issues={issues} emptyLabel="No validation issues. This quest is ready to export." />
-        </Panel>
-
-        <Panel title="Structured Preview" subtitle="The JSON preview updates live as the form changes.">
-          <pre className="json-preview tall">{JSON.stringify(quest, null, 2)}</pre>
-        </Panel>
-
-        <Panel title="Draft Envelope" subtitle="Draft files can be reimported later without losing Technica metadata.">
-          <pre className="json-preview">{JSON.stringify(createDraftEnvelope("quest", quest), null, 2)}</pre>
         </Panel>
       </div>
     </div>

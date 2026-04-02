@@ -1,8 +1,9 @@
 import type { CardDocument } from "../types/card";
 import type { ClassDocument } from "../types/class";
-import type { ValidationIssue } from "../types/common";
+import type { ImageAsset, ValidationIssue } from "../types/common";
 import type { GearDocument } from "../types/gear";
 import type { ItemDocument } from "../types/item";
+import type { NpcDocument } from "../types/npc";
 import type { OperationDocument } from "../types/operation";
 import type { UnitDocument } from "../types/unit";
 
@@ -51,6 +52,36 @@ function warnOnDuplicates(values: string[], field: string, label: string, issues
   });
 }
 
+function validateImageAsset(asset: ImageAsset | undefined, field: string, label: string, issues: ValidationIssue[]) {
+  if (!asset) {
+    return;
+  }
+
+  if (!asset.fileName.trim()) {
+    issues.push({
+      severity: "error",
+      field,
+      message: `${label} needs a filename.`
+    });
+  }
+
+  if (!asset.mimeType.startsWith("image/")) {
+    issues.push({
+      severity: "error",
+      field,
+      message: `${label} must be an image file.`
+    });
+  }
+
+  if (!asset.dataUrl.startsWith("data:image/")) {
+    issues.push({
+      severity: "error",
+      field,
+      message: `${label} data is invalid. Reattach the file and try again.`
+    });
+  }
+}
+
 export function validateGearDocument(document: GearDocument): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
@@ -71,6 +102,7 @@ export function validateGearDocument(document: GearDocument): ValidationIssue[] 
   requirePositive(document.wear, "wear", "Wear", issues);
   warnOnDuplicates(document.cardsGranted, "cardsGranted", "Granted cards", issues);
   warnOnDuplicates(document.attachedModules, "attachedModules", "Attached modules", issues);
+  validateImageAsset(document.iconAsset, "iconAsset", "Gear icon", issues);
 
   return issues;
 }
@@ -84,6 +116,7 @@ export function validateItemDocument(document: ItemDocument): ValidationIssue[] 
   requirePositive(document.massKg, "massKg", "Mass", issues);
   requirePositive(document.bulkBu, "bulkBu", "Bulk", issues);
   requirePositive(document.powerW, "powerW", "Power draw", issues);
+  validateImageAsset(document.iconAsset, "iconAsset", "Item icon", issues);
 
   return issues;
 }
@@ -120,6 +153,8 @@ export function validateCardDocument(document: CardDocument): ValidationIssue[] 
       message: "Every effect entry needs a type."
     });
   }
+
+  validateImageAsset(document.artAsset, "artAsset", "Card art", issues);
 
   return issues;
 }
@@ -245,6 +280,36 @@ export function validateClassDocument(document: ClassDocument): ValidationIssue[
       }
     }
   });
+
+  return issues;
+}
+
+export function validateNpcDocument(document: NpcDocument): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  requireText(document.id, "id", "NPC id", issues);
+  requireText(document.name, "name", "NPC name", issues);
+  requireText(document.mapId, "mapId", "Map id", issues);
+  requirePositive(document.tileX, "tileX", "Tile X", issues);
+  requirePositive(document.tileY, "tileY", "Tile Y", issues);
+
+  if (document.routeMode === "fixed" && document.routePoints.length === 0) {
+    issues.push({
+      severity: "warning",
+      field: "routePoints",
+      message: "Fixed route mode works best with at least one patrol point."
+    });
+  }
+
+  document.routePoints.forEach((point, index) => {
+    requireText(point.id, `routePoints.${index}.id`, "Route point id", issues);
+    requirePositive(point.x, `routePoints.${index}.x`, "Route point X", issues);
+    requirePositive(point.y, `routePoints.${index}.y`, "Route point Y", issues);
+  });
+
+  warnOnDuplicates(document.routePoints.map((point) => point.id), "routePoints", "Route points", issues);
+  validateImageAsset(document.portraitAsset, "portraitAsset", "NPC portrait", issues);
+  validateImageAsset(document.spriteAsset, "spriteAsset", "NPC sprite", issues);
 
   return issues;
 }

@@ -1,14 +1,29 @@
 import { useEffect, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { ChaosCoreDatabasePanel } from "../../components/ChaosCoreDatabasePanel";
 import { IssueList } from "../../components/IssueList";
 import { Panel } from "../../components/Panel";
 import { createSampleMap } from "../../data/sampleMap";
 import { usePersistentState } from "../../hooks/usePersistentState";
 import type { ExportTarget } from "../../types/common";
 import type { MapBrushState, MapDocument, MapObject, MapZone } from "../../types/map";
+import type { NpcDocument } from "../../types/npc";
 import { isoNow } from "../../utils/date";
 import { confirmAction, notify } from "../../utils/dialogs";
-import { buildMapBundleForTarget, createDraftEnvelope, downloadBundle, downloadDraftFile } from "../../utils/exporters";
+import {
+  buildMapBundleForTarget,
+  buildNpcBundleForTarget,
+  downloadBundle,
+  downloadDraftFile
+} from "../../utils/exporters";
 import { readTextFile } from "../../utils/file";
+import {
+  isTauriRuntime,
+  listChaosCoreDatabase,
+  loadChaosCoreDatabaseEntry,
+  publishChaosCoreBundle,
+  type ChaosCoreDatabaseEntry,
+  type LoadedChaosCoreDatabaseEntry
+} from "../../utils/chaosCoreDatabase";
 import { createSequentialId } from "../../utils/id";
 import { parseKeyValueLines, serializeKeyValueLines } from "../../utils/records";
 import { validateMapDocument } from "../../utils/mapValidation";
@@ -21,7 +36,18 @@ import {
   terrainPalette
 } from "./mapUtils";
 
-type MapTool = "paint" | "erase" | "select" | "move" | "object" | "zone" | "pan";
+type MapTool = "paint" | "erase" | "select" | "move" | "object" | "zone" | "npc" | "pan";
+
+type MapNpcMarker = {
+  entryKey: string;
+  contentId: string;
+  name: string;
+  mapId: string;
+  tileX: number;
+  tileY: number;
+  origin: "game" | "technica";
+  sourceFile?: string;
+};
 
 function touchMap(document: MapDocument) {
   return {
@@ -58,8 +84,21 @@ function createDefaultZone(x: number, y: number, width: number, height: number, 
   };
 }
 
+function isNpcDocument(value: unknown): value is NpcDocument {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      "id" in value &&
+      "name" in value &&
+      "mapId" in value &&
+      "tileX" in value &&
+      "tileY" in value
+  );
+}
+
 export function MapEditor() {
   const [map, setMap] = usePersistentState("technica.map.document", createSampleMap());
+  const [repoPath] = usePersistentState("technica.chaosCoreRepoPath", "");
   const [exportTarget, setExportTarget] = usePersistentState<ExportTarget>("technica.map.exportTarget", "generic");
   const [tool, setTool] = useState<MapTool>("paint");
   const [brush, setBrush] = useState<MapBrushState>({
@@ -77,8 +116,13 @@ export function MapEditor() {
     walkable: true,
     walls: true,
     objects: true,
-    zones: true
+    zones: true,
+    npcs: true
   });
+  const [npcEntries, setNpcEntries] = useState<ChaosCoreDatabaseEntry[]>([]);
+  const [mapNpcMarkers, setMapNpcMarkers] = useState<MapNpcMarker[]>([]);
+  const [selectedNpcEntryKey, setSelectedNpcEntryKey] = useState("");
+  const [isPlacingNpc, setIsPlacingNpc] = useState(false);
   const [isPainting, setIsPainting] = useState(false);
   const [zoneDrag, setZoneDrag] = useState<{ start: { x: number; y: number }; end: { x: number; y: number } } | null>(null);
   const [panState, setPanState] = useState<{
@@ -92,6 +136,7 @@ export function MapEditor() {
   const issues = validateMapDocument(map);
   const selectedObject = map.objects.find((item) => item.id === selectedObjectId) ?? null;
   const selectedZone = map.zones.find((item) => item.id === selectedZoneId) ?? null;
+  const selectedNpcEntry = npcEntries.find((entry) => entry.entryKey === selectedNpcEntryKey) ?? null;
   const cellSize = Math.max(28, Math.round(map.tileSize * 0.72 * zoom));
 
   useEffect(() => {
@@ -125,6 +170,135 @@ export function MapEditor() {
     window.addEventListener("pointerup", finishInteractions);
     return () => window.removeEventListener("pointerup", finishInteractions);
   }, [isPainting, panState, setMap, zoneDrag]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function refreshMapNpcs() {
+      if (!isTauriRuntime() || !repoPath.trim()) {
+        setNpcEntries([]);
+        setMapNpcMarkers([]);
+        setSelectedNpcEntryKey("");
+        return;
+      }
+
+      try {
+        const entries = await listChaosCoreDatabase(repoPath.trim(), "npc");
+        const loadedEntries: Array<MapNpcMarker | null> = await Promise.all(
+          entries.map(async (entry) => {
+            try {
+              const loaded = await loadChaosCoreDatabaseEntry(repoPath.trim(), "npc", entry.entryKey);
+              const parsed = JSON.parse(loaded.editorContent ?? loaded.sourceContent ?? loaded.runtimeContent);
+              if (!isNpcDocument(parsed)) {
+                return null;
+              }
+
+              return {
+                entryKey: entry.entryKey,
+                contentId: entry.contentId,
+                name: parsed.name || entry.title || entry.contentId,
+                mapId: parsed.mapId,
+                tileX: Number(parsed.tileX ?? 0),
+                tileY: Number(parsed.tileY ?? 0),
+                origin: entry.origin,
+                sourceFile: entry.sourceFile
+              };
+            } catch {
+              return null;
+            }
+          })
+        );
+
+        if (cancelled) {
+          return;
+        }
+
+        const nextMarkers = loadedEntries.filter((entry): entry is MapNpcMarker => entry !== null);
+        setNpcEntries(entries);
+        setMapNpcMarkers(nextMarkers.filter((entry) => entry.mapId === map.id));
+        setSelectedNpcEntryKey((current) => {
+          if (current && entries.some((entry) => entry.entryKey === current)) {
+            return current;
+          }
+          return entries[0]?.entryKey ?? "";
+        });
+      } catch {
+        if (!cancelled) {
+          setNpcEntries([]);
+          setMapNpcMarkers([]);
+          setSelectedNpcEntryKey("");
+        }
+      }
+    }
+
+    void refreshMapNpcs();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [map.id, repoPath]);
+
+  async function placeNpcOnMap(x: number, y: number) {
+    if (!isTauriRuntime()) {
+      notify("NPC placement writes directly into the Chaos Core repo and requires Technica desktop mode.");
+      return;
+    }
+
+    if (!repoPath.trim()) {
+      notify("Set the Chaos Core repo path in the database panel before placing NPCs.");
+      return;
+    }
+
+    if (!selectedNpcEntry) {
+      notify("Select an NPC from the placement dropdown before clicking a map tile.");
+      return;
+    }
+
+    setIsPlacingNpc(true);
+    try {
+      const loaded = await loadChaosCoreDatabaseEntry(repoPath.trim(), "npc", selectedNpcEntry.entryKey);
+      const parsed = JSON.parse(loaded.editorContent ?? loaded.sourceContent ?? loaded.runtimeContent);
+      if (!isNpcDocument(parsed)) {
+        notify("The selected NPC entry is not in a Technica-compatible NPC format.");
+        return;
+      }
+
+      const nextNpcDocument: NpcDocument = {
+        ...parsed,
+        mapId: map.id,
+        tileX: x,
+        tileY: y,
+        updatedAt: isoNow()
+      };
+
+      await publishChaosCoreBundle(
+        repoPath.trim(),
+        "npc",
+        buildNpcBundleForTarget(nextNpcDocument, "chaos-core"),
+        loaded.entryKey,
+        loaded.sourceFile
+      );
+
+      setMapNpcMarkers((current) => [
+        ...current.filter((marker) => marker.entryKey !== selectedNpcEntry.entryKey),
+        {
+          entryKey: selectedNpcEntry.entryKey,
+          contentId: selectedNpcEntry.contentId,
+          name: nextNpcDocument.name,
+          mapId: nextNpcDocument.mapId,
+          tileX: nextNpcDocument.tileX,
+          tileY: nextNpcDocument.tileY,
+          origin: selectedNpcEntry.origin,
+          sourceFile: selectedNpcEntry.sourceFile
+        }
+      ]);
+      notify(`Placed '${nextNpcDocument.name}' at ${x}, ${y} on '${map.name}'.`);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Could not place the selected NPC on this map.");
+    } finally {
+      setIsPlacingNpc(false);
+    }
+  }
 
   function patchMap(updater: (current: MapDocument) => MapDocument) {
     setMap((current) => touchMap(updater(current)));
@@ -222,6 +396,11 @@ export function MapEditor() {
       return;
     }
 
+    if (tool === "npc") {
+      void placeNpcOnMap(x, y);
+      return;
+    }
+
     if (tool === "pan" && viewportRef.current) {
       viewportRef.current.setPointerCapture(event.pointerId);
       setPanState({
@@ -307,6 +486,20 @@ export function MapEditor() {
     }
   }
 
+  function handleLoadDatabaseEntry(entry: LoadedChaosCoreDatabaseEntry) {
+    try {
+      const parsed = JSON.parse(entry.editorContent ?? entry.sourceContent ?? entry.runtimeContent);
+      const payload = parsed.payload ?? parsed;
+      if (!payload.id || !payload.tiles || !payload.width) {
+        notify("That Chaos Core map entry does not match the Technica map format.");
+        return;
+      }
+      setMap(touchMap(payload as MapDocument));
+    } catch {
+      notify("Could not load the selected map from the Chaos Core database.");
+    }
+  }
+
   return (
     <div className="workspace-grid">
       <div className="workspace-column">
@@ -325,7 +518,7 @@ export function MapEditor() {
           }
         >
           <div className="tool-strip">
-            {(["paint", "erase", "select", "move", "object", "zone", "pan"] as MapTool[]).map((option) => (
+            {(["paint", "erase", "select", "move", "object", "zone", "npc", "pan"] as MapTool[]).map((option) => (
               <button
                 key={option}
                 className={tool === option ? "tool-button active" : "tool-button"}
@@ -459,6 +652,14 @@ export function MapEditor() {
                 />
                 Zones
               </label>
+              <label className="inline-toggle">
+                <input
+                  type="checkbox"
+                  checked={layerVisibility.npcs}
+                  onChange={(event) => setLayerVisibility((current) => ({ ...current, npcs: event.target.checked }))}
+                />
+                NPCs
+              </label>
             </div>
             <div className="toolbar">
               <label className="inline-select">
@@ -492,6 +693,64 @@ export function MapEditor() {
               </button>
               <input ref={importRef} hidden type="file" accept=".json" onChange={handleImportFile} />
             </div>
+          </div>
+        </Panel>
+
+        <Panel
+          title="NPC Placement"
+          subtitle="Select an NPC from the Chaos Core database, switch to the NPC tool, and click a tile to place them on this map."
+        >
+          {!isTauriRuntime() ? (
+            <div className="empty-state compact">
+              Open Technica in desktop mode to place NPCs directly into the Chaos Core repo.
+            </div>
+          ) : null}
+
+          <div className="form-grid">
+            <label className="field full">
+              <span>NPC</span>
+              <select
+                value={selectedNpcEntryKey}
+                onChange={(event) => setSelectedNpcEntryKey(event.target.value)}
+                disabled={!isTauriRuntime() || npcEntries.length === 0}
+              >
+                {npcEntries.length === 0 ? <option value="">No NPCs found</option> : null}
+                {npcEntries.map((entry) => (
+                  <option key={entry.entryKey} value={entry.entryKey}>
+                    {entry.title || entry.contentId} ({entry.origin === "game" ? "Game" : "Technica"})
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="chip-row">
+            <span className="pill">{mapNpcMarkers.length} NPCs on this map</span>
+            {selectedNpcEntry ? <span className="pill accent">Placing {selectedNpcEntry.title}</span> : null}
+            {isPlacingNpc ? <span className="pill">Saving placement...</span> : null}
+          </div>
+
+          <div className="database-list">
+            {mapNpcMarkers.length === 0 ? (
+              <div className="empty-state compact">No NPCs are assigned to this map yet.</div>
+            ) : (
+              mapNpcMarkers.map((marker) => (
+                <button
+                  key={marker.entryKey}
+                  type="button"
+                  className={
+                    marker.entryKey === selectedNpcEntryKey ? "database-entry active" : "database-entry"
+                  }
+                  onClick={() => setSelectedNpcEntryKey(marker.entryKey)}
+                >
+                  <strong>{marker.name}</strong>
+                  <span>
+                    {marker.contentId} · {marker.tileX}, {marker.tileY}
+                  </span>
+                  <small>{marker.origin === "game" ? "Game" : "Technica"}</small>
+                </button>
+              ))
+            )}
           </div>
         </Panel>
 
@@ -959,6 +1218,28 @@ export function MapEditor() {
                   ))
                 : null}
 
+              {layerVisibility.npcs
+                ? mapNpcMarkers.map((npc) => (
+                    <button
+                      key={npc.entryKey}
+                      type="button"
+                      className={
+                        npc.entryKey === selectedNpcEntryKey ? "map-overlay npc selected" : "map-overlay npc"
+                      }
+                      style={{
+                        gridColumn: `${npc.tileX + 1} / span 1`,
+                        gridRow: `${npc.tileY + 1} / span 1`
+                      }}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setSelectedNpcEntryKey(npc.entryKey);
+                      }}
+                    >
+                      {npc.name}
+                    </button>
+                  ))
+                : null}
+
               {zoneDrag ? (
                 <div
                   className="map-overlay zone draft"
@@ -977,19 +1258,19 @@ export function MapEditor() {
             </div>
           </div>
         </Panel>
+
+        <ChaosCoreDatabasePanel
+          contentType="map"
+          currentDocument={map}
+          buildBundle={(current) => buildMapBundleForTarget(current, "chaos-core")}
+          onLoadEntry={handleLoadDatabaseEntry}
+          subtitle="Publish maps directly into the Chaos Core repo and reopen the live field maps here for iteration and balance work."
+        />
       </div>
 
       <div className="workspace-column">
         <Panel title="Validation" subtitle="Bounds, dimensions, duplicate ids, and contradictory tile flags show up here.">
           <IssueList issues={issues} emptyLabel="No validation issues. This map is ready to export." />
-        </Panel>
-
-        <Panel title="Map Preview JSON" subtitle="The exported map JSON updates as you paint and edit.">
-          <pre className="json-preview tall">{JSON.stringify(map, null, 2)}</pre>
-        </Panel>
-
-        <Panel title="Draft Envelope" subtitle="Map drafts can be exported and reimported without losing Technica metadata.">
-          <pre className="json-preview">{JSON.stringify(createDraftEnvelope("map", map), null, 2)}</pre>
         </Panel>
       </div>
     </div>
