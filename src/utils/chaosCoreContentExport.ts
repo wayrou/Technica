@@ -485,24 +485,29 @@ export function buildChaosCoreUnitBundle(
   document: UnitDocument,
   references = createWorkspaceReferenceIndex({ unit: document })
 ): ExportBundle {
-  buildUnitDependencies(document).forEach((dependency) => {
-    if (dependency.contentType === "class") {
-      assertKnownReference(dependency.id, references.classIds, "Unit export", "class id");
-    }
-    if (dependency.contentType === "gear") {
-      assertKnownReference(dependency.id, references.gearIds, "Unit export", "gear id");
-    }
-  });
+  // Units are allowed to point at built-in Chaos Core classes and gear, not only
+  // the drafts currently open in Technica. Keep dependency metadata, but do not
+  // reject external runtime references during export.
 
   const contentId = runtimeId(document.id || document.name, "unit");
   const entryFile = `${contentId}.unit.json`;
   const sourceFile = `${contentId}.source.json`;
-  const runtimeDocument = pruneEmpty({
+  const runtimeDocument = {
+    ...pruneEmpty({
     id: contentId,
     name: document.name,
     description: document.description,
     currentClassId: runtimeId(document.currentClassId),
     stats: document.stats,
+    traits: document.traits,
+    pwr: document.pwr,
+    recruitCost: document.recruitCost,
+    startingInRoster: document.startingInRoster,
+    deployInParty: document.deployInParty,
+    metadata: coerceRecord(document.metadata)
+    }),
+    // Keep the loadout object present even when every slot is empty so the
+    // Chaos Core importer can still recognize the unit template shape.
     loadout: {
       primaryWeapon: document.loadout.primaryWeapon ? runtimeId(document.loadout.primaryWeapon) : undefined,
       secondaryWeapon: document.loadout.secondaryWeapon ? runtimeId(document.loadout.secondaryWeapon) : undefined,
@@ -510,14 +515,8 @@ export function buildChaosCoreUnitBundle(
       chestpiece: document.loadout.chestpiece ? runtimeId(document.loadout.chestpiece) : undefined,
       accessory1: document.loadout.accessory1 ? runtimeId(document.loadout.accessory1) : undefined,
       accessory2: document.loadout.accessory2 ? runtimeId(document.loadout.accessory2) : undefined
-    },
-    traits: document.traits,
-    pwr: document.pwr,
-    recruitCost: document.recruitCost,
-    startingInRoster: document.startingInRoster,
-    deployInParty: document.deployInParty,
-    metadata: coerceRecord(document.metadata)
-  });
+    }
+  };
 
   const manifest = createManifest(
     "unit",

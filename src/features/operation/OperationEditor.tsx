@@ -135,15 +135,9 @@ export function OperationEditor() {
                   <span className="pill">
                     {document.floors.reduce((total, floor) => total + floor.rooms.length, 0)} room(s)
                   </span>
+                  <span className="pill accent">Chaos Core export</span>
                 </div>
                 <div className="toolbar">
-                  <label className="inline-select">
-                    <span>Export target</span>
-                    <select value={exportTarget} onChange={(event) => setExportTarget(event.target.value as ExportTarget)}>
-                      <option value="generic">Generic</option>
-                      <option value="chaos-core">Chaos Core</option>
-                    </select>
-                  </label>
                   <button type="button" className="ghost-button" onClick={importDraft}>
                     Import draft
                   </button>

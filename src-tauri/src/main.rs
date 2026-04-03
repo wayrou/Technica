@@ -114,6 +114,15 @@ fn disabled_root(repo_path: &Path, content_type: &str) -> PathBuf {
         .join(content_type)
 }
 
+fn generated_version_path(repo_path: &Path) -> PathBuf {
+    repo_path
+        .join("src")
+        .join("content")
+        .join("technica")
+        .join("generated")
+        .join("version.json")
+}
+
 fn built_in_source_file(content_type: &str) -> Option<&'static str> {
     match content_type {
         "map" => Some("src/field/maps.ts"),
@@ -285,6 +294,29 @@ fn replace_asset_paths(value: Value, replacements: &[(String, String)]) -> Value
 
 fn write_text(path: &Path, content: &str) -> Result<(), String> {
     fs::write(path, content).map_err(|error| format!("Could not write '{}': {}", path.display(), error))
+}
+
+fn touch_generated_version(repo_root: &Path, content_type: &str, content_id: &str) -> Result<(), String> {
+    let marker_path = generated_version_path(repo_root);
+    let marker_parent = marker_path
+        .parent()
+        .ok_or_else(|| "Could not resolve Chaos Core generated marker directory.".to_string())?;
+    ensure_dir(marker_parent)?;
+
+    let updated_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("Could not resolve generated-content timestamp: {}", error))?
+        .as_millis();
+    let marker = serde_json::json!({
+        "updatedAt": updated_at,
+        "contentType": content_type,
+        "contentId": content_id
+    });
+
+    write_text(
+        &marker_path,
+        &serde_json::to_string_pretty(&marker).unwrap_or_default(),
+    )
 }
 
 fn write_file(path: &Path, file: &PublishBundleFile) -> Result<(), String> {
@@ -529,6 +561,7 @@ fn publish_chaos_core_bundle(request: PublishBundleRequest) -> Result<PublishRes
                 );
                 let _ = fs::remove_file(&temp_payload_path);
                 let stdout = writeback_output?;
+                touch_generated_version(&repo_root, content_type, &content_id)?;
 
                 return serde_json::from_slice::<PublishResult>(&stdout)
                     .map_err(|error| format!("Could not parse the Chaos Core write-back result: {}", error))
@@ -597,6 +630,8 @@ fn publish_chaos_core_bundle(request: PublishBundleRequest) -> Result<PublishRes
         }
     }
 
+    touch_generated_version(&repo_root, content_type, &content_id)?;
+
     Ok(PublishResult {
         entry_key: format!("technica:{}", content_id),
         content_id,
@@ -624,6 +659,7 @@ fn remove_chaos_core_database_entry(
             remove_matching_files(&runtime_root(&repo_root, content_type), content_id)?;
             remove_matching_files(&source_root(&repo_root, content_type), content_id)?;
             remove_matching_files(&manifest_root(&repo_root, content_type), content_id)?;
+            touch_generated_version(&repo_root, content_type, content_id)?;
             Ok(())
         }
         "game" => {
@@ -643,7 +679,8 @@ fn remove_chaos_core_database_entry(
             write_text(
                 &disabled_dir.join(format!("{}.disabled.json", content_id)),
                 &serde_json::to_string_pretty(&tombstone).unwrap_or_default(),
-            )
+            )?;
+            touch_generated_version(&repo_root, content_type, content_id)
         }
         _ => Err(format!("Unsupported Chaos Core entry origin '{}'.", origin)),
     }

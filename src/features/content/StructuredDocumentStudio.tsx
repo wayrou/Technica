@@ -1,4 +1,12 @@
-import { useRef, type ChangeEvent, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import {
+  useDeferredValue,
+  useMemo,
+  useRef,
+  type ChangeEvent,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction
+} from "react";
 import { IssueList } from "../../components/IssueList";
 import { Panel } from "../../components/Panel";
 import { usePersistentState } from "../../hooks/usePersistentState";
@@ -54,9 +62,10 @@ export function StructuredDocumentStudio<TDocument>({
   renderWorkspace
 }: StructuredDocumentStudioProps<TDocument>) {
   const [document, setDocument] = usePersistentState(storageKey, initialDocument);
-  const [exportTarget, setExportTarget] = usePersistentState<ExportTarget>(exportTargetKey, "generic");
+  const [exportTarget, setExportTarget] = usePersistentState<ExportTarget>(exportTargetKey, "chaos-core");
   const importRef = useRef<HTMLInputElement | null>(null);
-  const issues = validate(document);
+  const deferredDocument = useDeferredValue(document);
+  const issues = useMemo(() => validate(deferredDocument), [deferredDocument, validate]);
 
   function patchDocument(updater: (current: TDocument) => TDocument) {
     setDocument((current) => touchDocument(updater(current)));
@@ -97,7 +106,7 @@ export function StructuredDocumentStudio<TDocument>({
 
   async function exportBundle() {
     try {
-      await downloadBundle(await buildBundleForTarget(document, exportTarget));
+      await downloadBundle(await buildBundleForTarget(document, "chaos-core"));
     } catch (error) {
       notify(error instanceof Error ? error.message : "Could not export the bundle.");
     }

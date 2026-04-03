@@ -48,7 +48,7 @@ function escapeAttributeValue(value: string) {
 function serializeMetadataLines(metadata: KeyValueRecord) {
   return Object.entries(metadata)
     .filter(([key, value]) => key.trim() && String(value).trim())
-    .map(([key, value]) => `@meta ${runtimeId(key, "meta")}=${value}`)
+    .map(([key, value]) => `@meta ${normalizeDialogueMetadataKey(key)}=${value}`)
     .join("\n");
 }
 
@@ -73,13 +73,24 @@ function normalizeBranchId(value: string, fallback = DEFAULT_BRANCH_ID) {
 
 function normalizeDocumentMetadata(metadata: KeyValueRecord) {
   return Object.entries(metadata).reduce<KeyValueRecord>((nextMetadata, [key, value]) => {
-    const normalizedKey = key.trim();
+    const normalizedKey = normalizeDialogueMetadataKey(key);
     const normalizedValue = String(value).trim();
     if (normalizedKey && normalizedValue) {
       nextMetadata[normalizedKey] = normalizedValue;
     }
     return nextMetadata;
   }, {});
+}
+
+function normalizeDialogueMetadataKey(key: string) {
+  const trimmedKey = key.trim();
+  const collapsedKey = trimmedKey.replace(/[-_\s]/g, "").toLowerCase();
+
+  if (collapsedKey === "linkednpcid") {
+    return "linkedNpcId";
+  }
+
+  return /\s/.test(trimmedKey) ? runtimeId(trimmedKey, "meta") : trimmedKey;
 }
 
 function normalizeLineEntry(entry: DialogueLine, index: number): DialogueLine {

@@ -107,9 +107,8 @@ textarea.authoring-editor {
 }
 
 .app-header {
-  display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.9fr);
-  gap: 24px;
+  display: flex;
+  align-items: center;
   margin-bottom: 24px;
 }
 
@@ -121,17 +120,27 @@ textarea.authoring-editor {
   font-size: 0.74rem;
 }
 
-.app-header h1 {
-  margin: 0;
-  font-size: clamp(2.6rem, 5vw, 4.2rem);
-  letter-spacing: -0.05em;
+.brand-lockup {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
 }
 
-.hero-copy {
-  max-width: 820px;
-  color: var(--ink-soft);
-  margin: 12px 0 0;
-  font-size: 1.05rem;
+.brand-logo {
+  display: block;
+  width: clamp(58px, 6vw, 86px);
+  height: clamp(58px, 6vw, 86px);
+  object-fit: contain;
+  filter: drop-shadow(0 12px 24px rgba(0, 0, 0, 0.35));
+}
+
+.app-header h1 {
+  margin: 0;
+  color: #ffffff;
+  font-size: clamp(2.6rem, 5vw, 4.2rem);
+  line-height: 0.82;
+  letter-spacing: -0.05em;
+  transform: translateY(-0.06em);
 }
 
 .hero-metrics {
@@ -643,6 +652,10 @@ textarea.authoring-editor {
   cursor: grab;
 }
 
+.map-canvas {
+  position: relative;
+}
+
 .map-grid {
   display: grid;
   gap: 1px;
@@ -692,6 +705,7 @@ textarea.authoring-editor {
 
 .map-overlay {
   z-index: 4;
+  position: absolute;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -703,6 +717,16 @@ textarea.authoring-editor {
   text-align: center;
   padding: 4px;
   color: #07100e;
+}
+
+.map-overlay-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.map-overlay-layer .map-overlay {
+  pointer-events: auto;
 }
 
 .map-overlay.object {
@@ -946,6 +970,25 @@ textarea.authoring-editor {
   padding-right: 4px;
 }
 
+.dialogue-floating-preview {
+  position: fixed;
+  top: 112px;
+  right: 32px;
+  z-index: 30;
+  width: min(420px, calc(100vw - 64px));
+  max-height: calc(100vh - 144px);
+}
+
+.dialogue-floating-preview .panel {
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.48);
+}
+
+.dialogue-floating-preview .flow-grid {
+  max-height: calc(100vh - 310px);
+  overflow: auto;
+  padding-right: 4px;
+}
+
 .chip-row {
   display: flex;
   flex-wrap: wrap;
@@ -1046,6 +1089,18 @@ textarea.authoring-editor {
   }
 
   .dialogue-preview-rail .flow-grid {
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+  }
+
+  .dialogue-floating-preview {
+    position: static;
+    width: auto;
+    max-height: none;
+  }
+
+  .dialogue-floating-preview .flow-grid {
     max-height: none;
     overflow: visible;
     padding-right: 0;

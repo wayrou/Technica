@@ -1,10 +1,9 @@
-import { useRef, type ChangeEvent } from "react";
+import { useDeferredValue, useMemo, useRef, type ChangeEvent } from "react";
 import { ChaosCoreDatabasePanel } from "../../components/ChaosCoreDatabasePanel";
 import { IssueList } from "../../components/IssueList";
 import { Panel } from "../../components/Panel";
 import { createSampleQuest } from "../../data/sampleQuest";
 import { usePersistentState } from "../../hooks/usePersistentState";
-import type { ExportTarget } from "../../types/common";
 import type { QuestDocument, QuestObjective, QuestReward, QuestState, QuestStep } from "../../types/quest";
 import { isoNow } from "../../utils/date";
 import { confirmAction, notify } from "../../utils/dialogs";
@@ -82,9 +81,9 @@ function touchQuest(document: QuestDocument) {
 
 export function QuestCreator() {
   const [quest, setQuest] = usePersistentState("technica.quest.document", createSampleQuest());
-  const [exportTarget, setExportTarget] = usePersistentState<ExportTarget>("technica.quest.exportTarget", "generic");
   const importRef = useRef<HTMLInputElement | null>(null);
-  const issues = validateQuestDocument(quest);
+  const deferredQuest = useDeferredValue(quest);
+  const issues = useMemo(() => validateQuestDocument(deferredQuest), [deferredQuest]);
 
   function patchQuest(updater: (current: QuestDocument) => QuestDocument) {
     setQuest((current) => touchQuest(updater(current)));
@@ -310,15 +309,9 @@ export function QuestCreator() {
               <span className="pill">{quest.objectives.length} objectives</span>
               <span className="pill">{quest.steps.length} steps</span>
               <span className="pill">{quest.states.length} states</span>
+              <span className="pill accent">Chaos Core export</span>
             </div>
             <div className="toolbar">
-              <label className="inline-select">
-                <span>Export target</span>
-                <select value={exportTarget} onChange={(event) => setExportTarget(event.target.value as ExportTarget)}>
-                  <option value="generic">Generic</option>
-                  <option value="chaos-core">Chaos Core</option>
-                </select>
-              </label>
               <button type="button" className="ghost-button" onClick={() => importRef.current?.click()}>
                 Import draft
               </button>
@@ -330,7 +323,7 @@ export function QuestCreator() {
                 className="primary-button"
                 onClick={async () => {
                   try {
-                    await downloadBundle(buildQuestBundleForTarget(quest, exportTarget));
+                    await downloadBundle(buildQuestBundleForTarget(quest, "chaos-core"));
                   } catch (error) {
                     notify(error instanceof Error ? error.message : "Could not export the quest bundle.");
                   }

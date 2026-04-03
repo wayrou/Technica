@@ -1,16 +1,20 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { ChaosCoreDatabasePanel } from "../../components/ChaosCoreDatabasePanel";
 import { IssueList } from "../../components/IssueList";
 import { Panel } from "../../components/Panel";
 import { createSampleDialogueDocument } from "../../data/sampleDialogue";
 import { usePersistentState } from "../../hooks/usePersistentState";
-import type { ExportTarget, KeyValueRecord } from "../../types/common";
+import type { KeyValueRecord } from "../../types/common";
 import type { DialogueDocument, DialogueEntry, DialogueLabel } from "../../types/dialogue";
 import {
+  CHAOS_CORE_DATABASE_UPDATE_EVENT,
+  CHAOS_CORE_DATABASE_UPDATE_STORAGE_KEY,
   isTauriRuntime,
   listChaosCoreDatabase,
+  parseChaosCoreDatabaseUpdate,
   type LoadedChaosCoreDatabaseEntry
 } from "../../utils/chaosCoreDatabase";
+import { isoNow } from "../../utils/date";
 import { confirmAction, notify } from "../../utils/dialogs";
 import {
   createBlankDialogueDocument,
@@ -26,11 +30,17 @@ import {
 } from "../../utils/dialogueDocument";
 import { downloadBundle, downloadDraftFile, buildDialogueBundleForTarget } from "../../utils/exporters";
 import { readTextFile } from "../../utils/file";
+import { getRequestedPopoutTab, openTechnicaPopout } from "../../utils/popout";
 import { parseCommaList, parseKeyValueLines, serializeCommaList, serializeKeyValueLines } from "../../utils/records";
 import { DialoguePreview } from "./DialoguePreview";
 
 const DIALOGUE_STORAGE_KEY = "technica.dialogue.document";
 const LEGACY_SOURCE_STORAGE_KEY = "technica.dialogue.source";
+
+interface DialogueNpcOption {
+  id: string;
+  name: string;
+}
 
 function loadInitialDialogueDocument() {
   if (typeof window !== "undefined" && !window.localStorage.getItem(DIALOGUE_STORAGE_KEY)) {
@@ -61,18 +71,69 @@ function getBranchLabelOptions(document: DialogueDocument) {
   return document.labels.map((branch) => branch.label);
 }
 
+function getLinkedNpcId(metadata: DialogueDocument["metadata"]) {
+  return metadata.linkedNpcId || metadata.linkednpcid || "";
+}
+
 export function DialogueStudio() {
+  const isPopout = getRequestedPopoutTab() === "dialogue";
   const [dialogue, setDialogue] = usePersistentState(DIALOGUE_STORAGE_KEY, loadInitialDialogueDocument());
-  const [exportTarget, setExportTarget] = usePersistentState<ExportTarget>("technica.dialogue.exportTarget", "generic");
-  const [npcSpeakers, setNpcSpeakers] = useState<string[]>([]);
+  const [npcOptions, setNpcOptions] = useState<DialogueNpcOption[]>([]);
   const importRef = useRef<HTMLInputElement | null>(null);
-  const issues = validateDialogueDocument(dialogue);
+  const deferredDialogue = useDeferredValue(dialogue);
+  const normalizedDialogue = useMemo(() => refreshDialogueDocument(deferredDialogue), [deferredDialogue]);
+  const issues = useMemo(() => validateDialogueDocument(deferredDialogue), [deferredDialogue]);
   const branchOptions = getBranchLabelOptions(dialogue);
+  const linkedNpcId = getLinkedNpcId(dialogue.metadata);
+  const refreshNpcSpeakers = useCallback(async (shouldCommit: () => boolean = () => true) => {
+    const optionsById = new Map<string, DialogueNpcOption>();
+
+    if (typeof window !== "undefined") {
+      try {
+        const localNpc = JSON.parse(window.localStorage.getItem("technica.npc.document") ?? "null") as
+          | { id?: string; name?: string }
+          | null;
+        if (localNpc?.id?.trim() && localNpc?.name?.trim()) {
+          optionsById.set(localNpc.id.trim(), {
+            id: localNpc.id.trim(),
+            name: localNpc.name.trim()
+          });
+        }
+      } catch {
+        // Ignore malformed local NPC drafts.
+      }
+    }
+
+    if (isTauriRuntime() && typeof window !== "undefined") {
+      const repoPath = window.localStorage.getItem("technica.chaosCoreRepoPath")?.trim();
+      if (repoPath) {
+        try {
+          const npcEntries = await listChaosCoreDatabase(repoPath, "npc");
+          npcEntries.forEach((entry) => {
+            optionsById.set(entry.contentId, {
+              id: entry.contentId,
+              name: entry.title.trim() || entry.contentId
+            });
+          });
+        } catch {
+          // Speaker suggestions are best-effort; dialogue editing should still work offline.
+        }
+      }
+    }
+
+    if (shouldCommit()) {
+      setNpcOptions(
+        Array.from(optionsById.values()).sort((left, right) =>
+          left.name.localeCompare(right.name) || left.id.localeCompare(right.id)
+        )
+      );
+    }
+  }, []);
   const speakerOptions = useMemo(() => {
     const names = new Set<string>(["Narrator"]);
-    npcSpeakers.forEach((speaker) => {
-      if (speaker.trim()) {
-        names.add(speaker.trim());
+    npcOptions.forEach((npc) => {
+      if (npc.name.trim()) {
+        names.add(npc.name.trim());
       }
     });
     dialogue.labels.forEach((branch) => {
@@ -83,58 +144,79 @@ export function DialogueStudio() {
       });
     });
     return Array.from(names).sort((left, right) => left.localeCompare(right));
-  }, [dialogue.labels, npcSpeakers]);
+  }, [dialogue.labels, npcOptions]);
+
+  const linkedNpcOptions = useMemo(() => {
+    if (!linkedNpcId || npcOptions.some((npc) => npc.id === linkedNpcId)) {
+      return npcOptions;
+    }
+
+    return [
+      {
+        id: linkedNpcId,
+        name: linkedNpcId
+      },
+      ...npcOptions
+    ];
+  }, [linkedNpcId, npcOptions]);
 
   useEffect(() => {
     let isCancelled = false;
 
-    async function refreshNpcSpeakers() {
-      const names = new Set<string>();
+    async function refreshSafely() {
+      await refreshNpcSpeakers(() => !isCancelled);
+    }
 
-      if (typeof window !== "undefined") {
-        try {
-          const localNpc = JSON.parse(window.localStorage.getItem("technica.npc.document") ?? "null") as
-            | { name?: string }
-            | null;
-          if (localNpc?.name?.trim()) {
-            names.add(localNpc.name.trim());
-          }
-        } catch {
-          // Ignore malformed local NPC drafts.
-        }
-      }
-
-      if (isTauriRuntime() && typeof window !== "undefined") {
-        const repoPath = window.localStorage.getItem("technica.chaosCoreRepoPath")?.trim();
-        if (repoPath) {
-          try {
-            const npcEntries = await listChaosCoreDatabase(repoPath, "npc");
-            npcEntries.forEach((entry) => names.add(entry.title.trim() || entry.contentId));
-          } catch {
-            // Speaker suggestions are best-effort; dialogue editing should still work offline.
-          }
-        }
-      }
-
-      if (!isCancelled) {
-        setNpcSpeakers(Array.from(names).filter(Boolean));
+    function handleChaosCoreUpdate(event: Event) {
+      const update = event as CustomEvent<{ contentType?: string }>;
+      if (update.detail?.contentType === "npc") {
+        void refreshSafely();
       }
     }
 
-    void refreshNpcSpeakers();
+    function handleStorageUpdate(event: StorageEvent) {
+      if (event.key !== CHAOS_CORE_DATABASE_UPDATE_STORAGE_KEY) {
+        return;
+      }
+
+      const update = parseChaosCoreDatabaseUpdate(event.newValue);
+      if (update?.contentType === "npc") {
+        void refreshSafely();
+      }
+    }
+
+    function handleFocus() {
+      void refreshSafely();
+    }
+
+    void refreshSafely();
+
+    if (typeof window !== "undefined") {
+      window.addEventListener(CHAOS_CORE_DATABASE_UPDATE_EVENT, handleChaosCoreUpdate);
+      window.addEventListener("storage", handleStorageUpdate);
+      window.addEventListener("focus", handleFocus);
+    }
 
     return () => {
       isCancelled = true;
+      if (typeof window !== "undefined") {
+        window.removeEventListener(CHAOS_CORE_DATABASE_UPDATE_EVENT, handleChaosCoreUpdate);
+        window.removeEventListener("storage", handleStorageUpdate);
+        window.removeEventListener("focus", handleFocus);
+      }
     };
-  }, []);
+  }, [refreshNpcSpeakers]);
 
   function patchDialogue(updater: (current: DialogueDocument) => DialogueDocument) {
-    setDialogue((current) => refreshDialogueDocument(updater(current)));
+    setDialogue((current) => ({
+      ...updater(current),
+      updatedAt: isoNow()
+    }));
   }
 
   async function handleExportBundle() {
     try {
-      await downloadBundle(buildDialogueBundleForTarget(refreshDialogueDocument(dialogue), exportTarget));
+      await downloadBundle(buildDialogueBundleForTarget(refreshDialogueDocument(dialogue), "chaos-core"));
     } catch (error) {
       notify(error instanceof Error ? error.message : "Could not export the dialogue bundle.");
     }
@@ -650,6 +732,25 @@ export function DialogueStudio() {
     );
   }
 
+  const flowPreviewPanel = (
+    <Panel
+      title="Flow Preview"
+      actions={
+        !isPopout ? (
+          <button
+            type="button"
+            className="ghost-button"
+            onClick={() => void openTechnicaPopout("dialogue", "Dialogue Editor")}
+          >
+            Pop out
+          </button>
+        ) : undefined
+      }
+    >
+      <DialoguePreview document={normalizedDialogue} />
+    </Panel>
+  );
+
   return (
     <div className="workspace-grid workspace-dialogue">
       <div className="workspace-column">
@@ -657,6 +758,9 @@ export function DialogueStudio() {
           title="Dialogue Setup"
           actions={
             <div className="toolbar">
+              <button type="button" className="ghost-button" onClick={() => void refreshNpcSpeakers()}>
+                Refresh NPC speakers
+              </button>
               <button type="button" className="ghost-button" onClick={handleLoadSample}>
                 Load sample
               </button>
@@ -698,6 +802,36 @@ export function DialogueStudio() {
                 ))}
               </select>
             </label>
+            <label className="field">
+              <span>NPC to activate this dialogue</span>
+              <select
+                value={linkedNpcId}
+                onChange={(event) =>
+                  patchDialogue((current) => {
+                    const metadata = { ...current.metadata };
+                    delete metadata.linkedNpcId;
+                    delete metadata.linkednpcid;
+
+                    return {
+                      ...current,
+                      metadata: event.target.value
+                        ? {
+                            ...metadata,
+                            linkedNpcId: event.target.value
+                          }
+                        : metadata
+                    };
+                  })
+                }
+              >
+                <option value="">None</option>
+                {linkedNpcOptions.map((npc) => (
+                  <option key={npc.id} value={npc.id}>
+                    {npc.name} ({npc.id})
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="field full">
               <span>Tags</span>
               <input
@@ -733,18 +867,12 @@ export function DialogueStudio() {
 
           <div className="toolbar split">
             <div className="chip-row">
-              <span className="pill">{dialogue.stats.labelCount} branches</span>
-              <span className="pill">{dialogue.stats.lineCount} lines</span>
-              <span className="pill">{dialogue.stats.choiceCount} choices</span>
+              <span className="pill">{normalizedDialogue.stats.labelCount} branches</span>
+              <span className="pill">{normalizedDialogue.stats.lineCount} lines</span>
+              <span className="pill">{normalizedDialogue.stats.choiceCount} choices</span>
+              <span className="pill accent">Chaos Core export</span>
             </div>
             <div className="toolbar">
-              <label className="inline-select">
-                <span>Export target</span>
-                <select value={exportTarget} onChange={(event) => setExportTarget(event.target.value as ExportTarget)}>
-                  <option value="generic">Generic</option>
-                  <option value="chaos-core">Chaos Core</option>
-                </select>
-              </label>
               <button type="button" className="ghost-button" onClick={() => importRef.current?.click()}>
                 Import draft
               </button>
@@ -765,7 +893,7 @@ export function DialogueStudio() {
 
         <ChaosCoreDatabasePanel
           contentType="dialogue"
-          currentDocument={refreshDialogueDocument(dialogue)}
+          currentDocument={dialogue}
           buildBundle={(current) => buildDialogueBundleForTarget(refreshDialogueDocument(current), "chaos-core")}
           onLoadEntry={handleLoadDatabaseEntry}
           subtitle="Publish dialogue straight into the Chaos Core repo, then reopen the in-game conversation here."
@@ -840,15 +968,15 @@ export function DialogueStudio() {
 
       <div className="workspace-column">
         <div className="dialogue-preview-rail">
-          <Panel title="Flow Preview">
-            <DialoguePreview document={refreshDialogueDocument(dialogue)} />
-          </Panel>
-
           <Panel title="Validation">
             <IssueList issues={issues} emptyLabel="No validation issues. This dialogue is ready to export." />
           </Panel>
         </div>
       </div>
+
+      <aside className="dialogue-floating-preview">
+        {flowPreviewPanel}
+      </aside>
     </div>
   );
 }

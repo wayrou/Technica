@@ -1,5 +1,8 @@
 import type { EditorKind, ExportBundle } from "../types/common";
 
+export const CHAOS_CORE_DATABASE_UPDATE_EVENT = "technica:chaos-core-database-update";
+export const CHAOS_CORE_DATABASE_UPDATE_STORAGE_KEY = "technica.chaosCoreDatabaseUpdate";
+
 export interface ChaosCoreDatabaseEntry {
   entryKey: string;
   contentId: string;
@@ -26,6 +29,11 @@ type PublishResult = {
   contentId: string;
   runtimeFile: string;
 };
+
+export interface ChaosCoreDatabaseUpdateEvent {
+  contentType: EditorKind;
+  updatedAt: string;
+}
 
 export function isTauriRuntime() {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -95,4 +103,54 @@ export async function removeChaosCoreDatabaseEntry(
     contentType,
     entryKey
   });
+}
+
+export function emitChaosCoreDatabaseUpdate(contentType: EditorKind) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const update: ChaosCoreDatabaseUpdateEvent = {
+    contentType,
+    updatedAt: new Date().toISOString()
+  };
+  const serialized = JSON.stringify(update);
+  window.localStorage.setItem(CHAOS_CORE_DATABASE_UPDATE_STORAGE_KEY, serialized);
+  window.dispatchEvent(
+    new CustomEvent<ChaosCoreDatabaseUpdateEvent>(CHAOS_CORE_DATABASE_UPDATE_EVENT, {
+      detail: update
+    })
+  );
+}
+
+export function parseChaosCoreDatabaseUpdate(value: string | null): ChaosCoreDatabaseUpdateEvent | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value) as Partial<ChaosCoreDatabaseUpdateEvent>;
+    if (parsed.contentType && parsed.updatedAt) {
+      return {
+        contentType: parsed.contentType,
+        updatedAt: parsed.updatedAt
+      };
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+export function resolveChaosCoreErrorMessage(error: unknown, fallbackMessage: string) {
+  if (typeof error === "string" && error.trim()) {
+    return error;
+  }
+
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+
+  return fallbackMessage;
 }

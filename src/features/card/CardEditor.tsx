@@ -262,15 +262,9 @@ export function CardEditor() {
               <div className="chip-row">
                 <span className="pill">{document.cardType}</span>
                 <span className="pill">{document.effects.length} effect(s)</span>
+                <span className="pill accent">Chaos Core export</span>
               </div>
               <div className="toolbar">
-                <label className="inline-select">
-                  <span>Export target</span>
-                  <select value={exportTarget} onChange={(event) => setExportTarget(event.target.value as ExportTarget)}>
-                    <option value="generic">Generic</option>
-                    <option value="chaos-core">Chaos Core</option>
-                  </select>
-                </label>
                 <button type="button" className="ghost-button" onClick={importDraft}>
                   Import draft
                 </button>

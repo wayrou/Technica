@@ -38,22 +38,26 @@ export async function openTechnicaPopout(tab: TechnicaTabId, title: string) {
     return;
   }
 
-  const url = `${window.location.pathname}?popout=1&tab=${encodeURIComponent(tab)}`;
+  const nextUrl = new URL(window.location.href);
+  nextUrl.searchParams.set("popout", "1");
+  nextUrl.searchParams.set("tab", tab);
+  const url = `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;
 
   if (isTauriRuntime()) {
     try {
       const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
       const label = `technica-${tab}-${Date.now()}`;
       const popout = new WebviewWindow(label, {
-        title: `Technica · ${title}`,
+        title: `Technica - ${title}`,
         url,
         width: 1680,
         height: 1080,
         resizable: true,
-        decorations: true
+        decorations: true,
       });
 
-      await popout.once("tauri://error", () => {
+      void popout.once("tauri://created", () => {});
+      void popout.once("tauri://error", () => {
         window.open(url, "_blank", "popup=yes,width=1680,height=1080");
       });
       return;

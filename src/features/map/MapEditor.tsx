@@ -1,10 +1,17 @@
-import { useEffect, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type PointerEvent as ReactPointerEvent
+} from "react";
 import { ChaosCoreDatabasePanel } from "../../components/ChaosCoreDatabasePanel";
 import { IssueList } from "../../components/IssueList";
 import { Panel } from "../../components/Panel";
 import { createSampleMap } from "../../data/sampleMap";
 import { usePersistentState } from "../../hooks/usePersistentState";
-import type { ExportTarget } from "../../types/common";
 import type { MapBrushState, MapDocument, MapObject, MapZone } from "../../types/map";
 import type { NpcDocument } from "../../types/npc";
 import { isoNow } from "../../utils/date";
@@ -99,7 +106,6 @@ function isNpcDocument(value: unknown): value is NpcDocument {
 export function MapEditor() {
   const [map, setMap] = usePersistentState("technica.map.document", createSampleMap());
   const [repoPath] = usePersistentState("technica.chaosCoreRepoPath", "");
-  const [exportTarget, setExportTarget] = usePersistentState<ExportTarget>("technica.map.exportTarget", "generic");
   const [tool, setTool] = useState<MapTool>("paint");
   const [brush, setBrush] = useState<MapBrushState>({
     terrain: "grass",
@@ -133,11 +139,16 @@ export function MapEditor() {
   } | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const importRef = useRef<HTMLInputElement | null>(null);
-  const issues = validateMapDocument(map);
+  const deferredMap = useDeferredValue(map);
+  const issues = useMemo(() => validateMapDocument(deferredMap), [deferredMap]);
   const selectedObject = map.objects.find((item) => item.id === selectedObjectId) ?? null;
   const selectedZone = map.zones.find((item) => item.id === selectedZoneId) ?? null;
   const selectedNpcEntry = npcEntries.find((entry) => entry.entryKey === selectedNpcEntryKey) ?? null;
   const cellSize = Math.max(28, Math.round(map.tileSize * 0.72 * zoom));
+  const gridGap = 1;
+  const cellStride = cellSize + gridGap;
+  const mapCanvasWidth = map.width * cellSize + Math.max(0, map.width - 1) * gridGap;
+  const mapCanvasHeight = map.height * cellSize + Math.max(0, map.height - 1) * gridGap;
 
   useEffect(() => {
     setDimensionDraft({ width: map.width, height: map.height });
@@ -435,6 +446,15 @@ export function MapEditor() {
     viewportRef.current.scrollTop = panState.scrollTop - (event.clientY - panState.startY);
   }
 
+  function getOverlayRectStyle(x: number, y: number, width: number, height: number) {
+    return {
+      left: `${x * cellStride}px`,
+      top: `${y * cellStride}px`,
+      width: `${width * cellSize + Math.max(0, width - 1) * gridGap}px`,
+      height: `${height * cellSize + Math.max(0, height - 1) * gridGap}px`
+    };
+  }
+
   async function handleImportFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) {
@@ -662,13 +682,6 @@ export function MapEditor() {
               </label>
             </div>
             <div className="toolbar">
-              <label className="inline-select">
-                <span>Export target</span>
-                <select value={exportTarget} onChange={(event) => setExportTarget(event.target.value as ExportTarget)}>
-                  <option value="generic">Generic</option>
-                  <option value="chaos-core">Chaos Core</option>
-                </select>
-              </label>
               <button type="button" className="ghost-button" onClick={handleResizeMap}>
                 Apply size
               </button>
@@ -683,7 +696,7 @@ export function MapEditor() {
                 className="primary-button"
                 onClick={async () => {
                   try {
-                    await downloadBundle(buildMapBundleForTarget(map, exportTarget));
+                    await downloadBundle(buildMapBundleForTarget(map, "chaos-core"));
                   } catch (error) {
                     notify(error instanceof Error ? error.message : "Could not export the map bundle.");
                   }
@@ -1145,116 +1158,113 @@ export function MapEditor() {
             onPointerMove={handleViewportPointerMove}
           >
             <div
-              className="map-grid"
+              className="map-canvas"
               style={{
-                gridTemplateColumns: `repeat(${map.width}, ${cellSize}px)`,
-                gridTemplateRows: `repeat(${map.height}, ${cellSize}px)`
+                width: `${mapCanvasWidth}px`,
+                height: `${mapCanvasHeight}px`
               }}
             >
-              {map.tiles.flatMap((row, rowIndex) =>
-                row.map((tile, columnIndex) => {
-                  const isSelected = selectedCell?.x === columnIndex && selectedCell?.y === rowIndex;
-                  return (
-                    <button
-                      key={`cell-${columnIndex}-${rowIndex}`}
-                      type="button"
-                      className={isSelected ? "map-cell selected" : "map-cell"}
-                      style={{
-                        background: terrainColorMap[tile.terrain]
-                      }}
-                      onPointerDown={(event) => handleCellPointerDown(columnIndex, rowIndex, event)}
-                      onPointerEnter={() => handleCellPointerEnter(columnIndex, rowIndex)}
-                      title={`${columnIndex},${rowIndex} ${tile.terrain}`}
-                    >
-                      {layerVisibility.walls && tile.wall ? <span className="cell-wall" /> : null}
-                      {layerVisibility.walkable && !tile.walkable ? <span className="cell-blocked" /> : null}
-                      {!tile.floor ? <span className="cell-no-floor" /> : null}
-                    </button>
-                  );
-                })
-              )}
+              <div
+                className="map-grid"
+                style={{
+                  gridTemplateColumns: `repeat(${map.width}, ${cellSize}px)`,
+                  gridTemplateRows: `repeat(${map.height}, ${cellSize}px)`
+                }}
+              >
+                {map.tiles.flatMap((row, rowIndex) =>
+                  row.map((tile, columnIndex) => {
+                    const isSelected = selectedCell?.x === columnIndex && selectedCell?.y === rowIndex;
+                    return (
+                      <button
+                        key={`cell-${columnIndex}-${rowIndex}`}
+                        type="button"
+                        className={isSelected ? "map-cell selected" : "map-cell"}
+                        style={{
+                          background: terrainColorMap[tile.terrain]
+                        }}
+                        onPointerDown={(event) => handleCellPointerDown(columnIndex, rowIndex, event)}
+                        onPointerEnter={() => handleCellPointerEnter(columnIndex, rowIndex)}
+                        title={`${columnIndex},${rowIndex} ${tile.terrain}`}
+                      >
+                        {layerVisibility.walls && tile.wall ? <span className="cell-wall" /> : null}
+                        {layerVisibility.walkable && !tile.walkable ? <span className="cell-blocked" /> : null}
+                        {!tile.floor ? <span className="cell-no-floor" /> : null}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
 
-              {layerVisibility.objects
-                ? map.objects.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className={item.id === selectedObjectId ? "map-overlay object selected" : "map-overlay object"}
-                      style={{
-                        gridColumn: `${item.x + 1} / span ${item.width}`,
-                        gridRow: `${item.y + 1} / span ${item.height}`
-                      }}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setSelectedObjectId(item.id);
-                        setSelectedZoneId(null);
-                        setSelectedCell(null);
-                      }}
-                    >
-                      {item.label || item.id}
-                    </button>
-                  ))
-                : null}
+              <div className="map-overlay-layer">
+                {layerVisibility.objects
+                  ? map.objects.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={item.id === selectedObjectId ? "map-overlay object selected" : "map-overlay object"}
+                        style={getOverlayRectStyle(item.x, item.y, item.width, item.height)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setSelectedObjectId(item.id);
+                          setSelectedZoneId(null);
+                          setSelectedCell(null);
+                        }}
+                      >
+                        {item.label || item.id}
+                      </button>
+                    ))
+                  : null}
 
-              {layerVisibility.zones
-                ? map.zones.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className={item.id === selectedZoneId ? "map-overlay zone selected" : "map-overlay zone"}
-                      style={{
-                        gridColumn: `${item.x + 1} / span ${item.width}`,
-                        gridRow: `${item.y + 1} / span ${item.height}`
-                      }}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setSelectedZoneId(item.id);
-                        setSelectedObjectId(null);
-                        setSelectedCell(null);
-                      }}
-                    >
-                      {item.label || item.id}
-                    </button>
-                  ))
-                : null}
+                {layerVisibility.zones
+                  ? map.zones.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={item.id === selectedZoneId ? "map-overlay zone selected" : "map-overlay zone"}
+                        style={getOverlayRectStyle(item.x, item.y, item.width, item.height)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setSelectedZoneId(item.id);
+                          setSelectedObjectId(null);
+                          setSelectedCell(null);
+                        }}
+                      >
+                        {item.label || item.id}
+                      </button>
+                    ))
+                  : null}
 
-              {layerVisibility.npcs
-                ? mapNpcMarkers.map((npc) => (
-                    <button
-                      key={npc.entryKey}
-                      type="button"
-                      className={
-                        npc.entryKey === selectedNpcEntryKey ? "map-overlay npc selected" : "map-overlay npc"
-                      }
-                      style={{
-                        gridColumn: `${npc.tileX + 1} / span 1`,
-                        gridRow: `${npc.tileY + 1} / span 1`
-                      }}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setSelectedNpcEntryKey(npc.entryKey);
-                      }}
-                    >
-                      {npc.name}
-                    </button>
-                  ))
-                : null}
+                {layerVisibility.npcs
+                  ? mapNpcMarkers.map((npc) => (
+                      <button
+                        key={npc.entryKey}
+                        type="button"
+                        className={
+                          npc.entryKey === selectedNpcEntryKey ? "map-overlay npc selected" : "map-overlay npc"
+                        }
+                        style={getOverlayRectStyle(npc.tileX, npc.tileY, 1, 1)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setSelectedNpcEntryKey(npc.entryKey);
+                        }}
+                      >
+                        {npc.name}
+                      </button>
+                    ))
+                  : null}
 
-              {zoneDrag ? (
-                <div
-                  className="map-overlay zone draft"
-                  style={{
-                    gridColumn: `${normalizeRect(zoneDrag.start, zoneDrag.end).x + 1} / span ${normalizeRect(
-                      zoneDrag.start,
-                      zoneDrag.end
-                    ).width}`,
-                    gridRow: `${normalizeRect(zoneDrag.start, zoneDrag.end).y + 1} / span ${normalizeRect(
-                      zoneDrag.start,
-                      zoneDrag.end
-                    ).height}`
-                  }}
-                />
-              ) : null}
+                {zoneDrag ? (
+                  <div
+                    className="map-overlay zone draft"
+                    style={getOverlayRectStyle(
+                      normalizeRect(zoneDrag.start, zoneDrag.end).x,
+                      normalizeRect(zoneDrag.start, zoneDrag.end).y,
+                      normalizeRect(zoneDrag.start, zoneDrag.end).width,
+                      normalizeRect(zoneDrag.start, zoneDrag.end).height
+                    )}
+                  />
+                ) : null}
+              </div>
             </div>
           </div>
         </Panel>

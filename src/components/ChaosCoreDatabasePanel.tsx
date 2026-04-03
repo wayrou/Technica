@@ -3,11 +3,13 @@ import { usePersistentState } from "../hooks/usePersistentState";
 import type { EditorKind, ExportBundle } from "../types/common";
 import {
   discoverChaosCoreRepo,
+  emitChaosCoreDatabaseUpdate,
   isTauriRuntime,
   listChaosCoreDatabase,
   loadChaosCoreDatabaseEntry,
   publishChaosCoreBundle,
   removeChaosCoreDatabaseEntry,
+  resolveChaosCoreErrorMessage,
   type ChaosCoreDatabaseEntry,
   type LoadedChaosCoreDatabaseEntry
 } from "../utils/chaosCoreDatabase";
@@ -30,7 +32,8 @@ export function ChaosCoreDatabasePanel<TDocument>({
   subtitle
 }: ChaosCoreDatabasePanelProps<TDocument>) {
   const desktopEnabled = isTauriRuntime();
-  const [repoPath, setRepoPath] = usePersistentState("technica.chaosCoreRepoPath", "");
+  const [storedRepoPath, setRepoPath] = usePersistentState("technica.chaosCoreRepoPath", "");
+  const repoPath = typeof storedRepoPath === "string" ? storedRepoPath : "";
   const [entries, setEntries] = useState<ChaosCoreDatabaseEntry[]>([]);
   const [selectedEntryKey, setSelectedEntryKey] = useState("");
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -58,7 +61,7 @@ export function ChaosCoreDatabasePanel<TDocument>({
         notify("Could not automatically find a Chaos Core repo. Paste the repo path below.");
       }
     } catch (error) {
-      notify(error instanceof Error ? error.message : "Could not detect the Chaos Core repo path.");
+      notify(resolveChaosCoreErrorMessage(error, "Could not detect the Chaos Core repo path."));
     }
   }
 
@@ -87,7 +90,7 @@ export function ChaosCoreDatabasePanel<TDocument>({
       });
       setArmedRemoveEntryKey("");
     } catch (error) {
-      notify(error instanceof Error ? error.message : "Could not load the Chaos Core database.");
+      notify(resolveChaosCoreErrorMessage(error, "Could not load the Chaos Core database."));
     } finally {
       setIsRefreshing(false);
     }
@@ -117,13 +120,14 @@ export function ChaosCoreDatabasePanel<TDocument>({
     try {
       await removeChaosCoreDatabaseEntry(repoPath.trim(), contentType, selectedEntry.entryKey);
       await refreshEntries(repoPath.trim());
+      emitChaosCoreDatabaseUpdate(contentType);
       notify(
         selectedEntry.origin === "game"
           ? `Disabled built-in '${selectedEntry.contentId}'.`
           : `Deleted Technica-published '${selectedEntry.contentId}'.`
       );
     } catch (error) {
-      notify(error instanceof Error ? error.message : "Could not remove the selected Chaos Core entry.");
+      notify(resolveChaosCoreErrorMessage(error, "Could not remove the selected Chaos Core entry."));
     } finally {
       setIsRemovingEntry(false);
     }
@@ -143,7 +147,7 @@ export function ChaosCoreDatabasePanel<TDocument>({
     try {
       onLoadEntry(await loadChaosCoreDatabaseEntry(repoPath.trim(), contentType, selectedEntry.entryKey));
     } catch (error) {
-      notify(error instanceof Error ? error.message : "Could not load the selected Chaos Core entry.");
+      notify(resolveChaosCoreErrorMessage(error, "Could not load the selected Chaos Core entry."));
     } finally {
       setIsLoadingEntry(false);
     }
@@ -162,14 +166,19 @@ export function ChaosCoreDatabasePanel<TDocument>({
 
     setIsPublishing(true);
     try {
+      const bundle = await buildBundle(currentDocument);
+      const canWriteBackSelectedEntry = selectedEntry?.origin === "technica" || contentType !== "dialogue";
+      const shouldUpdateSelectedEntry =
+        canWriteBackSelectedEntry && selectedEntry?.contentId === bundle.manifest.contentId;
       const result = await publishChaosCoreBundle(
         repoPath.trim(),
         contentType,
-        await buildBundle(currentDocument),
-        selectedEntry?.entryKey,
-        selectedEntry?.sourceFile
+        bundle,
+        shouldUpdateSelectedEntry ? selectedEntry?.entryKey : undefined,
+        shouldUpdateSelectedEntry ? selectedEntry?.sourceFile : undefined
       );
       await refreshEntries(repoPath.trim());
+      emitChaosCoreDatabaseUpdate(contentType);
       setSelectedEntryKey(result.entryKey);
       notify(
         result.entryKey.startsWith("game:")
@@ -177,7 +186,7 @@ export function ChaosCoreDatabasePanel<TDocument>({
           : `Published '${result.contentId}' into the Chaos Core repo.`
       );
     } catch (error) {
-      notify(error instanceof Error ? error.message : "Could not publish into the Chaos Core repo.");
+      notify(resolveChaosCoreErrorMessage(error, "Could not publish into the Chaos Core repo."));
     } finally {
       setIsPublishing(false);
     }

@@ -1,20 +1,46 @@
-import { CardEditor } from "./features/card/CardEditor";
-import { ClassEditor } from "./features/class/ClassEditor";
-import { DatabaseExplorer } from "./features/database/DatabaseExplorer";
-import { DialogueStudio } from "./features/dialogue/DialogueStudio";
-import { GearEditor } from "./features/gear/GearEditor";
-import { ItemEditor } from "./features/item/ItemEditor";
-import { MapEditor } from "./features/map/MapEditor";
-import { NpcEditor } from "./features/npc/NpcEditor";
-import { OperationEditor } from "./features/operation/OperationEditor";
-import { QuestCreator } from "./features/quest/QuestCreator";
-import { UnitEditor } from "./features/unit/UnitEditor";
+import { Suspense, lazy } from "react";
+import technicaLogo from "./assets/technica-logo.png";
+import { EditorErrorBoundary } from "./components/EditorErrorBoundary";
 import { usePersistentState } from "./hooks/usePersistentState";
 import {
   getRequestedPopoutTab,
   openTechnicaPopout,
   type TechnicaTabId
 } from "./utils/popout";
+
+const DialogueStudio = lazy(() =>
+  import("./features/dialogue/DialogueStudio").then((module) => ({ default: module.DialogueStudio }))
+);
+const QuestCreator = lazy(() =>
+  import("./features/quest/QuestCreator").then((module) => ({ default: module.QuestCreator }))
+);
+const MapEditor = lazy(() =>
+  import("./features/map/MapEditor").then((module) => ({ default: module.MapEditor }))
+);
+const NpcEditor = lazy(() =>
+  import("./features/npc/NpcEditor").then((module) => ({ default: module.NpcEditor }))
+);
+const GearEditor = lazy(() =>
+  import("./features/gear/GearEditor").then((module) => ({ default: module.GearEditor }))
+);
+const ItemEditor = lazy(() =>
+  import("./features/item/ItemEditor").then((module) => ({ default: module.ItemEditor }))
+);
+const CardEditor = lazy(() =>
+  import("./features/card/CardEditor").then((module) => ({ default: module.CardEditor }))
+);
+const UnitEditor = lazy(() =>
+  import("./features/unit/UnitEditor").then((module) => ({ default: module.UnitEditor }))
+);
+const OperationEditor = lazy(() =>
+  import("./features/operation/OperationEditor").then((module) => ({ default: module.OperationEditor }))
+);
+const ClassEditor = lazy(() =>
+  import("./features/class/ClassEditor").then((module) => ({ default: module.ClassEditor }))
+);
+const DatabaseExplorer = lazy(() =>
+  import("./features/database/DatabaseExplorer").then((module) => ({ default: module.DatabaseExplorer }))
+);
 
 const tabs: Array<{ id: TechnicaTabId; label: string }> = [
   {
@@ -116,14 +142,9 @@ export default function App() {
     <div className={requestedPopoutTab ? "app-shell popout-shell" : "app-shell"}>
       <div className="app-backdrop" />
       <header className="app-header">
-        <div>
+        <div className="brand-lockup">
+          <img className="brand-logo" src={technicaLogo} alt="Technica logo" />
           <h1>{requestedPopoutTab ? activeTabLabel : "Technica"}</h1>
-          {!requestedPopoutTab ? (
-            <p className="hero-copy">
-              A standalone local-first authoring tool for dialogue, quests, maps, gear, items, cards, units,
-              operations, and classes with Chaos Core-ready export bundles built for direct import.
-            </p>
-          ) : null}
         </div>
       </header>
 
@@ -152,7 +173,11 @@ export default function App() {
       ) : null}
 
       <main className="app-main">
-        {renderActiveEditor()}
+        <EditorErrorBoundary>
+          <Suspense fallback={<div className="empty-state compact">Loading editor...</div>}>
+            {renderActiveEditor()}
+          </Suspense>
+        </EditorErrorBoundary>
       </main>
     </div>
   );
