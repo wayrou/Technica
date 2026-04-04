@@ -14,6 +14,7 @@ import {
   type LoadedChaosCoreDatabaseEntry
 } from "../utils/chaosCoreDatabase";
 import { notify } from "../utils/dialogs";
+import { ChaosCoreCardGallery } from "./ChaosCoreCardGallery";
 import { Panel } from "./Panel";
 
 interface ChaosCoreDatabasePanelProps<TDocument> {
@@ -297,21 +298,30 @@ export function ChaosCoreDatabasePanel<TDocument>({
       </div>
 
       {desktopEnabled ? (
-        <div className="database-list">
-          {entries.length === 0 ? <div className="empty-state compact">No Chaos Core entries found for this tab yet.</div> : null}
-          {entries.map((entry) => (
-            <button
-              key={entry.entryKey}
-              type="button"
-              className={entry.entryKey === selectedEntryKey ? "database-entry active" : "database-entry"}
-              onClick={() => setSelectedEntryKey(entry.entryKey)}
-            >
-              <strong>{entry.title}</strong>
-              <span>{entry.contentId}</span>
-              <small>{entry.origin === "game" ? "Game" : "Technica"} · {entry.runtimeFile}</small>
-            </button>
-          ))}
-        </div>
+        contentType === "card" ? (
+          <ChaosCoreCardGallery
+            repoPath={repoPath.trim()}
+            entries={entries}
+            selectedEntryKey={selectedEntryKey}
+            onSelectEntryKey={setSelectedEntryKey}
+          />
+        ) : (
+          <div className="database-list">
+            {entries.length === 0 ? <div className="empty-state compact">No Chaos Core entries found for this tab yet.</div> : null}
+            {entries.map((entry) => (
+              <button
+                key={entry.entryKey}
+                type="button"
+                className={entry.entryKey === selectedEntryKey ? "database-entry active" : "database-entry"}
+                onClick={() => setSelectedEntryKey(entry.entryKey)}
+              >
+                <strong>{entry.title}</strong>
+                <span>{entry.contentId}</span>
+                <small>{entry.origin === "game" ? "Game" : "Technica"} | {entry.runtimeFile}</small>
+              </button>
+            ))}
+          </div>
+        )
       ) : null}
     </Panel>
   );

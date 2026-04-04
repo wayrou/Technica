@@ -250,7 +250,7 @@ export function QuestCreator() {
   }
 
   return (
-    <div className="workspace-grid">
+    <div className={issues.length > 0 ? "workspace-grid" : "workspace-grid validation-collapsed"}>
       <div className="workspace-column">
         <Panel
           title="Quest Setup"
@@ -1068,11 +1068,13 @@ export function QuestCreator() {
         </Panel>
       </div>
 
-      <div className="workspace-column">
-        <Panel title="Validation" subtitle="Required fields and cross-reference issues appear here.">
-          <IssueList issues={issues} emptyLabel="No validation issues. This quest is ready to export." />
-        </Panel>
-      </div>
+      {issues.length > 0 ? (
+        <div className="workspace-column">
+          <Panel title="Validation" subtitle="Required fields and cross-reference issues appear here.">
+            <IssueList issues={issues} emptyLabel="No validation issues. This quest is ready to export." />
+          </Panel>
+        </div>
+      ) : null}
     </div>
   );
 }

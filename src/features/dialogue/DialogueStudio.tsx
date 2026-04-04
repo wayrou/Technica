@@ -829,7 +829,7 @@ export function DialogueStudio() {
   );
 
   return (
-    <div className="workspace-grid workspace-dialogue">
+    <div className={issues.length > 0 ? "workspace-grid workspace-dialogue" : "workspace-grid workspace-dialogue validation-collapsed"}>
       <div className="workspace-column">
         <Panel
           title="Dialogue Setup"
@@ -1056,13 +1056,15 @@ export function DialogueStudio() {
 
       </div>
 
-      <div className="workspace-column">
-        <div className="dialogue-preview-rail">
-          <Panel title="Validation">
-            <IssueList issues={issues} emptyLabel="No validation issues. This dialogue is ready to export." />
-          </Panel>
+      {issues.length > 0 ? (
+        <div className="workspace-column">
+          <div className="dialogue-preview-rail">
+            <Panel title="Validation">
+              <IssueList issues={issues} emptyLabel="No validation issues. This dialogue is ready to export." />
+            </Panel>
+          </div>
         </div>
-      </div>
+      ) : null}
 
       <aside className="dialogue-floating-preview">
         {flowPreviewPanel}

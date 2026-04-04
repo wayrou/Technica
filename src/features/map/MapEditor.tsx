@@ -60,6 +60,7 @@ type MapNpcMarker = {
 };
 
 const MAP_STORAGE_KEY = "technica.map.document";
+const MAP_NPC_BATCH_SIZE = 8;
 
 function touchMap(document: MapDocument) {
   return {
@@ -208,6 +209,37 @@ export function MapEditor() {
   useEffect(() => {
     let cancelled = false;
 
+    async function loadNpcMarker(entry: ChaosCoreDatabaseEntry) {
+      try {
+        const loaded = await loadChaosCoreDatabaseEntry(repoPath.trim(), "npc", entry.entryKey);
+        const parsed = JSON.parse(loaded.editorContent ?? loaded.sourceContent ?? loaded.runtimeContent);
+        if (!isNpcDocument(parsed)) {
+          return null;
+        }
+
+        const marker: MapNpcMarker = {
+          entryKey: entry.entryKey,
+          contentId: entry.contentId,
+          name: parsed.name || entry.title || entry.contentId,
+          mapId: parsed.mapId,
+          tileX: Number(parsed.tileX ?? 0),
+          tileY: Number(parsed.tileY ?? 0),
+          origin: entry.origin,
+          sourceFile: entry.sourceFile
+        };
+
+        return marker;
+      } catch {
+        return null;
+      }
+    }
+
+    async function yieldToUi() {
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, 0);
+      });
+    }
+
     async function refreshMapNpcs() {
       if (!isTauriRuntime() || !repoPath.trim()) {
         setNpcEntries([]);
@@ -218,44 +250,36 @@ export function MapEditor() {
 
       try {
         const entries = await listChaosCoreDatabase(repoPath.trim(), "npc");
-        const loadedEntries: Array<MapNpcMarker | null> = await Promise.all(
-          entries.map(async (entry) => {
-            try {
-              const loaded = await loadChaosCoreDatabaseEntry(repoPath.trim(), "npc", entry.entryKey);
-              const parsed = JSON.parse(loaded.editorContent ?? loaded.sourceContent ?? loaded.runtimeContent);
-              if (!isNpcDocument(parsed)) {
-                return null;
-              }
-
-              return {
-                entryKey: entry.entryKey,
-                contentId: entry.contentId,
-                name: parsed.name || entry.title || entry.contentId,
-                mapId: parsed.mapId,
-                tileX: Number(parsed.tileX ?? 0),
-                tileY: Number(parsed.tileY ?? 0),
-                origin: entry.origin,
-                sourceFile: entry.sourceFile
-              };
-            } catch {
-              return null;
-            }
-          })
-        );
-
         if (cancelled) {
           return;
         }
 
-        const nextMarkers = loadedEntries.filter((entry): entry is MapNpcMarker => entry !== null);
         setNpcEntries(entries);
-        setMapNpcMarkers(nextMarkers.filter((entry) => entry.mapId === map.id));
+        setMapNpcMarkers([]);
         setSelectedNpcEntryKey((current) => {
           if (current && entries.some((entry) => entry.entryKey === current)) {
             return current;
           }
           return entries[0]?.entryKey ?? "";
         });
+
+        const collectedMarkers: MapNpcMarker[] = [];
+        for (let index = 0; index < entries.length; index += MAP_NPC_BATCH_SIZE) {
+          if (cancelled) {
+            return;
+          }
+
+          const batch = entries.slice(index, index + MAP_NPC_BATCH_SIZE);
+          const loadedBatch = await Promise.all(batch.map((entry) => loadNpcMarker(entry)));
+
+          if (cancelled) {
+            return;
+          }
+
+          collectedMarkers.push(...loadedBatch.filter((entry): entry is MapNpcMarker => entry !== null));
+          setMapNpcMarkers(collectedMarkers.filter((entry) => entry.mapId === map.id));
+          await yieldToUi();
+        }
       } catch {
         if (!cancelled) {
           setNpcEntries([]);
@@ -600,7 +624,7 @@ export function MapEditor() {
   }
 
   return (
-    <div className="workspace-grid">
+    <div className={issues.length > 0 ? "workspace-grid" : "workspace-grid validation-collapsed"}>
       <div className="workspace-column">
         <Panel
           title="Map Controls"
@@ -1370,11 +1394,13 @@ export function MapEditor() {
         />
       </div>
 
-      <div className="workspace-column">
-        <Panel title="Validation" subtitle="Bounds, dimensions, duplicate ids, and contradictory tile flags show up here.">
-          <IssueList issues={issues} emptyLabel="No validation issues. This map is ready to export." />
-        </Panel>
-      </div>
+      {issues.length > 0 ? (
+        <div className="workspace-column">
+          <Panel title="Validation" subtitle="Bounds, dimensions, duplicate ids, and contradictory tile flags show up here.">
+            <IssueList issues={issues} emptyLabel="No validation issues. This map is ready to export." />
+          </Panel>
+        </div>
+      ) : null}
     </div>
   );
 }

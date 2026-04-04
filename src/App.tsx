@@ -1,4 +1,4 @@
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import technicaLogo from "./assets/technica-logo.png";
 import { EditorErrorBoundary } from "./components/EditorErrorBoundary";
 import { useMobileSession } from "./hooks/useMobileSession";
@@ -49,6 +49,7 @@ const DatabaseExplorer = lazy(() =>
 const MobileSessionPanel = lazy(() =>
   import("./features/mobile/MobileSessionPanel").then((module) => ({ default: module.MobileSessionPanel }))
 );
+const DESKTOP_STARTUP_FALLBACK_TABS = new Set<TechnicaTabId>(["map", "card"]);
 
 const MOBILE_INBOX_TARGETS: Partial<Record<EditorKind, { storageKey: string; tabId: TechnicaTabId }>> = {
   dialogue: {
@@ -145,9 +146,38 @@ export default function App() {
   const mobileSession = useMobileSession();
   const requestedPopoutTab = getRequestedPopoutTab();
   const [storedActiveTab, setStoredActiveTab] = usePersistentState<TechnicaTabId>("technica.activeTab", "dialogue");
-  const activeTab: TechnicaTabId = requestedPopoutTab ?? storedActiveTab;
+  const [isMobileSessionOpen, setIsMobileSessionOpen] = useState(false);
+  const mobileSessionPopoverRef = useRef<HTMLDivElement | null>(null);
+  const activeTab: TechnicaTabId =
+    requestedPopoutTab ??
+    (runtime.isDesktop && DESKTOP_STARTUP_FALLBACK_TABS.has(storedActiveTab) ? "dialogue" : storedActiveTab);
   const activeTabLabel = tabs.find((tab) => tab.id === activeTab)?.label ?? "Technica";
   const mobileTabs = tabs;
+
+  useEffect(() => {
+    if (!isMobileSessionOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      if (!mobileSessionPopoverRef.current?.contains(event.target as Node)) {
+        setIsMobileSessionOpen(false);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsMobileSessionOpen(false);
+      }
+    }
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isMobileSessionOpen]);
 
   function handleOpenTab(tabId: TechnicaTabId) {
     if (requestedPopoutTab) {
@@ -228,6 +258,7 @@ export default function App() {
       className={[
         "app-shell",
         requestedPopoutTab ? "popout-shell" : "",
+        isMobileSessionOpen ? "mobile-session-open" : "",
         runtime.surface === "mobile" ? "surface-mobile" : "surface-desktop",
         runtime.isPhone ? "device-phone" : "",
         runtime.isTablet ? "device-tablet" : ""
@@ -239,6 +270,7 @@ export default function App() {
       data-session-id={runtime.sessionId ?? undefined}
     >
       <div className="app-backdrop" />
+      {isMobileSessionOpen && runtime.isDesktop && !requestedPopoutTab ? <div className="header-mobile-session-scrim" /> : null}
       <header className="app-header">
         <div className="brand-lockup">
           <img className="brand-logo" src={technicaLogo} alt="Technica logo" />
@@ -252,6 +284,27 @@ export default function App() {
             ) : null}
           </div>
         </div>
+        {runtime.isDesktop && !requestedPopoutTab ? (
+          <div className="app-header-actions" ref={mobileSessionPopoverRef}>
+            <button
+              type="button"
+              className={isMobileSessionOpen ? "header-utility-button active" : "header-utility-button"}
+              onClick={() => setIsMobileSessionOpen((current) => !current)}
+              aria-expanded={isMobileSessionOpen}
+              aria-haspopup="dialog"
+            >
+              <span className="header-utility-label">Mobile Session</span>
+              <span className="header-utility-status">{isMobileSessionOpen ? "Close" : "Open"}</span>
+            </button>
+            {isMobileSessionOpen ? (
+              <div className="header-mobile-session-popover" role="dialog" aria-label="Mobile session">
+                <Suspense fallback={<div className="empty-state compact">Loading mobile session...</div>}>
+                  <MobileSessionPanel onOpenInboxEntry={handleOpenMobileInboxEntry} />
+                </Suspense>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </header>
 
       {!requestedPopoutTab && runtime.isDesktop ? (
@@ -320,9 +373,6 @@ export default function App() {
       <main className="app-main">
         <EditorErrorBoundary>
           <Suspense fallback={<div className="empty-state compact">Loading editor...</div>}>
-            {runtime.isDesktop && !requestedPopoutTab ? (
-              <MobileSessionPanel onOpenInboxEntry={handleOpenMobileInboxEntry} />
-            ) : null}
             {renderActiveEditor()}
           </Suspense>
         </EditorErrorBoundary>

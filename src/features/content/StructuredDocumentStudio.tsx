@@ -208,17 +208,19 @@ export function StructuredDocumentStudio<TDocument>({
   };
 
   return (
-    <div className="workspace-grid blueprint-grid">
+    <div className={issues.length > 0 ? "workspace-grid blueprint-grid" : "workspace-grid blueprint-grid validation-collapsed"}>
       <div className="workspace-column">
         {renderWorkspace(context)}
         <input ref={importRef} hidden type="file" accept=".json" onChange={handleImportFile} />
       </div>
 
-      <div className="workspace-column">
-        <Panel title="Validation" subtitle="Required fields, duplicate ids, and broken references show up here.">
-          <IssueList issues={issues} emptyLabel="No validation issues. This content is ready to export." />
-        </Panel>
-      </div>
+      {issues.length > 0 ? (
+        <div className="workspace-column">
+          <Panel title="Validation" subtitle="Required fields, duplicate ids, and broken references show up here.">
+            <IssueList issues={issues} emptyLabel="No validation issues. This content is ready to export." />
+          </Panel>
+        </div>
+      ) : null}
     </div>
   );
 }

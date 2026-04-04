@@ -4,7 +4,10 @@
   "version": "1.0.0",
   "identifier": "com.chaoscore.technica",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": {
+      "script": "npm run dev:desktop:server",
+      "wait": false
+    },
     "beforeBuildCommand": "npm run build",
     "devUrl": "http://localhost:1430",
     "frontendDist": "../dist"
@@ -20,7 +23,13 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$HOME/**"
+        ]
+      }
     }
   },
   "bundle": {
