@@ -1,7 +1,9 @@
 import {
   useDeferredValue,
+  useEffect,
   useMemo,
   useRef,
+  useState,
   type ChangeEvent,
   type Dispatch,
   type ReactNode,
@@ -10,10 +12,13 @@ import {
 import { IssueList } from "../../components/IssueList";
 import { Panel } from "../../components/Panel";
 import { usePersistentState } from "../../hooks/usePersistentState";
+import { useTechnicaRuntime } from "../../hooks/useTechnicaRuntime";
 import type { EditorKind, ExportBundle, ExportTarget, ValidationIssue } from "../../types/common";
 import { confirmAction, notify } from "../../utils/dialogs";
 import { downloadBundle, downloadDraftFile } from "../../utils/exporters";
 import { readTextFile } from "../../utils/file";
+import { TECHNICA_MOBILE_INBOX_OPEN_EVENT, type MobileInboxEntry } from "../../utils/mobileProtocol";
+import { submitMobileInboxEntry } from "../../utils/mobileSession";
 
 interface StructuredStudioContext<TDocument> {
   document: TDocument;
@@ -21,11 +26,15 @@ interface StructuredStudioContext<TDocument> {
   patchDocument: (updater: (current: TDocument) => TDocument) => void;
   exportTarget: ExportTarget;
   setExportTarget: Dispatch<SetStateAction<ExportTarget>>;
+  isMobile: boolean;
+  canSendToDesktop: boolean;
+  isSendingToDesktop: boolean;
   loadSample: () => void;
   clearDocument: () => void;
   importDraft: () => void;
   saveDraft: () => void;
   exportBundle: () => Promise<void>;
+  sendToDesktop: () => Promise<void>;
 }
 
 interface StructuredDocumentStudioProps<TDocument> {
@@ -40,6 +49,7 @@ interface StructuredDocumentStudioProps<TDocument> {
   getTitle: (document: TDocument) => string;
   isImportPayload: (payload: unknown) => payload is TDocument;
   touchDocument?: (document: TDocument) => TDocument;
+  getMobileSendSummary?: (document: TDocument) => string;
   replacePrompt: string;
   invalidImportMessage: string;
   renderWorkspace: (context: StructuredStudioContext<TDocument>) => ReactNode;
@@ -57,15 +67,19 @@ export function StructuredDocumentStudio<TDocument>({
   getTitle,
   isImportPayload,
   touchDocument = (next) => next,
+  getMobileSendSummary,
   replacePrompt,
   invalidImportMessage,
   renderWorkspace
 }: StructuredDocumentStudioProps<TDocument>) {
+  const runtime = useTechnicaRuntime();
   const [document, setDocument] = usePersistentState(storageKey, initialDocument);
   const [exportTarget, setExportTarget] = usePersistentState<ExportTarget>(exportTargetKey, "chaos-core");
+  const [isSendingToDesktop, setIsSendingToDesktop] = useState(false);
   const importRef = useRef<HTMLInputElement | null>(null);
   const deferredDocument = useDeferredValue(document);
   const issues = useMemo(() => validate(deferredDocument), [deferredDocument, validate]);
+  const canSendToDesktop = runtime.isMobile && Boolean(runtime.sessionOrigin && runtime.pairingToken);
 
   function patchDocument(updater: (current: TDocument) => TDocument) {
     setDocument((current) => touchDocument(updater(current)));
@@ -112,17 +126,85 @@ export function StructuredDocumentStudio<TDocument>({
     }
   }
 
+  async function sendToDesktop() {
+    if (!runtime.sessionOrigin || !runtime.pairingToken) {
+      notify("Open this editor through the desktop pairing URL before sending content back.");
+      return;
+    }
+
+    setIsSendingToDesktop(true);
+    try {
+      const currentDocument = touchDocument(document);
+      const inferredContentId =
+        typeof currentDocument === "object" &&
+        currentDocument !== null &&
+        "id" in currentDocument &&
+        typeof (currentDocument as { id?: unknown }).id === "string"
+          ? (currentDocument as { id: string }).id
+          : getTitle(currentDocument);
+      const sendResult = await submitMobileInboxEntry({
+        sessionOrigin: runtime.sessionOrigin,
+        pairingToken: runtime.pairingToken,
+        deviceType: runtime.deviceType,
+        request: {
+          contentType: draftType,
+          contentId: inferredContentId,
+          title: getTitle(currentDocument),
+          summary: getMobileSendSummary?.(currentDocument),
+          payload: currentDocument
+        }
+      });
+      notify(sendResult.message);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Could not send this draft to the desktop inbox.");
+    } finally {
+      setIsSendingToDesktop(false);
+    }
+  }
+
+  useEffect(() => {
+    function handleMobileInboxOpen(event: Event) {
+      const customEvent = event as CustomEvent<{ entry?: MobileInboxEntry }>;
+      const entry = customEvent.detail?.entry;
+
+      if (entry?.contentType !== draftType) {
+        return;
+      }
+
+      if (!isImportPayload(entry.payload)) {
+        notify(`The mobile ${draftType} draft could not be loaded because its payload is invalid.`);
+        return;
+      }
+
+      setDocument(touchDocument(entry.payload));
+    }
+
+    if (typeof window !== "undefined") {
+      window.addEventListener(TECHNICA_MOBILE_INBOX_OPEN_EVENT, handleMobileInboxOpen);
+    }
+
+    return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener(TECHNICA_MOBILE_INBOX_OPEN_EVENT, handleMobileInboxOpen);
+      }
+    };
+  }, [draftType, isImportPayload, setDocument, touchDocument]);
+
   const context: StructuredStudioContext<TDocument> = {
     document,
     setDocument,
     patchDocument,
     exportTarget,
     setExportTarget,
+    isMobile: runtime.isMobile,
+    canSendToDesktop,
+    isSendingToDesktop,
     loadSample,
     clearDocument,
     importDraft: () => importRef.current?.click(),
     saveDraft: () => downloadDraftFile(draftType, getTitle(document), document),
-    exportBundle
+    exportBundle,
+    sendToDesktop
   };
 
   return (

@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Panel } from "../../components/Panel";
 import { usePersistentState } from "../../hooks/usePersistentState";
+import { useTechnicaRuntime } from "../../hooks/useTechnicaRuntime";
 import type { EditorKind } from "../../types/common";
 import {
   discoverChaosCoreRepo,
   isTauriRuntime,
   listChaosCoreDatabase,
+  listChaosCoreDatabaseFromSession,
   loadChaosCoreDatabaseEntry,
+  loadChaosCoreDatabaseEntryFromSession,
   type ChaosCoreDatabaseEntry,
   type LoadedChaosCoreDatabaseEntry
 } from "../../utils/chaosCoreDatabase";
@@ -102,7 +105,10 @@ interface DatabaseExplorerProps {
 }
 
 export function DatabaseExplorer({ onOpenEditor }: DatabaseExplorerProps) {
+  const runtime = useTechnicaRuntime();
   const desktopEnabled = isTauriRuntime();
+  const mobileSessionEnabled = runtime.isMobile && Boolean(runtime.sessionOrigin && runtime.pairingToken);
+  const databaseEnabled = desktopEnabled || mobileSessionEnabled;
   const loadedEntryCache = useRef(new Map<string, DatabaseLoadedEntry>());
   const [repoPath, setRepoPath] = usePersistentState("technica.chaosCoreRepoPath", "");
   const [entries, setEntries] = useState<DatabaseSummaryEntry[]>([]);
@@ -153,7 +159,16 @@ export function DatabaseExplorer({ onOpenEditor }: DatabaseExplorerProps) {
       return cached;
     }
 
-    const loaded = await loadChaosCoreDatabaseEntry(repoPath.trim(), summary.contentType, summary.entryKey);
+    const loaded = mobileSessionEnabled && runtime.sessionOrigin && runtime.pairingToken
+      ? (
+          await loadChaosCoreDatabaseEntryFromSession(
+            runtime.sessionOrigin,
+            runtime.pairingToken,
+            summary.contentType,
+            summary.entryKey
+          )
+        ).entry
+      : await loadChaosCoreDatabaseEntry(repoPath.trim(), summary.contentType, summary.entryKey);
     const nextLoaded = {
       ...loaded,
       contentType: summary.contentType,
@@ -165,6 +180,11 @@ export function DatabaseExplorer({ onOpenEditor }: DatabaseExplorerProps) {
   }
 
   async function handleDiscoverRepo() {
+    if (mobileSessionEnabled) {
+      notify("The mobile database browser uses the connected desktop session automatically.");
+      return;
+    }
+
     if (!desktopEnabled) {
       notify("Open Technica in desktop mode to browse the live Chaos Core database.");
       return;
@@ -183,6 +203,60 @@ export function DatabaseExplorer({ onOpenEditor }: DatabaseExplorerProps) {
   }
 
   async function refreshDatabase(nextRepoPath = repoPath) {
+    if (mobileSessionEnabled && runtime.sessionOrigin && runtime.pairingToken) {
+      setIsRefreshing(true);
+      try {
+        const summariesByType = await Promise.all(
+          DATABASE_CONTENT_TYPES.map(async (contentType) => {
+            const response = await listChaosCoreDatabaseFromSession(
+              runtime.sessionOrigin!,
+              runtime.pairingToken!,
+              contentType
+            );
+            return {
+              contentType,
+              repoPath: response.repoPath,
+              summaries: response.entries
+            };
+          })
+        );
+
+        const resolvedRepoPath = summariesByType.find((result) => result.repoPath)?.repoPath ?? "";
+        if (resolvedRepoPath && resolvedRepoPath !== repoPath) {
+          setRepoPath(resolvedRepoPath);
+        }
+
+        const nextEntries = summariesByType
+          .flatMap(({ contentType, summaries }) =>
+            summaries.map((summary) => ({
+              ...summary,
+              contentType
+            }))
+          )
+          .sort((left, right) =>
+            `${left.contentType}:${left.title}:${left.contentId}`.localeCompare(
+              `${right.contentType}:${right.title}:${right.contentId}`
+            )
+          );
+
+        loadedEntryCache.current.clear();
+        setEntries(nextEntries);
+        setSelectedEntry(null);
+        setInboundReferences([]);
+        setSelectedEntryKey((current) => {
+          if (current && nextEntries.some((entry) => entry.entryKey === current)) {
+            return current;
+          }
+          return nextEntries[0]?.entryKey ?? "";
+        });
+      } catch (error) {
+        notify(error instanceof Error ? error.message : "Could not refresh the Chaos Core database.");
+      } finally {
+        setIsRefreshing(false);
+      }
+      return;
+    }
+
     if (!desktopEnabled || !nextRepoPath.trim()) {
       loadedEntryCache.current.clear();
       setEntries([]);
@@ -248,12 +322,17 @@ export function DatabaseExplorer({ onOpenEditor }: DatabaseExplorerProps) {
   }
 
   useEffect(() => {
-    if (!desktopEnabled) {
+    if (!databaseEnabled) {
       loadedEntryCache.current.clear();
       setEntries([]);
       setSelectedEntryKey("");
       setSelectedEntry(null);
       setInboundReferences([]);
+      return;
+    }
+
+    if (mobileSessionEnabled) {
+      void refreshDatabase(repoPath);
       return;
     }
 
@@ -263,13 +342,13 @@ export function DatabaseExplorer({ onOpenEditor }: DatabaseExplorerProps) {
     }
 
     void refreshDatabase(repoPath);
-  }, [desktopEnabled, repoPath]);
+  }, [databaseEnabled, desktopEnabled, mobileSessionEnabled, repoPath, runtime.pairingToken, runtime.sessionOrigin]);
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadSelectedEntry() {
-      if (!desktopEnabled || !repoPath.trim() || !selectedEntryKey) {
+      if ((!desktopEnabled && !mobileSessionEnabled) || (!repoPath.trim() && !mobileSessionEnabled) || !selectedEntryKey) {
         setSelectedEntry(null);
         setInboundReferences([]);
         return;
@@ -305,13 +384,13 @@ export function DatabaseExplorer({ onOpenEditor }: DatabaseExplorerProps) {
     return () => {
       cancelled = true;
     };
-  }, [desktopEnabled, entries, repoPath, selectedEntryKey]);
+  }, [desktopEnabled, entries, mobileSessionEnabled, repoPath, selectedEntryKey, runtime.pairingToken, runtime.sessionOrigin]);
 
   useEffect(() => {
     let cancelled = false;
 
     async function scanInboundReferences() {
-      if (!selectedEntry || !repoPath.trim() || !desktopEnabled) {
+      if (!selectedEntry || (!repoPath.trim() && !mobileSessionEnabled) || (!desktopEnabled && !mobileSessionEnabled)) {
         setInboundReferences([]);
         return;
       }
@@ -361,7 +440,7 @@ export function DatabaseExplorer({ onOpenEditor }: DatabaseExplorerProps) {
     return () => {
       cancelled = true;
     };
-  }, [desktopEnabled, entries, repoPath, selectedEntry]);
+  }, [desktopEnabled, entries, mobileSessionEnabled, repoPath, selectedEntry, runtime.pairingToken, runtime.sessionOrigin]);
 
   return (
     <div className="workspace-grid blueprint-grid">
@@ -371,9 +450,11 @@ export function DatabaseExplorer({ onOpenEditor }: DatabaseExplorerProps) {
           subtitle="Browse every Chaos Core content table in one place, then jump into the matching editor when you want to revise a record."
           actions={
             <div className="toolbar">
-              <button type="button" className="ghost-button" onClick={() => void handleDiscoverRepo()}>
-                Detect repo
-              </button>
+              {desktopEnabled ? (
+                <button type="button" className="ghost-button" onClick={() => void handleDiscoverRepo()}>
+                  Detect repo
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="ghost-button"
@@ -385,21 +466,30 @@ export function DatabaseExplorer({ onOpenEditor }: DatabaseExplorerProps) {
             </div>
           }
         >
-          {!desktopEnabled ? (
+          {!databaseEnabled ? (
             <div className="empty-state compact">
-              The unified database browser is available in the Technica desktop app.
+              The unified database browser is available in the Technica desktop app or a paired mobile session.
             </div>
           ) : null}
 
           <div className="form-grid">
-            <label className="field full">
-              <span>Chaos Core repo path</span>
-              <input
-                value={repoPath}
-                onChange={(event) => setRepoPath(event.target.value)}
-                placeholder="/absolute/path/to/chaos-core"
-              />
-            </label>
+            {desktopEnabled ? (
+              <label className="field full">
+                <span>Chaos Core repo path</span>
+                <input
+                  value={repoPath}
+                  onChange={(event) => setRepoPath(event.target.value)}
+                  placeholder="/absolute/path/to/chaos-core"
+                />
+              </label>
+            ) : (
+              <div className="field full">
+                <span>Database source</span>
+                <div className="empty-state compact">
+                  Live Chaos Core data is coming through the connected desktop session.
+                </div>
+              </div>
+            )}
             <label className="field full">
               <span>Search</span>
               <input
@@ -413,6 +503,7 @@ export function DatabaseExplorer({ onOpenEditor }: DatabaseExplorerProps) {
           <div className="chip-row">
             <span className="pill">{visibleEntries.length} visible</span>
             <span className="pill">{entries.length} total</span>
+            {mobileSessionEnabled ? <span className="pill">Desktop session</span> : null}
             {selectedEntry ? <span className="pill accent">{selectedEntry.contentType}</span> : null}
             {isLoadingSelected ? <span className="pill">Loading record...</span> : null}
           </div>

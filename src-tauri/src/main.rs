@@ -1,6 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod mobile_server;
+mod mobile_session;
+mod mobile_state;
+
 use base64::Engine;
+use mobile_state::{MobileInboxEntry, MobileSessionStore, MobileSessionSummary};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::env;
@@ -8,10 +13,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tauri::State;
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct DatabaseEntrySummary {
+pub(crate) struct DatabaseEntrySummary {
     entry_key: String,
     content_id: String,
     title: String,
@@ -22,7 +28,7 @@ struct DatabaseEntrySummary {
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct LoadedDatabaseEntry {
+pub(crate) struct LoadedDatabaseEntry {
     entry_key: String,
     content_id: String,
     title: String,
@@ -433,8 +439,7 @@ fn discover_from_directory(root: &Path, remaining_depth: usize) -> Option<PathBu
     None
 }
 
-#[tauri::command]
-fn discover_chaos_core_repo() -> Result<Option<String>, String> {
+pub(crate) fn discover_chaos_core_repo_path() -> Result<Option<String>, String> {
     let current_dir = env::current_dir().map_err(|error| format!("Could not read current directory: {}", error))?;
     let home_dir = env::var("HOME").ok().map(PathBuf::from);
 
@@ -462,7 +467,14 @@ fn discover_chaos_core_repo() -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
-fn list_chaos_core_database(repo_path: String, content_type: String) -> Result<Vec<DatabaseEntrySummary>, String> {
+fn discover_chaos_core_repo() -> Result<Option<String>, String> {
+    discover_chaos_core_repo_path()
+}
+
+pub(crate) fn list_chaos_core_database_entries(
+    repo_path: String,
+    content_type: String,
+) -> Result<Vec<DatabaseEntrySummary>, String> {
     let content_type = normalize_content_type(&content_type)?;
     let stdout = run_database_snapshot("list", &repo_path, content_type, None)?;
     serde_json::from_slice::<Vec<DatabaseEntrySummary>>(&stdout)
@@ -470,7 +482,11 @@ fn list_chaos_core_database(repo_path: String, content_type: String) -> Result<V
 }
 
 #[tauri::command]
-fn load_chaos_core_database_entry(
+fn list_chaos_core_database(repo_path: String, content_type: String) -> Result<Vec<DatabaseEntrySummary>, String> {
+    list_chaos_core_database_entries(repo_path, content_type)
+}
+
+pub(crate) fn load_chaos_core_database_record(
     repo_path: String,
     content_type: String,
     entry_key: String,
@@ -479,6 +495,15 @@ fn load_chaos_core_database_entry(
     let stdout = run_database_snapshot("load", &repo_path, content_type, Some(&entry_key))?;
     serde_json::from_slice::<LoadedDatabaseEntry>(&stdout)
         .map_err(|error| format!("Could not parse the selected Chaos Core database entry: {}", error))
+}
+
+#[tauri::command]
+fn load_chaos_core_database_entry(
+    repo_path: String,
+    content_type: String,
+    entry_key: String,
+) -> Result<LoadedDatabaseEntry, String> {
+    load_chaos_core_database_record(repo_path, content_type, entry_key)
 }
 
 #[tauri::command]
@@ -686,14 +711,61 @@ fn remove_chaos_core_database_entry(
     }
 }
 
+#[tauri::command]
+fn start_mobile_session(session_store: State<'_, MobileSessionStore>) -> Result<MobileSessionSummary, String> {
+    mobile_session::start_session(&session_store)
+}
+
+#[tauri::command]
+fn stop_mobile_session(session_store: State<'_, MobileSessionStore>) -> Result<(), String> {
+    mobile_session::stop_session(&session_store)
+}
+
+#[tauri::command]
+fn get_mobile_session_status(
+    session_store: State<'_, MobileSessionStore>,
+) -> Result<Option<MobileSessionSummary>, String> {
+    mobile_session::get_session_status(&session_store)
+}
+
+#[tauri::command]
+fn list_mobile_inbox_entries(
+    session_store: State<'_, MobileSessionStore>,
+) -> Result<Vec<MobileInboxEntry>, String> {
+    mobile_session::list_inbox_entries(&session_store)
+}
+
+#[tauri::command]
+fn accept_mobile_inbox_entry(
+    session_store: State<'_, MobileSessionStore>,
+    entry_id: String,
+) -> Result<MobileInboxEntry, String> {
+    mobile_session::accept_inbox_entry(&session_store, &entry_id)
+}
+
+#[tauri::command]
+fn reject_mobile_inbox_entry(
+    session_store: State<'_, MobileSessionStore>,
+    entry_id: String,
+) -> Result<MobileInboxEntry, String> {
+    mobile_session::reject_inbox_entry(&session_store, &entry_id)
+}
+
 fn main() {
     tauri::Builder::default()
+        .manage(MobileSessionStore::default())
         .invoke_handler(tauri::generate_handler![
             discover_chaos_core_repo,
             list_chaos_core_database,
             load_chaos_core_database_entry,
             publish_chaos_core_bundle,
-            remove_chaos_core_database_entry
+            remove_chaos_core_database_entry,
+            start_mobile_session,
+            stop_mobile_session,
+            get_mobile_session_status,
+            list_mobile_inbox_entries,
+            accept_mobile_inbox_entry,
+            reject_mobile_inbox_entry
         ])
         .run(tauri::generate_context!())
         .expect("error while running Technica");

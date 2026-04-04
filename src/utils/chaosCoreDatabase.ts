@@ -48,6 +48,34 @@ async function invokeCommand<TResponse>(command: string, payload?: Record<string
   return invoke<TResponse>(command, payload);
 }
 
+function buildSessionUrl(origin: string, path: string) {
+  return `${origin.replace(/\/+$/, "")}${path}`;
+}
+
+async function fetchSessionDatabaseJson<TResponse>(origin: string, path: string) {
+  const response = await fetch(buildSessionUrl(origin, path), {
+    headers: {
+      Accept: "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Session request failed with ${response.status}.`);
+  }
+
+  return (await response.json()) as TResponse;
+}
+
+interface SessionDatabaseListResponse {
+  repoPath: string;
+  entries: ChaosCoreDatabaseEntry[];
+}
+
+interface SessionDatabaseLoadResponse {
+  repoPath: string;
+  entry: LoadedChaosCoreDatabaseEntry;
+}
+
 export async function discoverChaosCoreRepo(): Promise<string | null> {
   return invokeCommand<string | null>("discover_chaos_core_repo");
 }
@@ -72,6 +100,29 @@ export async function loadChaosCoreDatabaseEntry(
     contentType,
     entryKey
   });
+}
+
+export async function listChaosCoreDatabaseFromSession(
+  sessionOrigin: string,
+  pairingToken: string,
+  contentType: EditorKind
+): Promise<SessionDatabaseListResponse> {
+  return fetchSessionDatabaseJson(
+    sessionOrigin,
+    `/api/database/list?token=${encodeURIComponent(pairingToken)}&contentType=${encodeURIComponent(contentType)}`
+  );
+}
+
+export async function loadChaosCoreDatabaseEntryFromSession(
+  sessionOrigin: string,
+  pairingToken: string,
+  contentType: EditorKind,
+  entryKey: string
+): Promise<SessionDatabaseLoadResponse> {
+  return fetchSessionDatabaseJson(
+    sessionOrigin,
+    `/api/database/load?token=${encodeURIComponent(pairingToken)}&contentType=${encodeURIComponent(contentType)}&entryKey=${encodeURIComponent(entryKey)}`
+  );
 }
 
 export async function publishChaosCoreBundle(

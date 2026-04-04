@@ -3,6 +3,7 @@ import { ChaosCoreDatabasePanel } from "../../components/ChaosCoreDatabasePanel"
 import { IssueList } from "../../components/IssueList";
 import { Panel } from "../../components/Panel";
 import { createSampleDialogueDocument } from "../../data/sampleDialogue";
+import { useTechnicaRuntime } from "../../hooks/useTechnicaRuntime";
 import { usePersistentState } from "../../hooks/usePersistentState";
 import type { KeyValueRecord } from "../../types/common";
 import type { DialogueDocument, DialogueEntry, DialogueLabel } from "../../types/dialogue";
@@ -30,6 +31,8 @@ import {
 } from "../../utils/dialogueDocument";
 import { downloadBundle, downloadDraftFile, buildDialogueBundleForTarget } from "../../utils/exporters";
 import { readTextFile } from "../../utils/file";
+import { TECHNICA_MOBILE_INBOX_OPEN_EVENT, type MobileInboxEntry } from "../../utils/mobileProtocol";
+import { submitMobileInboxEntry } from "../../utils/mobileSession";
 import { getRequestedPopoutTab, openTechnicaPopout } from "../../utils/popout";
 import { parseCommaList, parseKeyValueLines, serializeCommaList, serializeKeyValueLines } from "../../utils/records";
 import { DialoguePreview } from "./DialoguePreview";
@@ -75,16 +78,33 @@ function getLinkedNpcId(metadata: DialogueDocument["metadata"]) {
   return metadata.linkedNpcId || metadata.linkednpcid || "";
 }
 
+function isDialogueDocumentPayload(value: unknown): value is DialogueDocument {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<DialogueDocument>;
+  return (
+    typeof candidate.id === "string" &&
+    typeof candidate.title === "string" &&
+    typeof candidate.sceneId === "string" &&
+    Array.isArray(candidate.labels)
+  );
+}
+
 export function DialogueStudio() {
+  const runtime = useTechnicaRuntime();
   const isPopout = getRequestedPopoutTab() === "dialogue";
   const [dialogue, setDialogue] = usePersistentState(DIALOGUE_STORAGE_KEY, loadInitialDialogueDocument());
   const [npcOptions, setNpcOptions] = useState<DialogueNpcOption[]>([]);
+  const [isSendingToDesktop, setIsSendingToDesktop] = useState(false);
   const importRef = useRef<HTMLInputElement | null>(null);
   const deferredDialogue = useDeferredValue(dialogue);
   const normalizedDialogue = useMemo(() => refreshDialogueDocument(deferredDialogue), [deferredDialogue]);
   const issues = useMemo(() => validateDialogueDocument(deferredDialogue), [deferredDialogue]);
   const branchOptions = getBranchLabelOptions(dialogue);
   const linkedNpcId = getLinkedNpcId(dialogue.metadata);
+  const canSendToDesktop = runtime.isMobile && Boolean(runtime.sessionOrigin && runtime.pairingToken);
   const refreshNpcSpeakers = useCallback(async (shouldCommit: () => boolean = () => true) => {
     const optionsById = new Map<string, DialogueNpcOption>();
 
@@ -207,6 +227,34 @@ export function DialogueStudio() {
     };
   }, [refreshNpcSpeakers]);
 
+  useEffect(() => {
+    function handleMobileInboxOpen(event: Event) {
+      const customEvent = event as CustomEvent<{ entry?: MobileInboxEntry }>;
+      const entry = customEvent.detail?.entry;
+
+      if (entry?.contentType !== "dialogue") {
+        return;
+      }
+
+      if (!isDialogueDocumentPayload(entry.payload)) {
+        notify("The mobile dialogue draft could not be loaded because its payload is invalid.");
+        return;
+      }
+
+      setDialogue(refreshDialogueDocument(entry.payload));
+    }
+
+    if (typeof window !== "undefined") {
+      window.addEventListener(TECHNICA_MOBILE_INBOX_OPEN_EVENT, handleMobileInboxOpen);
+    }
+
+    return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener(TECHNICA_MOBILE_INBOX_OPEN_EVENT, handleMobileInboxOpen);
+      }
+    };
+  }, [setDialogue]);
+
   function patchDialogue(updater: (current: DialogueDocument) => DialogueDocument) {
     setDialogue((current) => ({
       ...updater(current),
@@ -219,6 +267,35 @@ export function DialogueStudio() {
       await downloadBundle(buildDialogueBundleForTarget(refreshDialogueDocument(dialogue), "chaos-core"));
     } catch (error) {
       notify(error instanceof Error ? error.message : "Could not export the dialogue bundle.");
+    }
+  }
+
+  async function handleSendToDesktop() {
+    if (!runtime.sessionOrigin || !runtime.pairingToken) {
+      notify("Open this editor through the desktop pairing URL before sending content back.");
+      return;
+    }
+
+    setIsSendingToDesktop(true);
+    try {
+      const currentDialogue = refreshDialogueDocument(dialogue);
+      const sendResult = await submitMobileInboxEntry({
+        sessionOrigin: runtime.sessionOrigin,
+        pairingToken: runtime.pairingToken,
+        deviceType: runtime.deviceType,
+        request: {
+          contentType: "dialogue",
+          contentId: currentDialogue.id,
+          title: currentDialogue.title,
+          summary: `${currentDialogue.stats.labelCount} branches, ${currentDialogue.stats.lineCount} lines, ${currentDialogue.stats.choiceCount} choices`,
+          payload: currentDialogue
+        }
+      });
+      notify(sendResult.message);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Could not send this dialogue draft to the desktop inbox.");
+    } finally {
+      setIsSendingToDesktop(false);
     }
   }
 
@@ -873,19 +950,32 @@ export function DialogueStudio() {
               <span className="pill accent">Chaos Core export</span>
             </div>
             <div className="toolbar">
-              <button type="button" className="ghost-button" onClick={() => importRef.current?.click()}>
-                Import draft
-              </button>
-              <button
-                type="button"
-                className="ghost-button"
-                onClick={() => downloadDraftFile("dialogue", dialogue.title, refreshDialogueDocument(dialogue))}
-              >
-                Save draft file
-              </button>
-              <button type="button" className="primary-button" onClick={() => void handleExportBundle()}>
-                Export bundle
-              </button>
+              {runtime.isMobile ? (
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => void handleSendToDesktop()}
+                  disabled={!canSendToDesktop || isSendingToDesktop}
+                >
+                  {isSendingToDesktop ? "Sending..." : "Send to Desktop"}
+                </button>
+              ) : (
+                <>
+                  <button type="button" className="ghost-button" onClick={() => importRef.current?.click()}>
+                    Import draft
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={() => downloadDraftFile("dialogue", dialogue.title, refreshDialogueDocument(dialogue))}
+                  >
+                    Save draft file
+                  </button>
+                  <button type="button" className="primary-button" onClick={() => void handleExportBundle()}>
+                    Export bundle
+                  </button>
+                </>
+              )}
               <input ref={importRef} hidden type="file" accept=".txt,.json" onChange={handleImportFile} />
             </div>
           </div>

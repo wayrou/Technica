@@ -59,7 +59,7 @@ export function GearEditor() {
       touchDocument={touchGear}
       replacePrompt="Replace the current gear draft with the imported file?"
       invalidImportMessage="That file does not look like a Technica gear draft or export."
-      renderWorkspace={({ document, setDocument, patchDocument, exportTarget, setExportTarget, loadSample, clearDocument, importDraft, saveDraft, exportBundle }) => (
+      renderWorkspace={({ document, setDocument, patchDocument, loadSample, clearDocument, importDraft, saveDraft, exportBundle, isMobile, canSendToDesktop, isSendingToDesktop, sendToDesktop }) => (
         <>
           <Panel
             title="Gear Setup"
@@ -366,17 +366,30 @@ export function GearEditor() {
                 <span className="pill accent">Chaos Core export</span>
               </div>
               <div className="toolbar">
-                <button type="button" className="ghost-button" onClick={importDraft}>
-                  Import draft
-                </button>
-                <button type="button" className="ghost-button" onClick={saveDraft}>
-                  Save draft file
-                </button>
-                <button type="button" className="primary-button" onClick={() => void exportBundle()}>
-                  Export bundle
-                </button>
-                </div>
+                {isMobile ? (
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={() => void sendToDesktop()}
+                    disabled={!canSendToDesktop || isSendingToDesktop}
+                  >
+                    {isSendingToDesktop ? "Sending..." : "Send to Desktop"}
+                  </button>
+                ) : (
+                  <>
+                    <button type="button" className="ghost-button" onClick={importDraft}>
+                      Import draft
+                    </button>
+                    <button type="button" className="ghost-button" onClick={saveDraft}>
+                      Save draft file
+                    </button>
+                    <button type="button" className="primary-button" onClick={() => void exportBundle()}>
+                      Export bundle
+                    </button>
+                  </>
+                )}
               </div>
+            </div>
             </Panel>
 
             <ChaosCoreDatabasePanel

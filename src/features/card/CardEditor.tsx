@@ -74,7 +74,7 @@ export function CardEditor() {
       touchDocument={touchCard}
       replacePrompt="Replace the current card draft with the imported file?"
       invalidImportMessage="That file does not look like a Technica card draft or export."
-      renderWorkspace={({ document, setDocument, patchDocument, exportTarget, setExportTarget, loadSample, clearDocument, importDraft, saveDraft, exportBundle }) => (
+      renderWorkspace={({ document, setDocument, patchDocument, loadSample, clearDocument, importDraft, saveDraft, exportBundle, isMobile, canSendToDesktop, isSendingToDesktop, sendToDesktop }) => (
         <>
           <Panel
             title="Card Setup"
@@ -265,15 +265,28 @@ export function CardEditor() {
                 <span className="pill accent">Chaos Core export</span>
               </div>
               <div className="toolbar">
-                <button type="button" className="ghost-button" onClick={importDraft}>
-                  Import draft
-                </button>
-                <button type="button" className="ghost-button" onClick={saveDraft}>
-                  Save draft file
-                </button>
-                <button type="button" className="primary-button" onClick={() => void exportBundle()}>
-                  Export bundle
-                </button>
+                {isMobile ? (
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={() => void sendToDesktop()}
+                    disabled={!canSendToDesktop || isSendingToDesktop}
+                  >
+                    {isSendingToDesktop ? "Sending..." : "Send to Desktop"}
+                  </button>
+                ) : (
+                  <>
+                    <button type="button" className="ghost-button" onClick={importDraft}>
+                      Import draft
+                    </button>
+                    <button type="button" className="ghost-button" onClick={saveDraft}>
+                      Save draft file
+                    </button>
+                    <button type="button" className="primary-button" onClick={() => void exportBundle()}>
+                      Export bundle
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </Panel>

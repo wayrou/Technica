@@ -126,6 +126,11 @@ textarea.authoring-editor {
   gap: 10px;
 }
 
+.brand-copy {
+  display: grid;
+  gap: 6px;
+}
+
 .brand-logo {
   display: block;
   width: clamp(58px, 6vw, 86px);
@@ -141,6 +146,15 @@ textarea.authoring-editor {
   line-height: 0.82;
   letter-spacing: -0.05em;
   transform: translateY(-0.06em);
+}
+
+.runtime-pill {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .hero-metrics {
@@ -404,6 +418,73 @@ textarea.authoring-editor {
   gap: 14px;
 }
 
+.mobile-session-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.mobile-session-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.mobile-session-card.full {
+  grid-column: 1 / -1;
+}
+
+.mobile-session-pairing {
+  display: grid;
+  grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: center;
+}
+
+.mobile-session-instructions {
+  display: grid;
+  gap: 14px;
+}
+
+.qr-panel {
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+}
+
+.qr-frame {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  max-width: 240px;
+  aspect-ratio: 1;
+  padding: 14px;
+  border-radius: 20px;
+  background: rgba(243, 251, 248, 0.96);
+  box-shadow: inset 0 0 0 1px rgba(4, 17, 15, 0.08);
+}
+
+.qr-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 12px;
+}
+
+.qr-copy {
+  display: grid;
+  gap: 4px;
+  text-align: center;
+}
+
+.qr-copy span {
+  color: var(--ink-soft);
+  font-size: 0.86rem;
+}
+
 .database-entry {
   text-align: left;
   display: grid;
@@ -417,6 +498,85 @@ textarea.authoring-editor {
 
 .database-entry strong {
   font-size: 0.95rem;
+}
+
+.app-shell.surface-mobile {
+  padding: 18px;
+}
+
+.app-shell.surface-mobile .app-header {
+  margin-bottom: 18px;
+}
+
+.app-shell.surface-mobile .brand-lockup {
+  align-items: center;
+}
+
+.app-shell.surface-mobile .brand-logo {
+  width: 48px;
+  height: 48px;
+}
+
+.app-shell.surface-mobile .app-header h1 {
+  font-size: clamp(1.8rem, 8vw, 2.5rem);
+  line-height: 0.95;
+  transform: none;
+}
+
+.app-shell.surface-mobile .app-main {
+  min-width: 0;
+}
+
+.app-shell.surface-mobile.device-phone .workspace-grid {
+  grid-template-columns: 1fr;
+}
+
+.app-shell.surface-mobile.device-phone .workspace-column,
+.app-shell.surface-mobile.device-phone .workspace-column.wide {
+  min-width: 0;
+}
+
+.mobile-session-banner {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(15, 178, 140, 0.1);
+  border: 1px solid rgba(15, 178, 140, 0.24);
+  color: #dff7f1;
+}
+
+.mobile-session-banner span,
+.mobile-session-banner small {
+  color: var(--ink-soft);
+}
+
+.mobile-tab-nav {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 4px 0 14px;
+  margin-bottom: 6px;
+}
+
+.mobile-tab-button {
+  flex: 0 0 auto;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(8, 17, 20, 0.92);
+  color: inherit;
+  white-space: nowrap;
+}
+
+.mobile-tab-button.active {
+  background: var(--accent-soft);
+  border-color: rgba(15, 178, 140, 0.44);
+  color: #9aeedb;
 }
 
 .database-entry span,
@@ -1104,6 +1264,18 @@ textarea.authoring-editor {
     max-height: none;
     overflow: visible;
     padding-right: 0;
+  }
+
+  .mobile-session-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .mobile-session-pairing {
+    grid-template-columns: 1fr;
+  }
+
+  .mobile-tab-nav {
+    top: 0;
   }
 }
 

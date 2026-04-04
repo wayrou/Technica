@@ -1,8 +1,9 @@
-import { useDeferredValue, useMemo, useRef, type ChangeEvent } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { ChaosCoreDatabasePanel } from "../../components/ChaosCoreDatabasePanel";
 import { IssueList } from "../../components/IssueList";
 import { Panel } from "../../components/Panel";
 import { createSampleQuest } from "../../data/sampleQuest";
+import { useTechnicaRuntime } from "../../hooks/useTechnicaRuntime";
 import { usePersistentState } from "../../hooks/usePersistentState";
 import type { QuestDocument, QuestObjective, QuestReward, QuestState, QuestStep } from "../../types/quest";
 import { isoNow } from "../../utils/date";
@@ -11,6 +12,8 @@ import { buildQuestBundleForTarget, downloadBundle, downloadDraftFile } from "..
 import { readTextFile } from "../../utils/file";
 import type { LoadedChaosCoreDatabaseEntry } from "../../utils/chaosCoreDatabase";
 import { createSequentialId } from "../../utils/id";
+import { TECHNICA_MOBILE_INBOX_OPEN_EVENT, type MobileInboxEntry } from "../../utils/mobileProtocol";
+import { submitMobileInboxEntry } from "../../utils/mobileSession";
 import {
   parseCommaList,
   parseKeyValueLines,
@@ -20,6 +23,8 @@ import {
   serializeMultilineList
 } from "../../utils/records";
 import { validateQuestDocument } from "../../utils/questValidation";
+
+const QUEST_STORAGE_KEY = "technica.quest.document";
 
 function createBlankQuest(): QuestDocument {
   const timestamp = isoNow();
@@ -79,11 +84,55 @@ function touchQuest(document: QuestDocument) {
   };
 }
 
+function isQuestDocumentPayload(value: unknown): value is QuestDocument {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<QuestDocument>;
+  return (
+    typeof candidate.id === "string" &&
+    typeof candidate.title === "string" &&
+    Array.isArray(candidate.states) &&
+    Array.isArray(candidate.steps)
+  );
+}
+
 export function QuestCreator() {
-  const [quest, setQuest] = usePersistentState("technica.quest.document", createSampleQuest());
+  const runtime = useTechnicaRuntime();
+  const [quest, setQuest] = usePersistentState(QUEST_STORAGE_KEY, createSampleQuest());
+  const [isSendingToDesktop, setIsSendingToDesktop] = useState(false);
   const importRef = useRef<HTMLInputElement | null>(null);
   const deferredQuest = useDeferredValue(quest);
   const issues = useMemo(() => validateQuestDocument(deferredQuest), [deferredQuest]);
+  const canSendToDesktop = runtime.isMobile && Boolean(runtime.sessionOrigin && runtime.pairingToken);
+
+  useEffect(() => {
+    function handleMobileInboxOpen(event: Event) {
+      const customEvent = event as CustomEvent<{ entry?: MobileInboxEntry }>;
+      const entry = customEvent.detail?.entry;
+      if (entry?.contentType !== "quest") {
+        return;
+      }
+
+      if (!isQuestDocumentPayload(entry.payload)) {
+        notify("The mobile quest draft could not be loaded because its payload is invalid.");
+        return;
+      }
+
+      setQuest(touchQuest(entry.payload));
+    }
+
+    if (typeof window !== "undefined") {
+      window.addEventListener(TECHNICA_MOBILE_INBOX_OPEN_EVENT, handleMobileInboxOpen);
+    }
+
+    return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener(TECHNICA_MOBILE_INBOX_OPEN_EVENT, handleMobileInboxOpen);
+      }
+    };
+  }, [setQuest]);
 
   function patchQuest(updater: (current: QuestDocument) => QuestDocument) {
     setQuest((current) => touchQuest(updater(current)));
@@ -168,6 +217,35 @@ export function QuestCreator() {
       setQuest(touchQuest(payload as QuestDocument));
     } catch {
       notify("Could not load the selected quest from the Chaos Core database.");
+    }
+  }
+
+  async function handleSendToDesktop() {
+    if (!runtime.sessionOrigin || !runtime.pairingToken) {
+      notify("Open this editor through the desktop pairing URL before sending content back.");
+      return;
+    }
+
+    setIsSendingToDesktop(true);
+    try {
+      const currentQuest = touchQuest(quest);
+      const sendResult = await submitMobileInboxEntry({
+        sessionOrigin: runtime.sessionOrigin,
+        pairingToken: runtime.pairingToken,
+        deviceType: runtime.deviceType,
+        request: {
+          contentType: "quest",
+          contentId: currentQuest.id,
+          title: currentQuest.title,
+          summary: `${currentQuest.objectives.length} objectives, ${currentQuest.steps.length} steps, ${currentQuest.states.length} states`,
+          payload: currentQuest
+        }
+      });
+      notify(sendResult.message);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Could not send this quest draft to the desktop inbox.");
+    } finally {
+      setIsSendingToDesktop(false);
     }
   }
 
@@ -312,25 +390,38 @@ export function QuestCreator() {
               <span className="pill accent">Chaos Core export</span>
             </div>
             <div className="toolbar">
-              <button type="button" className="ghost-button" onClick={() => importRef.current?.click()}>
-                Import draft
-              </button>
-              <button type="button" className="ghost-button" onClick={() => downloadDraftFile("quest", quest.title, quest)}>
-                Save draft file
-              </button>
-              <button
-                type="button"
-                className="primary-button"
-                onClick={async () => {
-                  try {
-                    await downloadBundle(buildQuestBundleForTarget(quest, "chaos-core"));
-                  } catch (error) {
-                    notify(error instanceof Error ? error.message : "Could not export the quest bundle.");
-                  }
-                }}
-              >
-                Export bundle
-              </button>
+              {runtime.isMobile ? (
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => void handleSendToDesktop()}
+                  disabled={!canSendToDesktop || isSendingToDesktop}
+                >
+                  {isSendingToDesktop ? "Sending..." : "Send to Desktop"}
+                </button>
+              ) : (
+                <>
+                  <button type="button" className="ghost-button" onClick={() => importRef.current?.click()}>
+                    Import draft
+                  </button>
+                  <button type="button" className="ghost-button" onClick={() => downloadDraftFile("quest", quest.title, quest)}>
+                    Save draft file
+                  </button>
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={async () => {
+                      try {
+                        await downloadBundle(buildQuestBundleForTarget(quest, "chaos-core"));
+                      } catch (error) {
+                        notify(error instanceof Error ? error.message : "Could not export the quest bundle.");
+                      }
+                    }}
+                  >
+                    Export bundle
+                  </button>
+                </>
+              )}
               <input ref={importRef} hidden type="file" accept=".json" onChange={handleImportFile} />
             </div>
           </div>

@@ -11,6 +11,7 @@ import { ChaosCoreDatabasePanel } from "../../components/ChaosCoreDatabasePanel"
 import { IssueList } from "../../components/IssueList";
 import { Panel } from "../../components/Panel";
 import { createSampleMap } from "../../data/sampleMap";
+import { useTechnicaRuntime } from "../../hooks/useTechnicaRuntime";
 import { usePersistentState } from "../../hooks/usePersistentState";
 import type { MapBrushState, MapDocument, MapObject, MapZone } from "../../types/map";
 import type { NpcDocument } from "../../types/npc";
@@ -23,6 +24,8 @@ import {
   downloadDraftFile
 } from "../../utils/exporters";
 import { readTextFile } from "../../utils/file";
+import { TECHNICA_MOBILE_INBOX_OPEN_EVENT, type MobileInboxEntry } from "../../utils/mobileProtocol";
+import { submitMobileInboxEntry } from "../../utils/mobileSession";
 import {
   isTauriRuntime,
   listChaosCoreDatabase,
@@ -55,6 +58,8 @@ type MapNpcMarker = {
   origin: "game" | "technica";
   sourceFile?: string;
 };
+
+const MAP_STORAGE_KEY = "technica.map.document";
 
 function touchMap(document: MapDocument) {
   return {
@@ -103,8 +108,24 @@ function isNpcDocument(value: unknown): value is NpcDocument {
   );
 }
 
+function isMapDocumentPayload(value: unknown): value is MapDocument {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<MapDocument>;
+  return (
+    typeof candidate.id === "string" &&
+    typeof candidate.name === "string" &&
+    typeof candidate.width === "number" &&
+    typeof candidate.height === "number" &&
+    Array.isArray(candidate.tiles)
+  );
+}
+
 export function MapEditor() {
-  const [map, setMap] = usePersistentState("technica.map.document", createSampleMap());
+  const runtime = useTechnicaRuntime();
+  const [map, setMap] = usePersistentState(MAP_STORAGE_KEY, createSampleMap());
   const [repoPath] = usePersistentState("technica.chaosCoreRepoPath", "");
   const [tool, setTool] = useState<MapTool>("paint");
   const [brush, setBrush] = useState<MapBrushState>({
@@ -129,6 +150,7 @@ export function MapEditor() {
   const [mapNpcMarkers, setMapNpcMarkers] = useState<MapNpcMarker[]>([]);
   const [selectedNpcEntryKey, setSelectedNpcEntryKey] = useState("");
   const [isPlacingNpc, setIsPlacingNpc] = useState(false);
+  const [isSendingToDesktop, setIsSendingToDesktop] = useState(false);
   const [isPainting, setIsPainting] = useState(false);
   const [zoneDrag, setZoneDrag] = useState<{ start: { x: number; y: number }; end: { x: number; y: number } } | null>(null);
   const [panState, setPanState] = useState<{
@@ -141,6 +163,7 @@ export function MapEditor() {
   const importRef = useRef<HTMLInputElement | null>(null);
   const deferredMap = useDeferredValue(map);
   const issues = useMemo(() => validateMapDocument(deferredMap), [deferredMap]);
+  const canSendToDesktop = runtime.isMobile && Boolean(runtime.sessionOrigin && runtime.pairingToken);
   const selectedObject = map.objects.find((item) => item.id === selectedObjectId) ?? null;
   const selectedZone = map.zones.find((item) => item.id === selectedZoneId) ?? null;
   const selectedNpcEntry = npcEntries.find((entry) => entry.entryKey === selectedNpcEntryKey) ?? null;
@@ -248,6 +271,33 @@ export function MapEditor() {
       cancelled = true;
     };
   }, [map.id, repoPath]);
+
+  useEffect(() => {
+    function handleMobileInboxOpen(event: Event) {
+      const customEvent = event as CustomEvent<{ entry?: MobileInboxEntry }>;
+      const entry = customEvent.detail?.entry;
+      if (entry?.contentType !== "map") {
+        return;
+      }
+
+      if (!isMapDocumentPayload(entry.payload)) {
+        notify("The mobile map draft could not be loaded because its payload is invalid.");
+        return;
+      }
+
+      setMap(touchMap(entry.payload));
+    }
+
+    if (typeof window !== "undefined") {
+      window.addEventListener(TECHNICA_MOBILE_INBOX_OPEN_EVENT, handleMobileInboxOpen);
+    }
+
+    return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener(TECHNICA_MOBILE_INBOX_OPEN_EVENT, handleMobileInboxOpen);
+      }
+    };
+  }, [setMap]);
 
   async function placeNpcOnMap(x: number, y: number) {
     if (!isTauriRuntime()) {
@@ -520,6 +570,35 @@ export function MapEditor() {
     }
   }
 
+  async function handleSendToDesktop() {
+    if (!runtime.sessionOrigin || !runtime.pairingToken) {
+      notify("Open this editor through the desktop pairing URL before sending content back.");
+      return;
+    }
+
+    setIsSendingToDesktop(true);
+    try {
+      const currentMap = touchMap(map);
+      const sendResult = await submitMobileInboxEntry({
+        sessionOrigin: runtime.sessionOrigin,
+        pairingToken: runtime.pairingToken,
+        deviceType: runtime.deviceType,
+        request: {
+          contentType: "map",
+          contentId: currentMap.id,
+          title: currentMap.name,
+          summary: `${currentMap.width}x${currentMap.height} · ${currentMap.objects.length} objects · ${currentMap.zones.length} zones`,
+          payload: currentMap
+        }
+      });
+      notify(sendResult.message);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Could not send this map draft to the desktop inbox.");
+    } finally {
+      setIsSendingToDesktop(false);
+    }
+  }
+
   return (
     <div className="workspace-grid">
       <div className="workspace-column">
@@ -685,25 +764,38 @@ export function MapEditor() {
               <button type="button" className="ghost-button" onClick={handleResizeMap}>
                 Apply size
               </button>
-              <button type="button" className="ghost-button" onClick={() => importRef.current?.click()}>
-                Import draft
-              </button>
-              <button type="button" className="ghost-button" onClick={() => downloadDraftFile("map", map.name, map)}>
-                Save draft file
-              </button>
-              <button
-                type="button"
-                className="primary-button"
-                onClick={async () => {
-                  try {
-                    await downloadBundle(buildMapBundleForTarget(map, "chaos-core"));
-                  } catch (error) {
-                    notify(error instanceof Error ? error.message : "Could not export the map bundle.");
-                  }
-                }}
-              >
-                Export bundle
-              </button>
+              {runtime.isMobile ? (
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => void handleSendToDesktop()}
+                  disabled={!canSendToDesktop || isSendingToDesktop}
+                >
+                  {isSendingToDesktop ? "Sending..." : "Send to Desktop"}
+                </button>
+              ) : (
+                <>
+                  <button type="button" className="ghost-button" onClick={() => importRef.current?.click()}>
+                    Import draft
+                  </button>
+                  <button type="button" className="ghost-button" onClick={() => downloadDraftFile("map", map.name, map)}>
+                    Save draft file
+                  </button>
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={async () => {
+                      try {
+                        await downloadBundle(buildMapBundleForTarget(map, "chaos-core"));
+                      } catch (error) {
+                        notify(error instanceof Error ? error.message : "Could not export the map bundle.");
+                      }
+                    }}
+                  >
+                    Export bundle
+                  </button>
+                </>
+              )}
               <input ref={importRef} hidden type="file" accept=".json" onChange={handleImportFile} />
             </div>
           </div>

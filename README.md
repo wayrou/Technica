@@ -36,4 +36,6 @@ Each export bundle is zipped and contains:
 - [`src/features/map`](/Users/alexhungate/Desktop/technica-core/src/features/map): Map Editor UI and grid helpers
 - [`src-tauri`](/Users/alexhungate/Desktop/technica-core/src-tauri): Tauri desktop shell
 - [`docs`](/Users/alexhungate/Desktop/technica-core/docs): Architecture, schema, and import docs
+- [`docs/mobile-architecture.md`](/Users/alexhungate/Desktop/technica-core/docs/mobile-architecture.md): Mobile/web companion plan for phone and tablet without app-store-first distribution
+- [`docs/mobile-phase-1-backlog.md`](/Users/alexhungate/Desktop/technica-core/docs/mobile-phase-1-backlog.md): Concrete Phase 1 mobile delivery backlog with file-level implementation targets
 - [`examples/exports`](/Users/alexhungate/Desktop/technica-core/examples/exports): Sample export bundles in unzipped form

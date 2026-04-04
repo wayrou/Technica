@@ -65,11 +65,14 @@ export function NpcEditor() {
       validate={validateNpcDocument}
       buildBundleForTarget={buildNpcBundleForTarget}
       getTitle={(document) => document.name}
+      getMobileSendSummary={(document) =>
+        `${document.mapId || "no map"} · ${document.routeMode} route · ${document.routePoints.length} route point(s)`
+      }
       isImportPayload={isNpcDocument}
       touchDocument={touchNpc}
       replacePrompt="Replace the current NPC draft with the imported file?"
       invalidImportMessage="That file does not look like a Technica NPC draft or export."
-      renderWorkspace={({ document, setDocument, patchDocument, exportTarget, setExportTarget, loadSample, clearDocument, importDraft, saveDraft, exportBundle }) => (
+      renderWorkspace={({ document, setDocument, patchDocument, loadSample, clearDocument, importDraft, saveDraft, exportBundle, isMobile, canSendToDesktop, isSendingToDesktop, sendToDesktop }) => (
         <>
           <Panel
             title="NPC Setup"
@@ -292,15 +295,28 @@ export function NpcEditor() {
                 <span className="pill accent">Chaos Core export</span>
               </div>
               <div className="toolbar">
-                <button type="button" className="ghost-button" onClick={importDraft}>
-                  Import draft
-                </button>
-                <button type="button" className="ghost-button" onClick={saveDraft}>
-                  Save draft file
-                </button>
-                <button type="button" className="primary-button" onClick={() => void exportBundle()}>
-                  Export bundle
-                </button>
+                {isMobile ? (
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={() => void sendToDesktop()}
+                    disabled={!canSendToDesktop || isSendingToDesktop}
+                  >
+                    {isSendingToDesktop ? "Sending..." : "Send to Desktop"}
+                  </button>
+                ) : (
+                  <>
+                    <button type="button" className="ghost-button" onClick={importDraft}>
+                      Import draft
+                    </button>
+                    <button type="button" className="ghost-button" onClick={saveDraft}>
+                      Save draft file
+                    </button>
+                    <button type="button" className="primary-button" onClick={() => void exportBundle()}>
+                      Export bundle
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </Panel>
