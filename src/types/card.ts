@@ -1,4 +1,5 @@
 import type { ImageAsset, KeyValueRecord } from "./common";
+import type { EffectFlowDocument } from "./effectFlow";
 
 export type CardDocumentType = "core" | "class" | "equipment" | "gambit";
 export type CardDocumentRarity = "common" | "uncommon" | "rare" | "epic" | "legendary";
@@ -19,6 +20,10 @@ export type CardEffectBlockAction =
   | "atk_up"
   | "agi_up"
   | "acc_up"
+  | "def_down"
+  | "atk_down"
+  | "agi_down"
+  | "acc_down"
   | "push"
   | "move"
   | "stun"
@@ -47,6 +52,10 @@ export const cardEffectBlockActions: CardEffectBlockAction[] = [
   "atk_up",
   "agi_up",
   "acc_up",
+  "def_down",
+  "atk_down",
+  "agi_down",
+  "acc_down",
   "push",
   "move",
   "stun",
@@ -87,6 +96,7 @@ export interface CardDocument {
   targetType: CardDocumentTargetType;
   range: number;
   damage?: number;
+  effectFlow: EffectFlowDocument;
   effectComposerMode: CardEffectComposerMode;
   effectBlocks: CardEffectBlockDocument[];
   effects: CardEffectDocument[];

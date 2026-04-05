@@ -10,7 +10,8 @@ import type { NpcDocument } from "../types/npc";
 import type { OperationDocument } from "../types/operation";
 import type { SchemaDocument } from "../types/schema";
 import type { UnitDocument } from "../types/unit";
-import { compileCardEffectBlocks } from "./cardComposer";
+import { createLegacyCardEffectsFromFlow } from "./cardComposer";
+import { validateEffectFlowDocument } from "./effectFlow";
 
 function requireText(value: string, field: string, label: string, issues: ValidationIssue[]) {
   if (!value.trim()) {
@@ -226,7 +227,8 @@ export function validateFieldModDocument(document: FieldModDocument): Validation
 
   requireText(document.id, "id", "Field mod id", issues);
   requireText(document.name, "name", "Field mod name", issues);
-  requireText(document.effects, "effects", "Field mod effects", issues);
+  requirePositive(document.chance, "chance", "Proc chance", issues);
+  requirePositive(document.maxStacks, "maxStacks", "Max stacks", issues, false);
   requirePositive(document.cost, "cost", "Field mod cost", issues, false);
   requirePositive(
     document.unlockAfterOperationFloor,
@@ -234,6 +236,14 @@ export function validateFieldModDocument(document: FieldModDocument): Validation
     "Field mod unlock floor",
     issues
   );
+  if (document.chance > 1) {
+    issues.push({
+      severity: "error",
+      field: "chance",
+      message: "Proc chance cannot be greater than 1.",
+    });
+  }
+  issues.push(...validateEffectFlowDocument(document.effectFlow, "effectFlow"));
 
   return issues;
 }
@@ -396,7 +406,7 @@ export function validateSchemaDocument(document: SchemaDocument): ValidationIssu
 
 export function validateCardDocument(document: CardDocument): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  const compiledEffects = document.effectComposerMode === "blocks" ? compileCardEffectBlocks(document.effectBlocks) : document.effects;
+  const compiledEffects = createLegacyCardEffectsFromFlow(document.effectFlow);
 
   requireText(document.id, "id", "Card id", issues);
   requireText(document.name, "name", "Card name", issues);
@@ -427,18 +437,7 @@ export function validateCardDocument(document: CardDocument): ValidationIssue[] 
       message: "Every effect entry needs a type."
     });
   }
-
-  if (document.effectComposerMode === "blocks") {
-    if (document.effectBlocks.length === 0) {
-      issues.push({
-        severity: "warning",
-        field: "effectBlocks",
-        message: "Add at least one effect block or switch the composer to manual mode."
-      });
-    }
-
-    warnOnDuplicates(document.effectBlocks.map((block) => block.id), "effectBlocks", "Effect block ids", issues);
-  }
+  issues.push(...validateEffectFlowDocument(document.effectFlow, "effectFlow"));
 
   validateImageAsset(document.artAsset, "artAsset", "Card art", issues);
 

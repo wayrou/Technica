@@ -2,7 +2,7 @@ import type { EditorKind } from "../types/common";
 import { isTauriRuntime } from "./chaosCoreDatabase";
 
 export type TechnicaTabId = EditorKind | "database";
-export type TechnicaPopoutId = TechnicaTabId | "card-preview" | "class-preview";
+export type TechnicaPopoutId = TechnicaTabId | "card-preview" | "class-preview" | "card-flow" | "fieldmod-flow";
 
 export function getRequestedPopoutTab(): TechnicaPopoutId | null {
   if (typeof window === "undefined") {
@@ -32,7 +32,9 @@ export function getRequestedPopoutTab(): TechnicaPopoutId | null {
     tab === "class" ||
     tab === "database" ||
     tab === "card-preview" ||
-    tab === "class-preview"
+    tab === "class-preview" ||
+    tab === "card-flow" ||
+    tab === "fieldmod-flow"
   ) {
     return tab;
   }

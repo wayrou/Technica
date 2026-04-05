@@ -19,8 +19,9 @@ import type { OperationDocument } from "../types/operation";
 import type { SchemaDocument } from "../types/schema";
 import type { UnitDocument } from "../types/unit";
 import { createImageAssetExport } from "./assets";
-import { compileCardEffectBlocks } from "./cardComposer";
+import { createLegacyCardEffectsFromFlow } from "./cardComposer";
 import { isoNow } from "./date";
+import { summarizeEffectFlow } from "./effectFlow";
 import { createWorkspaceReferenceIndex } from "./chaosCoreExport";
 import { runtimeId, slugify } from "./id";
 
@@ -437,10 +438,17 @@ export function buildChaosCoreFieldModBundle(document: FieldModDocument): Export
   const contentId = runtimeId(document.id || document.name, "field_mod");
   const entryFile = `${contentId}.fieldmod.json`;
   const sourceFile = `${contentId}.source.json`;
+  const summaryText = `${document.trigger}: ${summarizeEffectFlow(document.effectFlow).join(" Then ")}`.trim();
   const runtimeDocument = pruneEmpty({
     id: contentId,
     name: document.name,
-    effects: document.effects,
+    description: summaryText,
+    effects: document.effects || summaryText,
+    trigger: document.trigger,
+    chance: document.chance,
+    stackMode: document.stackMode,
+    maxStacks: document.maxStacks,
+    effectFlow: document.effectFlow,
     scope: document.scope,
     cost: document.cost,
     rarity: document.rarity,
@@ -449,7 +457,7 @@ export function buildChaosCoreFieldModBundle(document: FieldModDocument): Export
 
   const manifest = createManifest(
     "fieldmod",
-    "field-mod.v1",
+    "field-mod.v2",
     contentId,
     document.name,
     "Chaos Core-targeted field mod export.",
@@ -473,7 +481,8 @@ Runtime entry: \`${entryFile}\`
 Content id: \`${contentId}\`
 
 Importer notes:
-- Field mods capture the player-facing effect summary, scope, cost, and rarity for black-market style content authoring.
+- Field mods now export trigger metadata plus a shared effect-flow graph for Chaos Core's proc executor.
+- \`description\` and \`effects\` remain as compatibility summaries for UI surfaces that still expect plain text.
 - \`unlockAfterOperationFloor\` gates when the field mod becomes available after campaign progression.
 - \`${sourceFile}\` preserves the original Technica field mod document.
 `
@@ -701,6 +710,7 @@ export function buildChaosCoreCardBundle(
   const entryFile = `${contentId}.card.json`;
   const sourceFile = `${contentId}.source.json`;
   const artAsset = document.artAsset ? createImageAssetExport(contentId, "art", document.artAsset) : null;
+  const legacyEffects = createLegacyCardEffectsFromFlow(document.effectFlow);
   const runtimeDocument = pruneEmpty({
     id: contentId,
     name: document.name,
@@ -712,7 +722,8 @@ export function buildChaosCoreCardBundle(
     targetType: document.targetType,
     range: document.range,
     damage: document.damage,
-    effects: document.effectComposerMode === "blocks" ? compileCardEffectBlocks(document.effectBlocks) : document.effects,
+    effectFlow: document.effectFlow,
+    effects: legacyEffects,
     sourceClassId: document.sourceClassId ? runtimeId(document.sourceClassId) : undefined,
     sourceEquipmentId: document.sourceEquipmentId ? runtimeId(document.sourceEquipmentId) : undefined,
     artPath: artAsset?.runtimePath,
@@ -721,7 +732,7 @@ export function buildChaosCoreCardBundle(
 
   const manifest = createManifest(
     "card",
-    "battle-card.v1",
+    "battle-card.v2",
     contentId,
     document.name,
     "Chaos Core runtime battle card export.",
@@ -737,6 +748,7 @@ Content id: \`${contentId}\`
 
 Importer notes:
 - Imported cards populate both the battle card runtime and Chaos Core's card library metadata.
+- \`effectFlow\` is now the primary scripted runtime source of truth; \`effects\` is exported as a compatibility projection.
 - Class and gear source references are normalized when provided.
 - Attached card art resolves through \`artPath\` when present.
 - \`${sourceFile}\` preserves the authoring document.

@@ -1,10 +1,19 @@
 import type {
   CardDocument,
+  CardDocumentTargetType,
   CardEffectBlockAction,
   CardEffectBlockDocument,
   CardEffectComposerMode,
   CardEffectDocument,
 } from "../types/card";
+import type { EffectActionNode, EffectFlowDocument, EffectSelectorKind } from "../types/effectFlow";
+import {
+  createActionNode,
+  createBlankEffectFlow,
+  createEffectFlowScript,
+  humanizeToken,
+  normalizeEffectFlowDocument,
+} from "./effectFlow";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -29,24 +38,26 @@ function readCardEffectComposerMode(value: unknown): CardEffectComposerMode {
 }
 
 function readCardEffectBlockAction(value: unknown): CardEffectBlockAction {
-  if (
-    value === "damage" ||
-    value === "heal" ||
-    value === "def_up" ||
-    value === "atk_up" ||
-    value === "agi_up" ||
-    value === "acc_up" ||
-    value === "push" ||
-    value === "move" ||
-    value === "stun" ||
-    value === "burn" ||
-    value === "set_flag" ||
-    value === "end_turn"
-  ) {
-    return value;
+  switch (value) {
+    case "heal":
+    case "def_up":
+    case "atk_up":
+    case "agi_up":
+    case "acc_up":
+    case "def_down":
+    case "atk_down":
+    case "agi_down":
+    case "acc_down":
+    case "push":
+    case "move":
+    case "stun":
+    case "burn":
+    case "set_flag":
+    case "end_turn":
+      return value;
+    default:
+      return "damage";
   }
-
-  return "damage";
 }
 
 function createComposerId(prefix: string) {
@@ -92,10 +103,9 @@ function normalizeEffectBlock(value: unknown, index: number): CardEffectBlockDoc
     return null;
   }
 
-  const action = readCardEffectBlockAction(record.action ?? record.type);
   return createCardEffectBlock({
     id: readString(record.id, `effect_${index + 1}`),
-    action,
+    action: readCardEffectBlockAction(record.action ?? record.type),
     amount: readNumber(record.amount),
     duration: readNumber(record.duration),
     stat: readOptionalString(record.stat),
@@ -103,6 +113,120 @@ function normalizeEffectBlock(value: unknown, index: number): CardEffectBlockDoc
     note: readOptionalString(record.note),
     condition: readOptionalString(record.condition),
   });
+}
+
+function selectorForCardTarget(targetType: CardDocumentTargetType): EffectSelectorKind {
+  switch (targetType) {
+    case "enemy":
+    case "ally":
+      return "chosen_target";
+    case "tile":
+      return "chosen_tile";
+    default:
+      return "self";
+  }
+}
+
+function statusFromLegacyType(type: string) {
+  switch (type) {
+    case "stun":
+      return "stunned";
+    case "burn":
+      return "burning";
+    default:
+      return undefined;
+  }
+}
+
+function legacyActionToNode(effect: CardEffectDocument, targetType: CardDocumentTargetType, index: number): EffectActionNode {
+  const selector = selectorForCardTarget(targetType);
+  switch (effect.type) {
+    case "damage":
+      return createActionNode("deal_damage", { id: `legacy_action_${index + 1}`, amount: effect.amount ?? 0, selector });
+    case "heal":
+      return createActionNode("heal", { id: `legacy_action_${index + 1}`, amount: effect.amount ?? 0, selector });
+    case "def_up":
+    case "atk_up":
+    case "agi_up":
+    case "acc_up":
+      return createActionNode("modify_stat", {
+        id: `legacy_action_${index + 1}`,
+        amount: effect.amount ?? 0,
+        duration: effect.duration,
+        stat: (effect.type.replace("_up", "") as EffectActionNode["stat"]) ?? "def",
+        modifierMode: "buff",
+        selector,
+      });
+    case "def_down":
+    case "atk_down":
+    case "agi_down":
+    case "acc_down":
+      return createActionNode("modify_stat", {
+        id: `legacy_action_${index + 1}`,
+        amount: effect.amount ?? 0,
+        duration: effect.duration,
+        stat: (effect.type.replace("_down", "") as EffectActionNode["stat"]) ?? "def",
+        modifierMode: "debuff",
+        selector,
+      });
+    case "push":
+      return createActionNode("knockback", {
+        id: `legacy_action_${index + 1}`,
+        tiles: effect.tiles ?? effect.amount,
+        selector,
+      });
+    case "move":
+      return createActionNode("move_target", {
+        id: `legacy_action_${index + 1}`,
+        tiles: effect.tiles ?? effect.amount,
+        selector,
+      });
+    case "stun":
+    case "burn":
+      return createActionNode("apply_status", {
+        id: `legacy_action_${index + 1}`,
+        duration: effect.duration ?? 1,
+        status: statusFromLegacyType(effect.type),
+        selector,
+      });
+    case "set_flag":
+      return createActionNode("set_flag", {
+        id: `legacy_action_${index + 1}`,
+        flagKey: effect.stat ?? "scenario_flag",
+        flagValue: String(effect.amount ?? 1),
+      });
+    case "end_turn":
+      return createActionNode("end_turn", {
+        id: `legacy_action_${index + 1}`,
+        selector,
+      });
+    default:
+      return createActionNode("deal_damage", { id: `legacy_action_${index + 1}`, amount: effect.amount ?? 0, selector });
+  }
+}
+
+export function createCardEffectFlowFromLegacyEffects(
+  effects: CardEffectDocument[],
+  targetType: CardDocumentTargetType
+): EffectFlowDocument {
+  if (effects.length === 0) {
+    return createBlankEffectFlow();
+  }
+
+  const nodes = effects.map((effect, index) => legacyActionToNode(effect, targetType, index));
+  const edges = nodes.slice(0, -1).map((node, index) => ({
+    id: `legacy_edge_${index + 1}`,
+    fromNodeId: node.id,
+    toNodeId: nodes[index + 1].id,
+    kind: "next" as const,
+  }));
+
+  return {
+    version: 1,
+    entryNodeId: nodes[0]?.id ?? null,
+    nodes,
+    edges,
+  };
 }
 
 export function compileCardEffectBlocks(blocks: CardEffectBlockDocument[]): CardEffectDocument[] {
@@ -128,6 +252,52 @@ export function cardEffectBlocksFromEffects(effects: CardEffectDocument[]): Card
   );
 }
 
+function legacyEffectsFromActionNode(node: EffectActionNode): CardEffectDocument[] {
+  switch (node.action) {
+    case "deal_damage":
+      return [{ type: "damage", amount: node.amount }];
+    case "heal":
+      return [{ type: "heal", amount: node.amount }];
+    case "grant_shield":
+      return [{ type: "def_up", amount: node.amount, duration: node.duration }];
+    case "draw_cards":
+      return [{ type: "draw", amount: node.amount }];
+    case "modify_stat":
+      return node.stat
+        ? [
+            {
+              type: `${node.stat}_${node.modifierMode === "debuff" ? "down" : "up"}`,
+              amount: node.amount,
+              duration: node.duration,
+              stat: node.stat,
+            },
+          ]
+        : [];
+    case "apply_status":
+      if (node.status === "stunned") {
+        return [{ type: "stun", duration: node.duration }];
+      }
+      if (node.status === "burning") {
+        return [{ type: "burn", duration: node.duration, amount: node.amount }];
+      }
+      return [{ type: humanizeToken(node.status ?? "status").toLowerCase(), duration: node.duration, amount: node.amount }];
+    case "move_target":
+      return [{ type: "move", tiles: node.tiles ?? node.amount }];
+    case "knockback":
+      return [{ type: "push", tiles: node.tiles ?? node.amount }];
+    case "end_turn":
+      return [{ type: "end_turn" }];
+    case "set_flag":
+      return [{ type: "set_flag", stat: node.flagKey, amount: node.flagValue ? Number(node.flagValue) || 1 : 1 }];
+    default:
+      return [];
+  }
+}
+
+export function createLegacyCardEffectsFromFlow(flow: EffectFlowDocument): CardEffectDocument[] {
+  return flow.nodes.flatMap((node) => (node.family === "action" ? legacyEffectsFromActionNode(node) : []));
+}
+
 export function normalizeCardDocument(value: unknown, fallback: CardDocument): CardDocument {
   const record = toRecord(value);
   if (!record) {
@@ -144,7 +314,12 @@ export function normalizeCardDocument(value: unknown, fallback: CardDocument): C
     : [];
   const effectComposerMode = readCardEffectComposerMode(record.effectComposerMode);
   const effectBlocks = rawBlocks.length > 0 ? rawBlocks : cardEffectBlocksFromEffects(rawEffects);
-  const effects = effectComposerMode === "manual" ? rawEffects : compileCardEffectBlocks(effectBlocks);
+  const legacyEffects = effectComposerMode === "manual" ? rawEffects : rawBlocks.length > 0 ? compileCardEffectBlocks(effectBlocks) : rawEffects;
+  const effectFlow = (() => {
+    const normalizedFlow = normalizeEffectFlowDocument(record.effectFlow);
+    return normalizedFlow.nodes.length > 0 ? normalizedFlow : createCardEffectFlowFromLegacyEffects(legacyEffects, (record.targetType as CardDocumentTargetType) ?? fallback.targetType);
+  })();
+  const effects = legacyEffects.length > 0 ? legacyEffects : createLegacyCardEffectsFromFlow(effectFlow);
   const metadata = toRecord(record.metadata);
 
   return {
@@ -161,6 +336,7 @@ export function normalizeCardDocument(value: unknown, fallback: CardDocument): C
     targetType: (record.targetType as CardDocument["targetType"]) ?? fallback.targetType,
     range: readNumber(record.range) ?? fallback.range,
     damage: readNumber(record.damage),
+    effectFlow,
     effectComposerMode,
     effectBlocks,
     effects,
@@ -175,10 +351,6 @@ export function normalizeCardDocument(value: unknown, fallback: CardDocument): C
   };
 }
 
-function humanizeAction(action: CardEffectBlockAction) {
-  return action.replace(/_/g, " ").replace(/\b\w/g, (character) => character.toUpperCase());
-}
-
 export function describeCardEffectBlock(block: CardEffectBlockDocument) {
   const amount = block.amount !== undefined ? ` ${block.amount}` : "";
   const stat = block.stat ? ` ${block.stat.toUpperCase()}` : "";
@@ -187,13 +359,9 @@ export function describeCardEffectBlock(block: CardEffectBlockDocument) {
   const condition = block.condition?.trim() ? ` if ${block.condition.trim()}` : "";
   const note = block.note?.trim() ? ` // ${block.note.trim()}` : "";
 
-  return `${humanizeAction(block.action)}${amount}${stat}${tiles}${duration}${condition}${note}`.trim();
+  return `${humanizeToken(block.action)}${amount}${stat}${tiles}${duration}${condition}${note}`.trim();
 }
 
-export function createCardEffectScript(blocks: CardEffectBlockDocument[]) {
-  if (blocks.length === 0) {
-    return ["PLAY -> NO EFFECT BLOCKS"];
-  }
-
-  return blocks.map((block, index) => `${index === 0 ? "PLAY" : "THEN"} -> ${describeCardEffectBlock(block)}`);
+export function createCardEffectScript(effectFlow: EffectFlowDocument) {
+  return createEffectFlowScript(effectFlow);
 }

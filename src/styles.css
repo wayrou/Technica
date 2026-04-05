@@ -207,7 +207,8 @@ textarea.authoring-editor {
   --surface-stripe: rgba(255, 225, 186, 0.016);
 }
 
-.app-shell[data-active-tab="fieldmod"] {
+.app-shell[data-active-tab="fieldmod"],
+.app-shell[data-active-tab="fieldmod-flow"] {
   --surface-glow-left: rgba(131, 98, 204, 0.18);
   --surface-glow-right: rgba(86, 167, 192, 0.14);
   --surface-core-top: #151328;
@@ -230,6 +231,7 @@ textarea.authoring-editor {
 }
 
 .app-shell[data-active-tab="card"],
+.app-shell[data-active-tab="card-flow"],
 .app-shell[data-active-tab="card-preview"] {
   --surface-glow-left: rgba(94, 118, 222, 0.2);
   --surface-glow-right: rgba(240, 185, 89, 0.16);
@@ -610,6 +612,10 @@ textarea.authoring-editor {
 
 .tool-suite-grid.tool-suite-grid-dual {
   grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.78fr);
+}
+
+.tool-suite-span-full {
+  grid-column: 1 / -1;
 }
 
 .tool-suite-column {
@@ -1168,23 +1174,12 @@ textarea.authoring-editor {
   justify-self: center;
 }
 
-.card-preview-script-shell {
-  display: grid;
-  gap: 8px;
-}
-
-.card-preview-script-title,
 .class-grid-preview-title {
   color: var(--gold);
   font-size: 0.76rem;
   font-weight: 800;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-}
-
-.card-preview-script {
-  margin: 0;
-  min-height: 160px;
 }
 
 .class-grid-preview-shell {
@@ -1997,12 +1992,79 @@ textarea.authoring-editor {
   padding: 16px;
 }
 
+.effect-flow-composer {
+  display: grid;
+  grid-template-columns: minmax(230px, 0.64fr) minmax(0, 1.8fr) minmax(320px, 0.92fr);
+  gap: 16px;
+  align-items: start;
+  width: 100%;
+}
+
+.effect-flow-palette,
+.effect-flow-inspector {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.effect-flow-board {
+  min-width: 0;
+}
+
+.effect-flow-panel .panel-body {
+  padding-inline: 24px;
+}
+
+.effect-flow-popout-panel {
+  min-height: calc(100vh - 108px);
+}
+
+.effect-flow-popout-panel .panel-body {
+  min-height: calc(100vh - 210px);
+}
+
+.effect-flow-palette-group {
+  display: grid;
+  gap: 10px;
+}
+
+.effect-flow-palette-label {
+  color: var(--gold);
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.effect-flow-node-card {
+  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+}
+
+.effect-flow-node-card.active {
+  border-color: rgba(15, 178, 140, 0.44);
+  background: linear-gradient(180deg, rgba(12, 26, 29, 0.92), rgba(8, 17, 20, 0.88));
+  transform: translateY(-1px);
+  box-shadow: inset 0 0 0 1px rgba(15, 178, 140, 0.08);
+}
+
+.effect-flow-link-grid {
+  margin-top: 12px;
+}
+
+.effect-flow-summary-line {
+  margin: 0;
+}
+
 @media (max-width: 1240px) {
   .workspace-grid {
     grid-template-columns: 1fr;
   }
 
   .tool-suite-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .effect-flow-composer {
     grid-template-columns: 1fr;
   }
 

@@ -1,5 +1,5 @@
 import type { CardDocument } from "../types/card";
-import { compileCardEffectBlocks, createCardEffectScript, normalizeCardDocument } from "../utils/cardComposer";
+import { createLegacyCardEffectsFromFlow, normalizeCardDocument } from "../utils/cardComposer";
 
 function humanizeToken(value: string) {
   return value
@@ -33,6 +33,14 @@ function formatEffectLine(effect: CardDocument["effects"][number]) {
       return `Gain +${effect.amount ?? 0} AGI${formatTurns(effect.duration)}.`;
     case "acc_up":
       return `Gain +${effect.amount ?? 0} ACC${formatTurns(effect.duration)}.`;
+    case "def_down":
+      return `Inflict -${effect.amount ?? 0} DEF${formatTurns(effect.duration)}.`;
+    case "atk_down":
+      return `Inflict -${effect.amount ?? 0} ATK${formatTurns(effect.duration)}.`;
+    case "agi_down":
+      return `Inflict -${effect.amount ?? 0} AGI${formatTurns(effect.duration)}.`;
+    case "acc_down":
+      return `Inflict -${effect.amount ?? 0} ACC${formatTurns(effect.duration)}.`;
     case "push":
       return `Push ${effect.tiles ?? effect.amount ?? 1} tile${(effect.tiles ?? effect.amount ?? 1) === 1 ? "" : "s"}.`;
     case "move":
@@ -77,11 +85,7 @@ function getCategoryBadge(category: string) {
 
 export function CardFacePreview({ document }: { document: CardDocument }) {
   const normalized = normalizeCardDocument(document, document);
-  const compiledEffects =
-    normalized.effectComposerMode === "blocks"
-      ? compileCardEffectBlocks(normalized.effectBlocks)
-      : normalized.effects;
-  const scriptLines = createCardEffectScript(normalized.effectBlocks);
+  const compiledEffects = createLegacyCardEffectsFromFlow(normalized.effectFlow);
   const effectLines = compiledEffects.map((effect) => formatEffectLine(effect));
   const cardCopy = [normalized.description.trim(), ...effectLines].filter(Boolean);
 
@@ -116,11 +120,6 @@ export function CardFacePreview({ document }: { document: CardDocument }) {
           </div>
           <div className="database-card-face-target">{humanizeToken(normalized.targetType)}</div>
         </div>
-      </div>
-
-      <div className="card-preview-script-shell">
-        <div className="card-preview-script-title">Effect Script</div>
-        <pre className="json-preview tall card-preview-script">{scriptLines.join("\n")}</pre>
       </div>
     </div>
   );

@@ -64,6 +64,9 @@ const CardPreviewSurface = lazy(() =>
 const ClassPreviewSurface = lazy(() =>
   import("./features/class/ClassPreviewSurface").then((module) => ({ default: module.ClassPreviewSurface }))
 );
+const EffectFlowPopoutSurface = lazy(() =>
+  import("./features/effects/EffectFlowPopoutSurface").then((module) => ({ default: module.EffectFlowPopoutSurface }))
+);
 const DatabaseExplorer = lazy(() =>
   import("./features/database/DatabaseExplorer").then((module) => ({ default: module.DatabaseExplorer }))
 );
@@ -74,6 +77,10 @@ const DESKTOP_STARTUP_FALLBACK_TABS = new Set<TechnicaTabId>(["map"]);
 const PREVIEW_POPOUT_BY_TAB: Partial<Record<TechnicaTabId, TechnicaPopoutId>> = {
   card: "card-preview",
   class: "class-preview",
+};
+const FLOW_POPOUT_BY_TAB: Partial<Record<TechnicaTabId, TechnicaPopoutId>> = {
+  card: "card-flow",
+  fieldmod: "fieldmod-flow",
 };
 const workspaceShortcuts = [
   { keys: "Ctrl/Cmd + 1..0", label: "Switch tabs" },
@@ -217,7 +224,10 @@ export default function App() {
   const [isShortcutOverlayOpen, setIsShortcutOverlayOpen] = useState(false);
   const mobileSessionPopoverRef = useRef<HTMLDivElement | null>(null);
   const requestedEditorPopoutTab: TechnicaTabId | null =
-    requestedPopoutTab === "card-preview" || requestedPopoutTab === "class-preview"
+    requestedPopoutTab === "card-preview" ||
+    requestedPopoutTab === "class-preview" ||
+    requestedPopoutTab === "card-flow" ||
+    requestedPopoutTab === "fieldmod-flow"
       ? null
       : requestedPopoutTab;
   const activeTab: TechnicaTabId = requestedEditorPopoutTab
@@ -230,7 +240,11 @@ export default function App() {
       ? "Card Preview"
       : requestedPopoutTab === "class-preview"
         ? "Class Preview"
-      : tabs.find((tab) => tab.id === activeTab)?.label ?? "Technica";
+        : requestedPopoutTab === "card-flow"
+          ? "Card Effect Flow"
+          : requestedPopoutTab === "fieldmod-flow"
+            ? "Field Mod Effect Flow"
+        : tabs.find((tab) => tab.id === activeTab)?.label ?? "Technica";
   const activeSurfaceKey = requestedPopoutTab ?? activeTab;
   const mobileTabs = tabs;
 
@@ -395,6 +409,12 @@ export default function App() {
     }
     if (requestedPopoutTab === "class-preview") {
       return <ClassPreviewSurface />;
+    }
+    if (requestedPopoutTab === "card-flow") {
+      return <EffectFlowPopoutSurface mode="card" />;
+    }
+    if (requestedPopoutTab === "fieldmod-flow") {
+      return <EffectFlowPopoutSurface mode="fieldmod" />;
     }
     if (activeTab === "dialogue") {
       return <DialogueStudio />;
@@ -579,6 +599,20 @@ export default function App() {
                 onClick={() => void openTechnicaPopout(PREVIEW_POPOUT_BY_TAB[activeTab]!, `${activeTabLabel} Preview`)}
               >
                 Open preview window
+              </button>
+            ) : null}
+            {FLOW_POPOUT_BY_TAB[activeTab] ? (
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() =>
+                  void openTechnicaPopout(
+                    FLOW_POPOUT_BY_TAB[activeTab]!,
+                    activeTab === "card" ? "Card Effect Flow" : "Field Mod Effect Flow"
+                  )
+                }
+              >
+                Open effect flow window
               </button>
             ) : null}
             <button type="button" className="ghost-button" onClick={() => setIsShortcutOverlayOpen((current) => !current)}>

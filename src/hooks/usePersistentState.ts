@@ -77,5 +77,34 @@ export function usePersistentState<TValue>(storageKey: string, initialValue: TVa
     };
   }, [storageKey]);
 
+  useEffect(() => {
+    function handleStorage(event: StorageEvent) {
+      if (event.storageArea !== window.localStorage || event.key !== storageKey) {
+        return;
+      }
+
+      if (!event.newValue) {
+        setState(initialValue);
+        latestStateRef.current = initialValue;
+        lastPersistedValueRef.current = null;
+        return;
+      }
+
+      try {
+        const nextValue = JSON.parse(event.newValue) as TValue;
+        latestStateRef.current = nextValue;
+        lastPersistedValueRef.current = event.newValue;
+        setState(nextValue);
+      } catch {
+        // Ignore malformed cross-window updates.
+      }
+    }
+
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, [initialValue, storageKey]);
+
   return [state, setState] as const;
 }

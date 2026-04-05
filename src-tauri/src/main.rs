@@ -79,7 +79,7 @@ struct PublishResult {
 
 fn normalize_content_type(content_type: &str) -> Result<&str, String> {
     match content_type {
-        "dialogue" | "quest" | "map" | "npc" | "item" | "gear" | "card" | "unit" | "operation" | "class" | "schema" => {
+        "dialogue" | "quest" | "map" | "npc" | "item" | "gear" | "card" | "unit" | "operation" | "class" | "fieldmod" | "schema" => {
             Ok(content_type)
         }
         _ => Err(format!("Unsupported Chaos Core content type '{}'.", content_type)),

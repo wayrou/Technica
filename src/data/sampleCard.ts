@@ -1,5 +1,5 @@
 import type { CardDocument } from "../types/card";
-import { cardEffectBlocksFromEffects } from "../utils/cardComposer";
+import { createCardEffectFlowFromLegacyEffects, cardEffectBlocksFromEffects } from "../utils/cardComposer";
 import { isoNow } from "../utils/date";
 
 export function createBlankCard(): CardDocument {
@@ -18,6 +18,7 @@ export function createBlankCard(): CardDocument {
     targetType: "self",
     range: 0,
     damage: undefined,
+    effectFlow: createCardEffectFlowFromLegacyEffects([], "self"),
     effectComposerMode: "blocks",
     effectBlocks: [],
     effects: [],
@@ -45,6 +46,20 @@ export function createSampleCard(): CardDocument {
     targetType: "self",
     range: 1,
     damage: undefined,
+    effectFlow: createCardEffectFlowFromLegacyEffects(
+      [
+        {
+          type: "def_up",
+          amount: 2,
+          duration: 1
+        },
+        {
+          type: "push",
+          amount: 1
+        }
+      ],
+      "self"
+    ),
     effectComposerMode: "blocks",
     effectBlocks: cardEffectBlocksFromEffects([
       {
