@@ -9,12 +9,17 @@ import {
 } from "../types/common";
 import type { CardDocument } from "../types/card";
 import type { ClassDocument, ClassUnlockConditionDocument } from "../types/class";
+import type { CraftingDocument } from "../types/crafting";
+import type { DishDocument } from "../types/dish";
+import type { FieldModDocument } from "../types/fieldmod";
 import type { GearDocument } from "../types/gear";
 import type { ItemDocument } from "../types/item";
 import type { NpcDocument } from "../types/npc";
 import type { OperationDocument } from "../types/operation";
+import type { SchemaDocument } from "../types/schema";
 import type { UnitDocument } from "../types/unit";
 import { createImageAssetExport } from "./assets";
+import { compileCardEffectBlocks } from "./cardComposer";
 import { isoNow } from "./date";
 import { createWorkspaceReferenceIndex } from "./chaosCoreExport";
 import { runtimeId, slugify } from "./id";
@@ -50,6 +55,22 @@ function pruneEmpty<TValue>(value: TValue): TValue {
   }
 
   return value;
+}
+
+function toPartialResourceWallet(wallet: {
+  metalScrap: number;
+  wood: number;
+  chaosShards: number;
+  steamComponents: number;
+}) {
+  return Object.fromEntries(
+    Object.entries({
+      metalScrap: wallet.metalScrap,
+      wood: wallet.wood,
+      chaosShards: wallet.chaosShards,
+      steamComponents: wallet.steamComponents
+    }).filter(([, amount]) => Number.isFinite(amount) && amount > 0)
+  );
 }
 
 function coercePrimitive(value: string) {
@@ -217,23 +238,56 @@ export function buildChaosCoreItemBundle(
   const entryFile = `${contentId}.item.json`;
   const sourceFile = `${contentId}.source.json`;
   const iconAsset = document.iconAsset ? createImageAssetExport(contentId, "icon", document.iconAsset) : null;
+  const isWeaponChassis = document.archetype === "weapon_chassis";
   const runtimeDocument = pruneEmpty({
     id: contentId,
     name: document.name,
     description: document.description,
-    kind: document.kind,
-    stackable: document.stackable,
-    quantity: document.quantity,
+    kind: isWeaponChassis ? "equipment" : document.kind,
+    archetype: document.archetype,
+    stackable: isWeaponChassis ? false : document.stackable,
+    quantity: isWeaponChassis ? 1 : document.quantity,
     massKg: document.massKg,
     bulkBu: document.bulkBu,
     powerW: document.powerW,
-    iconPath: iconAsset?.runtimePath,
-    metadata: coerceRecord(document.metadata)
+    acquisition: isWeaponChassis
+      ? undefined
+      : {
+          startsWithPlayer: document.acquisition.startsWithPlayer,
+          havenShop: document.acquisition.havenShop.enabled
+            ? {
+                unlockFloor: document.acquisition.havenShop.unlockFloor,
+                notes: document.acquisition.havenShop.notes
+              }
+            : undefined,
+          fieldMapResource: document.acquisition.fieldMapResource.enabled
+            ? {
+                mapId: runtimeId(document.acquisition.fieldMapResource.mapId),
+                resourceNodeId: runtimeId(document.acquisition.fieldMapResource.resourceNodeId),
+                notes: document.acquisition.fieldMapResource.notes
+              }
+            : undefined,
+          enemyDrop: document.acquisition.enemyDrop.enabled
+            ? {
+                enemyUnitIds: document.acquisition.enemyDrop.enemyUnitIds.map((enemyUnitId) => runtimeId(enemyUnitId)),
+                notes: document.acquisition.enemyDrop.notes
+              }
+            : undefined,
+          otherSourcesNotes: document.acquisition.otherSourcesNotes || undefined
+        },
+    weaponChassis: isWeaponChassis
+      ? {
+          stability: document.weaponChassis.stability,
+          cardSlots: document.weaponChassis.cardSlots
+        }
+      : undefined,
+    iconPath: isWeaponChassis ? undefined : iconAsset?.runtimePath,
+    metadata: isWeaponChassis ? undefined : coerceRecord(document.metadata)
   });
 
   const manifest = createManifest(
     "item",
-    "inventory-item.v1",
+    "inventory-item.v2",
     contentId,
     document.name,
     "Chaos Core runtime inventory item export.",
@@ -249,6 +303,8 @@ Content id: \`${contentId}\`
 
 Importer notes:
 - Imported items land in Chaos Core base storage using their explicit mass, bulk, and power values.
+- Acquisition metadata preserves whether the player starts with the item, whether HAVEN sells it, and whether it can be found in the field or on enemies.
+- Weapon chassis exports flag themselves explicitly and keep stability plus card-slot metadata beside the base inventory footprint.
 - Stackable items preserve quantity.
 - Attached item icons resolve through \`iconPath\` when present.
 - \`${sourceFile}\` preserves the authoring document.
@@ -263,6 +319,247 @@ Importer notes:
       { name: sourceFile, content: prettyJson(document) },
       ...(iconAsset ? [iconAsset.file] : []),
       { name: "README.md", content: readme }
+    ]
+  };
+}
+
+export function buildChaosCoreCraftingBundle(document: CraftingDocument): ExportBundle {
+  const contentId = runtimeId(document.id || document.name, "recipe");
+  const entryFile = `${contentId}.crafting.json`;
+  const sourceFile = `${contentId}.source.json`;
+  const runtimeDocument = pruneEmpty({
+    id: contentId,
+    name: document.name,
+    category: document.category,
+    description: document.description,
+    cost: document.cost,
+    resultItemId: document.grants[0]?.itemId ? runtimeId(document.grants[0].itemId) : undefined,
+    resultQuantity: document.grants[0]?.quantity ?? undefined,
+    grants: document.grants.map((grant) => ({
+      itemId: runtimeId(grant.itemId),
+      quantity: grant.quantity
+    })),
+    requiresItemId: document.requiresItemId ? runtimeId(document.requiresItemId) : undefined,
+    acquisition: {
+      method: document.acquisitionMethod,
+      purchaseVendor: document.purchaseVendor || undefined,
+      purchaseCostWad: document.acquisitionMethod === "purchased" ? document.purchaseCostWad : undefined,
+      unlockFloor: document.acquisitionMethod === "unlock_floor" ? document.unlockFloor : undefined,
+      notes: document.notes || undefined
+    },
+    metadata: coerceRecord(document.metadata)
+  });
+
+  const manifest = createManifest(
+    "crafting",
+    "crafting-recipe.v1",
+    contentId,
+    document.name,
+    "Chaos Core-targeted crafting recipe export.",
+    entryFile,
+    ["manifest.json", entryFile, sourceFile, "README.md"],
+    []
+  );
+
+  return {
+    bundleName: `${slugify(document.name, contentId)}-chaos-core-crafting-export`,
+    manifest,
+    files: [
+      { name: "manifest.json", content: prettyJson(manifest) },
+      { name: entryFile, content: prettyJson(runtimeDocument) },
+      { name: sourceFile, content: prettyJson(document) },
+      {
+        name: "README.md",
+        content: `# Chaos Core Crafting Export
+
+Runtime entry: \`${entryFile}\`
+Content id: \`${contentId}\`
+
+Importer notes:
+- Recipes preserve resource costs, crafted grant items, and optional base-item requirements for upgrades.
+- Acquisition metadata captures whether the recipe starts known, must be purchased, or unlocks after a floor threshold.
+- \`${sourceFile}\` preserves the original Technica recipe document.
+`
+      }
+    ]
+  };
+}
+
+export function buildChaosCoreDishBundle(document: DishDocument): ExportBundle {
+  const contentId = runtimeId(document.id || document.name, "dish");
+  const entryFile = `${contentId}.dish.json`;
+  const sourceFile = `${contentId}.source.json`;
+  const runtimeDocument = pruneEmpty({
+    id: contentId,
+    name: document.name,
+    cost: document.cost,
+    unlockAfterOperationFloor: document.unlockAfterOperationFloor,
+    effect: document.effect,
+    description: document.description
+  });
+
+  const manifest = createManifest(
+    "dish",
+    "dish.v1",
+    contentId,
+    document.name,
+    "Chaos Core-targeted tavern dish export.",
+    entryFile,
+    ["manifest.json", entryFile, sourceFile, "README.md"],
+    []
+  );
+
+  return {
+    bundleName: `${slugify(document.name, contentId)}-chaos-core-dish-export`,
+    manifest,
+    files: [
+      { name: "manifest.json", content: prettyJson(manifest) },
+      { name: entryFile, content: prettyJson(runtimeDocument) },
+      { name: sourceFile, content: prettyJson(document) },
+      {
+        name: "README.md",
+        content: `# Chaos Core Dish Export
+
+Runtime entry: \`${entryFile}\`
+Content id: \`${contentId}\`
+
+Importer notes:
+- Dishes capture tavern or mess-hall purchase cost, effect text, and player-facing description.
+- \`unlockAfterOperationFloor\` gates when the dish becomes available after campaign progression.
+- \`${sourceFile}\` preserves the original Technica dish document.
+`
+      }
+    ]
+  };
+}
+
+export function buildChaosCoreFieldModBundle(document: FieldModDocument): ExportBundle {
+  const contentId = runtimeId(document.id || document.name, "field_mod");
+  const entryFile = `${contentId}.fieldmod.json`;
+  const sourceFile = `${contentId}.source.json`;
+  const runtimeDocument = pruneEmpty({
+    id: contentId,
+    name: document.name,
+    effects: document.effects,
+    scope: document.scope,
+    cost: document.cost,
+    rarity: document.rarity,
+    unlockAfterOperationFloor: document.unlockAfterOperationFloor
+  });
+
+  const manifest = createManifest(
+    "fieldmod",
+    "field-mod.v1",
+    contentId,
+    document.name,
+    "Chaos Core-targeted field mod export.",
+    entryFile,
+    ["manifest.json", entryFile, sourceFile, "README.md"],
+    []
+  );
+
+  return {
+    bundleName: `${slugify(document.name, contentId)}-chaos-core-fieldmod-export`,
+    manifest,
+    files: [
+      { name: "manifest.json", content: prettyJson(manifest) },
+      { name: entryFile, content: prettyJson(runtimeDocument) },
+      { name: sourceFile, content: prettyJson(document) },
+      {
+        name: "README.md",
+        content: `# Chaos Core Field Mod Export
+
+Runtime entry: \`${entryFile}\`
+Content id: \`${contentId}\`
+
+Importer notes:
+- Field mods capture the player-facing effect summary, scope, cost, and rarity for black-market style content authoring.
+- \`unlockAfterOperationFloor\` gates when the field mod becomes available after campaign progression.
+- \`${sourceFile}\` preserves the original Technica field mod document.
+`
+      }
+    ]
+  };
+}
+
+export function buildChaosCoreSchemaBundle(document: SchemaDocument): ExportBundle {
+  const isFortification = document.kind === "fortification";
+  const contentId = runtimeId(document.id || document.name, document.kind);
+  const entryFile = `${contentId}.schema.json`;
+  const sourceFile = `${contentId}.source.json`;
+  const runtimeDocument = pruneEmpty({
+    id: contentId,
+    displayName: document.name,
+    description: document.description,
+    buildCost: toPartialResourceWallet(document.buildCost),
+    unlockSource: document.unlockSource,
+    unlockCost: document.unlockSource === "schema" ? toPartialResourceWallet(document.unlockCost) : undefined,
+    unlockWadCost: document.unlockSource === "schema" ? document.unlockWadCost : undefined,
+    preferredRoomTags: document.preferredRoomTags,
+    placeholder: document.placeholder || undefined,
+    kind: document.kind,
+    ...(isFortification
+      ? {}
+      : {
+          shortCode: document.shortCode.trim() || undefined,
+          category: document.category.trim() || undefined,
+          operationalRequirements: pruneEmpty({
+            powerWatts: document.operationalRequirements.powerWatts,
+            commsBw: document.operationalRequirements.commsBw,
+            supplyCrates: document.operationalRequirements.supplyCrates
+          }),
+          powerOutputWatts: document.powerOutputWatts || undefined,
+          powerOutputMode: document.powerOutputMode !== "fixed" ? document.powerOutputMode : undefined,
+          commsOutputBw: document.commsOutputBw || undefined,
+          commsOutputMode: document.commsOutputMode !== "fixed" ? document.commsOutputMode : undefined,
+          supplyOutputCrates: document.supplyOutputCrates || undefined,
+          supplyOutputMode: document.supplyOutputMode !== "fixed" ? document.supplyOutputMode : undefined,
+          upkeep: toPartialResourceWallet(document.upkeep),
+          wadUpkeepPerTick: document.wadUpkeepPerTick,
+          incomePerTick: toPartialResourceWallet(document.incomePerTick),
+          supportRadius: document.supportRadius,
+          tagOutputModifiers: document.tagOutputModifiers.map((modifier) =>
+            pruneEmpty({
+              tag: modifier.tag,
+              output: toPartialResourceWallet(modifier.output),
+              note: modifier.note.trim() || undefined
+            })
+          )
+        })
+  });
+
+  const manifest = createManifest(
+    "schema",
+    isFortification ? "chaos-core-schema-fortification.native.v1" : "chaos-core-schema-core.native.v1",
+    contentId,
+    document.name,
+    `Chaos Core native ${document.kind} schema export.`,
+    entryFile,
+    ["manifest.json", entryFile, sourceFile, "README.md"],
+    []
+  );
+
+  return {
+    bundleName: `${slugify(document.name, contentId)}-chaos-core-schema-export`,
+    manifest,
+    files: [
+      { name: "manifest.json", content: prettyJson(manifest) },
+      { name: entryFile, content: prettyJson(runtimeDocument) },
+      { name: sourceFile, content: prettyJson(document) },
+      {
+        name: "README.md",
+        content: `# Chaos Core Schema Export
+
+Runtime entry: \`${entryFile}\`
+Content id: \`${contentId}\`
+
+Importer notes:
+- Schema exports now mirror Chaos Core's native schema definitions field-for-field.
+- Core entries include category, operational requirements, outputs, upkeep, income, support radius, unlock data, tags, and tag output modifiers.
+- Fortifications include build cost, unlock data, preferred room tags, and placeholder state.
+- \`${sourceFile}\` preserves the original Technica schema document.
+`
+      }
     ]
   };
 }
@@ -415,7 +712,7 @@ export function buildChaosCoreCardBundle(
     targetType: document.targetType,
     range: document.range,
     damage: document.damage,
-    effects: document.effects,
+    effects: document.effectComposerMode === "blocks" ? compileCardEffectBlocks(document.effectBlocks) : document.effects,
     sourceClassId: document.sourceClassId ? runtimeId(document.sourceClassId) : undefined,
     sourceEquipmentId: document.sourceEquipmentId ? runtimeId(document.sourceEquipmentId) : undefined,
     artPath: artAsset?.runtimePath,
@@ -498,12 +795,14 @@ export function buildChaosCoreUnitBundle(
     name: document.name,
     description: document.description,
     currentClassId: runtimeId(document.currentClassId),
+    spawnRole: document.spawnRole,
+    enemySpawnFloorOrdinals: document.spawnRole === "enemy" ? document.enemySpawnFloorOrdinals : [],
     stats: document.stats,
     traits: document.traits,
     pwr: document.pwr,
     recruitCost: document.recruitCost,
-    startingInRoster: document.startingInRoster,
-    deployInParty: document.deployInParty,
+    startingInRoster: document.spawnRole === "enemy" ? false : document.startingInRoster,
+    deployInParty: document.spawnRole === "enemy" ? false : document.deployInParty,
     metadata: coerceRecord(document.metadata)
     }),
     // Keep the loadout object present even when every slot is empty so the
@@ -535,7 +834,8 @@ Runtime entry: \`${entryFile}\`
 Content id: \`${contentId}\`
 
 Importer notes:
-- Imported units can be added straight into the roster and optionally the current party.
+- Imported units can be published either as player roster templates or tactical enemy templates.
+- Enemy units spawn on the selected floor ordinals across Chaos Core tactical battles.
 - Loadout references are normalized to imported or built-in gear ids.
 - \`${sourceFile}\` preserves the original Technica authoring document.
 `;
@@ -683,6 +983,18 @@ export function buildChaosCoreClassBundle(
       })
     ),
     innateAbility: document.innateAbility,
+    trainingGrid: document.trainingGrid.map((node) =>
+      pruneEmpty({
+        id: node.id,
+        name: node.name,
+        description: node.description,
+        cost: node.cost,
+        row: node.row,
+        col: node.col,
+        requires: node.requires,
+        benefit: node.benefit
+      })
+    ),
     metadata: coerceRecord(document.metadata)
   });
 
@@ -705,6 +1017,7 @@ Content id: \`${contentId}\`
 Importer notes:
 - Imported classes register beside built-in classes and appear in class management flows.
 - Unlock conditions preserve rank and milestone metadata.
+- Training grid nodes flow directly into Chaos Core's class mastery board when provided.
 - \`${sourceFile}\` preserves the original Technica authoring document.
 `;
 

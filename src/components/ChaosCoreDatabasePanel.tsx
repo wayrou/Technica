@@ -1,16 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
-import { usePersistentState } from "../hooks/usePersistentState";
-import type { EditorKind, ExportBundle } from "../types/common";
+import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { useChaosCoreDatabase } from "../hooks/useChaosCoreDatabase";
+import type { DatabaseContentType, ExportBundle } from "../types/common";
 import {
-  discoverChaosCoreRepo,
   emitChaosCoreDatabaseUpdate,
-  isTauriRuntime,
-  listChaosCoreDatabase,
-  loadChaosCoreDatabaseEntry,
   publishChaosCoreBundle,
   removeChaosCoreDatabaseEntry,
   resolveChaosCoreErrorMessage,
-  type ChaosCoreDatabaseEntry,
   type LoadedChaosCoreDatabaseEntry
 } from "../utils/chaosCoreDatabase";
 import { notify } from "../utils/dialogs";
@@ -18,7 +13,7 @@ import { ChaosCoreCardGallery } from "./ChaosCoreCardGallery";
 import { Panel } from "./Panel";
 
 interface ChaosCoreDatabasePanelProps<TDocument> {
-  contentType: EditorKind;
+  contentType: DatabaseContentType;
   currentDocument: TDocument;
   buildBundle: (document: TDocument) => Promise<ExportBundle> | ExportBundle;
   onLoadEntry: (entry: LoadedChaosCoreDatabaseEntry) => void;
@@ -32,21 +27,61 @@ export function ChaosCoreDatabasePanel<TDocument>({
   onLoadEntry,
   subtitle
 }: ChaosCoreDatabasePanelProps<TDocument>) {
-  const desktopEnabled = isTauriRuntime();
-  const [storedRepoPath, setRepoPath] = usePersistentState("technica.chaosCoreRepoPath", "");
-  const repoPath = typeof storedRepoPath === "string" ? storedRepoPath : "";
-  const [entries, setEntries] = useState<ChaosCoreDatabaseEntry[]>([]);
+  const {
+    databaseEnabled,
+    desktopEnabled,
+    repoPath,
+    repoPathDraft,
+    setRepoPathDraft,
+    commitRepoPath,
+    detectRepo,
+    summaryStates,
+    ensureSummaries,
+    loadEntry
+  } = useChaosCoreDatabase();
+  const [isOpen, setIsOpen] = useState(false);
   const [selectedEntryKey, setSelectedEntryKey] = useState("");
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [isLoadingEntry, setIsLoadingEntry] = useState(false);
   const [isRemovingEntry, setIsRemovingEntry] = useState(false);
   const [armedRemoveEntryKey, setArmedRemoveEntryKey] = useState("");
+  const summaryState = summaryStates[contentType];
+  const entries = summaryState.entries;
 
   const selectedEntry = useMemo(
     () => entries.find((entry) => entry.entryKey === selectedEntryKey) ?? null,
     [entries, selectedEntryKey]
   );
+
+  useEffect(() => {
+    if (!isOpen || !desktopEnabled) {
+      return;
+    }
+
+    void ensureSummaries(contentType).then((nextEntries) => {
+      setSelectedEntryKey((current) => {
+        if (current && nextEntries.some((entry) => entry.entryKey === current)) {
+          return current;
+        }
+        return nextEntries[0]?.entryKey ?? "";
+      });
+    });
+  }, [contentType, desktopEnabled, ensureSummaries, isOpen]);
+
+  useEffect(() => {
+    setArmedRemoveEntryKey("");
+  }, [selectedEntryKey]);
+
+  function commitRepoPathDraft() {
+    commitRepoPath();
+  }
+
+  function handleRepoPathKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      commitRepoPathDraft();
+    }
+  }
 
   async function handleDiscoverRepo() {
     if (!desktopEnabled) {
@@ -55,10 +90,8 @@ export function ChaosCoreDatabasePanel<TDocument>({
     }
 
     try {
-      const discovered = await discoverChaosCoreRepo();
-      if (discovered) {
-        setRepoPath(discovered);
-      } else {
+      const discovered = await detectRepo();
+      if (!discovered) {
         notify("Could not automatically find a Chaos Core repo. Paste the repo path below.");
       }
     } catch (error) {
@@ -66,35 +99,25 @@ export function ChaosCoreDatabasePanel<TDocument>({
     }
   }
 
-  async function refreshEntries(nextRepoPath = repoPath) {
+  async function refreshEntries(force = false) {
     if (!desktopEnabled) {
-      setEntries([]);
       setSelectedEntryKey("");
-      return;
+      return [];
     }
 
-    if (!nextRepoPath.trim()) {
-      setEntries([]);
+    if (!repoPath.trim()) {
       setSelectedEntryKey("");
-      return;
+      return [];
     }
 
-    setIsRefreshing(true);
-    try {
-      const nextEntries = await listChaosCoreDatabase(nextRepoPath.trim(), contentType);
-      setEntries(nextEntries);
-      setSelectedEntryKey((current) => {
-        if (current && nextEntries.some((entry) => entry.entryKey === current)) {
-          return current;
-        }
-        return nextEntries[0]?.entryKey ?? "";
-      });
-      setArmedRemoveEntryKey("");
-    } catch (error) {
-      notify(resolveChaosCoreErrorMessage(error, "Could not load the Chaos Core database."));
-    } finally {
-      setIsRefreshing(false);
-    }
+    const nextEntries = await ensureSummaries(contentType, { force });
+    setSelectedEntryKey((current) => {
+      if (current && nextEntries.some((entry) => entry.entryKey === current)) {
+        return current;
+      }
+      return nextEntries[0]?.entryKey ?? "";
+    });
+    return nextEntries;
   }
 
   async function handleRemove() {
@@ -120,7 +143,7 @@ export function ChaosCoreDatabasePanel<TDocument>({
     setIsRemovingEntry(true);
     try {
       await removeChaosCoreDatabaseEntry(repoPath.trim(), contentType, selectedEntry.entryKey);
-      await refreshEntries(repoPath.trim());
+      await refreshEntries(true);
       emitChaosCoreDatabaseUpdate(contentType);
       notify(
         selectedEntry.origin === "game"
@@ -146,7 +169,7 @@ export function ChaosCoreDatabasePanel<TDocument>({
 
     setIsLoadingEntry(true);
     try {
-      onLoadEntry(await loadChaosCoreDatabaseEntry(repoPath.trim(), contentType, selectedEntry.entryKey));
+      onLoadEntry(await loadEntry(contentType, selectedEntry.entryKey));
     } catch (error) {
       notify(resolveChaosCoreErrorMessage(error, "Could not load the selected Chaos Core entry."));
     } finally {
@@ -178,9 +201,11 @@ export function ChaosCoreDatabasePanel<TDocument>({
         shouldUpdateSelectedEntry ? selectedEntry?.entryKey : undefined,
         shouldUpdateSelectedEntry ? selectedEntry?.sourceFile : undefined
       );
-      await refreshEntries(repoPath.trim());
+      const nextEntries = await refreshEntries(true);
       emitChaosCoreDatabaseUpdate(contentType);
-      setSelectedEntryKey(result.entryKey);
+      setSelectedEntryKey(
+        nextEntries.find((entry) => entry.entryKey === result.entryKey)?.entryKey ?? result.entryKey
+      );
       notify(
         result.entryKey.startsWith("game:")
           ? `Updated built-in '${result.contentId}' in the Chaos Core source tables.`
@@ -193,51 +218,38 @@ export function ChaosCoreDatabasePanel<TDocument>({
     }
   }
 
-  useEffect(() => {
-    if (!desktopEnabled) {
-      setEntries([]);
-      setSelectedEntryKey("");
-      return;
-    }
-
-    if (!repoPath.trim()) {
-      void handleDiscoverRepo();
-      return;
-    }
-
-    void refreshEntries(repoPath);
-  }, [contentType, desktopEnabled, repoPath]);
-
-  useEffect(() => {
-    setArmedRemoveEntryKey("");
-  }, [selectedEntryKey]);
-
   return (
     <Panel
       title="Chaos Core Database"
       subtitle={subtitle}
       actions={
         <div className="toolbar">
+          {desktopEnabled ? (
+            <button type="button" className="ghost-button" onClick={() => void handleDiscoverRepo()}>
+              Detect repo
+            </button>
+          ) : null}
+          {isOpen ? (
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={() => void refreshEntries(true)}
+              disabled={!desktopEnabled || !repoPath.trim() || summaryState.status === "loading"}
+            >
+              Refresh
+            </button>
+          ) : null}
           <button
             type="button"
-            className="ghost-button"
-            onClick={() => void handleDiscoverRepo()}
-            disabled={!desktopEnabled}
+            className={isOpen ? "secondary-button" : "ghost-button"}
+            onClick={() => setIsOpen((current) => !current)}
           >
-            Detect repo
-          </button>
-          <button
-            type="button"
-            className="ghost-button"
-            onClick={() => void refreshEntries()}
-            disabled={!desktopEnabled || isRefreshing}
-          >
-            Refresh
+            {isOpen ? "Hide game database" : "Open game database"}
           </button>
         </div>
       }
     >
-      {!desktopEnabled ? (
+      {!databaseEnabled ? (
         <div className="empty-state compact">
           Repo-backed Chaos Core publishing is available in the Technica desktop app. Use{" "}
           <code>npm run dev:desktop</code>
@@ -245,83 +257,114 @@ export function ChaosCoreDatabasePanel<TDocument>({
         </div>
       ) : null}
 
-      <div className="form-grid">
-        <label className="field full">
-          <span>Chaos Core repo path</span>
-          <input
-            value={repoPath}
-            onChange={(event) => setRepoPath(event.target.value)}
-            placeholder="/absolute/path/to/chaos-core"
-            disabled={!desktopEnabled}
-          />
-        </label>
-      </div>
+      {desktopEnabled ? (
+        <div className="form-grid">
+          <label className="field full">
+            <span>Chaos Core repo path</span>
+            <div className="toolbar repo-path-toolbar">
+              <input
+                value={repoPathDraft}
+                onChange={(event) => setRepoPathDraft(event.target.value)}
+                onBlur={commitRepoPathDraft}
+                onKeyDown={handleRepoPathKeyDown}
+                placeholder="/absolute/path/to/chaos-core"
+              />
+              <button type="button" className="ghost-button" onClick={commitRepoPathDraft}>
+                Apply
+              </button>
+            </div>
+          </label>
+        </div>
+      ) : null}
 
       <div className="toolbar split">
         <div className="chip-row">
-          <span className="pill">{entries.length} entries</span>
+          <span className="pill">{entries.length} cached entr{entries.length === 1 ? "y" : "ies"}</span>
           <span className="pill">{contentType}</span>
-          {selectedEntry ? <span className="pill">{selectedEntry.origin === "game" ? "Game" : "Technica"}</span> : null}
+          {summaryState.stale ? <span className="pill warning">Stale</span> : null}
+          {summaryState.status === "loading" ? <span className="pill">Loading...</span> : null}
+          {selectedEntry ? (
+            <span className="pill">{selectedEntry.origin === "game" ? "Game" : "Technica"}</span>
+          ) : null}
         </div>
-        <div className="toolbar">
-          <button
-            type="button"
-            className="ghost-button"
-            onClick={() => void handleLoad()}
-            disabled={!desktopEnabled || !selectedEntry || isLoadingEntry}
-          >
-            Load selected
-          </button>
-          <button
-            type="button"
-            className="ghost-button danger"
-            onClick={() => void handleRemove()}
-            disabled={!desktopEnabled || !selectedEntry || isRemovingEntry}
-          >
-            {selectedEntry?.origin === "game"
-              ? armedRemoveEntryKey === selectedEntry.entryKey
-                ? "Confirm disable"
-                : "Disable built-in"
-              : armedRemoveEntryKey === selectedEntry?.entryKey
-                ? "Confirm delete"
-                : "Delete published"}
-          </button>
-          <button
-            type="button"
-            className="primary-button"
-            onClick={() => void handlePublish()}
-            disabled={!desktopEnabled || isPublishing}
-          >
-            Publish current to game
-          </button>
-        </div>
+        {summaryState.error ? <span className="muted">{summaryState.error}</span> : null}
       </div>
 
-      {desktopEnabled ? (
-        contentType === "card" ? (
-          <ChaosCoreCardGallery
-            repoPath={repoPath.trim()}
-            entries={entries}
-            selectedEntryKey={selectedEntryKey}
-            onSelectEntryKey={setSelectedEntryKey}
-          />
-        ) : (
-          <div className="database-list">
-            {entries.length === 0 ? <div className="empty-state compact">No Chaos Core entries found for this tab yet.</div> : null}
-            {entries.map((entry) => (
+      {!isOpen ? (
+        <div className="empty-state compact">
+          The per-tab game database stays closed until you open it, so editor tabs remain snappy.
+        </div>
+      ) : null}
+
+      {isOpen ? (
+        <>
+          <div className="toolbar split">
+            <div className="chip-row">
+              <span className="pill accent">Lazy-loaded</span>
+            </div>
+            <div className="toolbar">
               <button
-                key={entry.entryKey}
                 type="button"
-                className={entry.entryKey === selectedEntryKey ? "database-entry active" : "database-entry"}
-                onClick={() => setSelectedEntryKey(entry.entryKey)}
+                className="ghost-button"
+                onClick={() => void handleLoad()}
+                disabled={!desktopEnabled || !selectedEntry || isLoadingEntry}
               >
-                <strong>{entry.title}</strong>
-                <span>{entry.contentId}</span>
-                <small>{entry.origin === "game" ? "Game" : "Technica"} | {entry.runtimeFile}</small>
+                Load selected
               </button>
-            ))}
+              <button
+                type="button"
+                className="ghost-button danger"
+                onClick={() => void handleRemove()}
+                disabled={!desktopEnabled || !selectedEntry || isRemovingEntry}
+              >
+                {selectedEntry?.origin === "game"
+                  ? armedRemoveEntryKey === selectedEntry.entryKey
+                    ? "Confirm disable"
+                    : "Disable built-in"
+                  : armedRemoveEntryKey === selectedEntry?.entryKey
+                    ? "Confirm delete"
+                    : "Delete published"}
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => void handlePublish()}
+                disabled={!desktopEnabled || isPublishing}
+              >
+                Publish current to game
+              </button>
+            </div>
           </div>
-        )
+
+          {contentType === "card" ? (
+            <ChaosCoreCardGallery
+              repoPath={repoPath.trim()}
+              entries={entries}
+              selectedEntryKey={selectedEntryKey}
+              onSelectEntryKey={setSelectedEntryKey}
+            />
+          ) : (
+            <div className="database-list">
+              {entries.length === 0 ? (
+                <div className="empty-state compact">No Chaos Core entries found for this tab yet.</div>
+              ) : null}
+              {entries.map((entry) => (
+                <button
+                  key={entry.entryKey}
+                  type="button"
+                  className={entry.entryKey === selectedEntryKey ? "database-entry active" : "database-entry"}
+                  onClick={() => setSelectedEntryKey(entry.entryKey)}
+                >
+                  <strong>{entry.title}</strong>
+                  <span>{entry.contentId}</span>
+                  <small>
+                    {entry.origin === "game" ? "Game" : "Technica"} | {entry.runtimeFile}
+                  </small>
+                </button>
+              ))}
+            </div>
+          )}
+        </>
       ) : null}
     </Panel>
   );

@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import technicaLogo from "./assets/technica-logo.png";
 import { EditorErrorBoundary } from "./components/EditorErrorBoundary";
+import { Panel } from "./components/Panel";
 import { useMobileSession } from "./hooks/useMobileSession";
 import { usePersistentState } from "./hooks/usePersistentState";
 import { useTechnicaRuntime } from "./hooks/useTechnicaRuntime";
@@ -10,8 +11,10 @@ import { TECHNICA_MOBILE_INBOX_OPEN_EVENT, type MobileInboxEntry } from "./utils
 import {
   getRequestedPopoutTab,
   openTechnicaPopout,
+  type TechnicaPopoutId,
   type TechnicaTabId
 } from "./utils/popout";
+import { dispatchWorkspaceCommand } from "./utils/workspaceShortcuts";
 
 const DialogueStudio = lazy(() =>
   import("./features/dialogue/DialogueStudio").then((module) => ({ default: module.DialogueStudio }))
@@ -31,6 +34,18 @@ const GearEditor = lazy(() =>
 const ItemEditor = lazy(() =>
   import("./features/item/ItemEditor").then((module) => ({ default: module.ItemEditor }))
 );
+const CraftingEditor = lazy(() =>
+  import("./features/crafting/CraftingEditor").then((module) => ({ default: module.CraftingEditor }))
+);
+const DishEditor = lazy(() =>
+  import("./features/dish/DishEditor").then((module) => ({ default: module.DishEditor }))
+);
+const FieldModEditor = lazy(() =>
+  import("./features/fieldmod/FieldModEditor").then((module) => ({ default: module.FieldModEditor }))
+);
+const SchemaEditor = lazy(() =>
+  import("./features/schema/SchemaEditor").then((module) => ({ default: module.SchemaEditor }))
+);
 const CardEditor = lazy(() =>
   import("./features/card/CardEditor").then((module) => ({ default: module.CardEditor }))
 );
@@ -43,13 +58,33 @@ const OperationEditor = lazy(() =>
 const ClassEditor = lazy(() =>
   import("./features/class/ClassEditor").then((module) => ({ default: module.ClassEditor }))
 );
+const CardPreviewSurface = lazy(() =>
+  import("./features/card/CardPreviewSurface").then((module) => ({ default: module.CardPreviewSurface }))
+);
+const ClassPreviewSurface = lazy(() =>
+  import("./features/class/ClassPreviewSurface").then((module) => ({ default: module.ClassPreviewSurface }))
+);
 const DatabaseExplorer = lazy(() =>
   import("./features/database/DatabaseExplorer").then((module) => ({ default: module.DatabaseExplorer }))
 );
 const MobileSessionPanel = lazy(() =>
   import("./features/mobile/MobileSessionPanel").then((module) => ({ default: module.MobileSessionPanel }))
 );
-const DESKTOP_STARTUP_FALLBACK_TABS = new Set<TechnicaTabId>(["map", "card"]);
+const DESKTOP_STARTUP_FALLBACK_TABS = new Set<TechnicaTabId>(["map"]);
+const PREVIEW_POPOUT_BY_TAB: Partial<Record<TechnicaTabId, TechnicaPopoutId>> = {
+  card: "card-preview",
+  class: "class-preview",
+};
+const workspaceShortcuts = [
+  { keys: "Ctrl/Cmd + 1..0", label: "Switch tabs" },
+  { keys: "Ctrl/Cmd + S", label: "Save current draft file" },
+  { keys: "Ctrl/Cmd + O", label: "Import draft file" },
+  { keys: "Ctrl/Cmd + Enter", label: "Export current bundle" },
+  { keys: "Ctrl/Cmd + Shift + P", label: "Pop out current editor" },
+  { keys: "Ctrl/Cmd + Shift + D", label: "Open database window" },
+  { keys: "Ctrl/Cmd + .", label: "Open preview window for supported tabs" },
+  { keys: "?", label: "Toggle shortcuts overlay" },
+];
 
 const MOBILE_INBOX_TARGETS: Partial<Record<EditorKind, { storageKey: string; tabId: TechnicaTabId }>> = {
   dialogue: {
@@ -67,6 +102,22 @@ const MOBILE_INBOX_TARGETS: Partial<Record<EditorKind, { storageKey: string; tab
   item: {
     storageKey: "technica.item.document",
     tabId: "item"
+  },
+  crafting: {
+    storageKey: "technica.crafting.document",
+    tabId: "crafting"
+  },
+  dish: {
+    storageKey: "technica.dish.document",
+    tabId: "dish"
+  },
+  fieldmod: {
+    storageKey: "technica.fieldmod.document",
+    tabId: "fieldmod"
+  },
+  schema: {
+    storageKey: "technica.schema.document",
+    tabId: "schema"
   },
   gear: {
     storageKey: "technica.gear.document",
@@ -120,6 +171,22 @@ const tabs: Array<{ id: TechnicaTabId; label: string }> = [
     label: "Item Editor"
   },
   {
+    id: "crafting",
+    label: "Crafting Editor"
+  },
+  {
+    id: "dish",
+    label: "Dish Editor"
+  },
+  {
+    id: "fieldmod",
+    label: "Field Mods"
+  },
+  {
+    id: "schema",
+    label: "Schema Editor"
+  },
+  {
     id: "card",
     label: "Card Editor"
   },
@@ -147,11 +214,24 @@ export default function App() {
   const requestedPopoutTab = getRequestedPopoutTab();
   const [storedActiveTab, setStoredActiveTab] = usePersistentState<TechnicaTabId>("technica.activeTab", "dialogue");
   const [isMobileSessionOpen, setIsMobileSessionOpen] = useState(false);
+  const [isShortcutOverlayOpen, setIsShortcutOverlayOpen] = useState(false);
   const mobileSessionPopoverRef = useRef<HTMLDivElement | null>(null);
-  const activeTab: TechnicaTabId =
-    requestedPopoutTab ??
-    (runtime.isDesktop && DESKTOP_STARTUP_FALLBACK_TABS.has(storedActiveTab) ? "dialogue" : storedActiveTab);
-  const activeTabLabel = tabs.find((tab) => tab.id === activeTab)?.label ?? "Technica";
+  const requestedEditorPopoutTab: TechnicaTabId | null =
+    requestedPopoutTab === "card-preview" || requestedPopoutTab === "class-preview"
+      ? null
+      : requestedPopoutTab;
+  const activeTab: TechnicaTabId = requestedEditorPopoutTab
+    ? requestedEditorPopoutTab
+    : runtime.isDesktop && DESKTOP_STARTUP_FALLBACK_TABS.has(storedActiveTab)
+      ? "dialogue"
+      : storedActiveTab;
+  const activeTabLabel =
+    requestedPopoutTab === "card-preview"
+      ? "Card Preview"
+      : requestedPopoutTab === "class-preview"
+        ? "Class Preview"
+      : tabs.find((tab) => tab.id === activeTab)?.label ?? "Technica";
+  const activeSurfaceKey = requestedPopoutTab ?? activeTab;
   const mobileTabs = tabs;
 
   useEffect(() => {
@@ -178,6 +258,96 @@ export default function App() {
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [isMobileSessionOpen]);
+
+  useEffect(() => {
+    function handleGlobalShortcuts(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const isTypingTarget =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        Boolean(target?.isContentEditable);
+      const key = event.key.toLowerCase();
+      const commandKey = event.ctrlKey || event.metaKey;
+
+      if (event.key === "Escape" && isShortcutOverlayOpen) {
+        setIsShortcutOverlayOpen(false);
+        return;
+      }
+
+      if (key === "?" && !commandKey) {
+        event.preventDefault();
+        setIsShortcutOverlayOpen((current) => !current);
+        return;
+      }
+
+      if (!commandKey) {
+        return;
+      }
+
+      if (event.shiftKey && key === "p") {
+        event.preventDefault();
+        void openTechnicaPopout(activeTab, activeTabLabel);
+        return;
+      }
+
+      if (event.shiftKey && key === "d") {
+        event.preventDefault();
+        void openTechnicaPopout("database", "Database");
+        return;
+      }
+
+      if (key === ".") {
+        const previewPopout = PREVIEW_POPOUT_BY_TAB[activeTab];
+        if (previewPopout) {
+          event.preventDefault();
+          void openTechnicaPopout(previewPopout, `${activeTabLabel} Preview`);
+        }
+        return;
+      }
+
+      if (key >= "0" && key <= "9" && !requestedPopoutTab) {
+        const index = key === "0" ? tabs.length - 1 : Number(key) - 1;
+        const targetTab = tabs[index];
+        if (targetTab) {
+          event.preventDefault();
+          setStoredActiveTab(targetTab.id);
+        }
+        return;
+      }
+
+      if (isTypingTarget && key !== "s" && key !== "o" && key !== "enter") {
+        return;
+      }
+
+      if (key === "s") {
+        event.preventDefault();
+        dispatchWorkspaceCommand("save-draft");
+        return;
+      }
+
+      if (key === "o") {
+        event.preventDefault();
+        dispatchWorkspaceCommand("import-draft");
+        return;
+      }
+
+      if (key === "enter") {
+        event.preventDefault();
+        dispatchWorkspaceCommand("export-bundle");
+      }
+    }
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("keydown", handleGlobalShortcuts);
+    }
+
+    return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener("keydown", handleGlobalShortcuts);
+      }
+    };
+  }, [activeTab, activeTabLabel, isShortcutOverlayOpen, requestedPopoutTab, setStoredActiveTab]);
 
   function handleOpenTab(tabId: TechnicaTabId) {
     if (requestedPopoutTab) {
@@ -220,6 +390,12 @@ export default function App() {
   }
 
   function renderActiveEditor() {
+    if (requestedPopoutTab === "card-preview") {
+      return <CardPreviewSurface />;
+    }
+    if (requestedPopoutTab === "class-preview") {
+      return <ClassPreviewSurface />;
+    }
     if (activeTab === "dialogue") {
       return <DialogueStudio />;
     }
@@ -237,6 +413,18 @@ export default function App() {
     }
     if (activeTab === "item") {
       return <ItemEditor />;
+    }
+    if (activeTab === "crafting") {
+      return <CraftingEditor />;
+    }
+    if (activeTab === "dish") {
+      return <DishEditor />;
+    }
+    if (activeTab === "fieldmod") {
+      return <FieldModEditor />;
+    }
+    if (activeTab === "schema") {
+      return <SchemaEditor />;
     }
     if (activeTab === "card") {
       return <CardEditor />;
@@ -266,6 +454,7 @@ export default function App() {
         .filter(Boolean)
         .join(" ")}
       data-surface={runtime.surface}
+      data-active-tab={activeSurfaceKey}
       data-device-type={runtime.deviceType ?? undefined}
       data-session-id={runtime.sessionId ?? undefined}
     >
@@ -368,6 +557,54 @@ export default function App() {
             ))}
           </nav>
         </>
+      ) : null}
+
+      {runtime.isDesktop && !requestedPopoutTab ? (
+        <div className="workspace-bar">
+          <div className="chip-row">
+            <span className="pill">Workspace</span>
+            <span className="pill">{activeTabLabel}</span>
+          </div>
+          <div className="toolbar">
+            <button type="button" className="ghost-button" onClick={() => void openTechnicaPopout(activeTab, activeTabLabel)}>
+              Pop out editor
+            </button>
+            <button type="button" className="ghost-button" onClick={() => void openTechnicaPopout("database", "Database")}>
+              Open database window
+            </button>
+            {PREVIEW_POPOUT_BY_TAB[activeTab] ? (
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => void openTechnicaPopout(PREVIEW_POPOUT_BY_TAB[activeTab]!, `${activeTabLabel} Preview`)}
+              >
+                Open preview window
+              </button>
+            ) : null}
+            <button type="button" className="ghost-button" onClick={() => setIsShortcutOverlayOpen((current) => !current)}>
+              Shortcuts
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {isShortcutOverlayOpen ? (
+        <div className="workspace-shortcuts-overlay" role="dialog" aria-label="Keyboard shortcuts">
+          <Panel
+            title="Keyboard Shortcuts"
+            subtitle="Desktop workflow shortcuts for moving between tabs, exporting, and opening detached surfaces."
+            actions={<button type="button" className="ghost-button" onClick={() => setIsShortcutOverlayOpen(false)}>Close</button>}
+          >
+            <div className="shortcut-list">
+              {workspaceShortcuts.map((shortcut) => (
+                <div key={shortcut.keys} className="shortcut-row">
+                  <strong>{shortcut.keys}</strong>
+                  <span>{shortcut.label}</span>
+                </div>
+              ))}
+            </div>
+          </Panel>
+        </div>
       ) : null}
 
       <main className="app-main">

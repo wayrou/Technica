@@ -11,6 +11,7 @@ import { ChaosCoreDatabasePanel } from "../../components/ChaosCoreDatabasePanel"
 import { IssueList } from "../../components/IssueList";
 import { Panel } from "../../components/Panel";
 import { createSampleMap } from "../../data/sampleMap";
+import { useChaosCoreDatabase } from "../../hooks/useChaosCoreDatabase";
 import { useTechnicaRuntime } from "../../hooks/useTechnicaRuntime";
 import { usePersistentState } from "../../hooks/usePersistentState";
 import type { MapBrushState, MapDocument, MapObject, MapZone } from "../../types/map";
@@ -27,11 +28,8 @@ import { readTextFile } from "../../utils/file";
 import { TECHNICA_MOBILE_INBOX_OPEN_EVENT, type MobileInboxEntry } from "../../utils/mobileProtocol";
 import { submitMobileInboxEntry } from "../../utils/mobileSession";
 import {
-  isTauriRuntime,
-  listChaosCoreDatabase,
-  loadChaosCoreDatabaseEntry,
+  emitChaosCoreDatabaseUpdate,
   publishChaosCoreBundle,
-  type ChaosCoreDatabaseEntry,
   type LoadedChaosCoreDatabaseEntry
 } from "../../utils/chaosCoreDatabase";
 import { createSequentialId } from "../../utils/id";
@@ -60,8 +58,6 @@ type MapNpcMarker = {
 };
 
 const MAP_STORAGE_KEY = "technica.map.document";
-const MAP_NPC_BATCH_SIZE = 8;
-
 function touchMap(document: MapDocument) {
   return {
     ...document,
@@ -126,8 +122,8 @@ function isMapDocumentPayload(value: unknown): value is MapDocument {
 
 export function MapEditor() {
   const runtime = useTechnicaRuntime();
+  const { desktopEnabled, repoPath, summaryStates, ensureSummaries, loadEntry } = useChaosCoreDatabase();
   const [map, setMap] = usePersistentState(MAP_STORAGE_KEY, createSampleMap());
-  const [repoPath] = usePersistentState("technica.chaosCoreRepoPath", "");
   const [tool, setTool] = useState<MapTool>("paint");
   const [brush, setBrush] = useState<MapBrushState>({
     terrain: "grass",
@@ -147,8 +143,6 @@ export function MapEditor() {
     zones: true,
     npcs: true
   });
-  const [npcEntries, setNpcEntries] = useState<ChaosCoreDatabaseEntry[]>([]);
-  const [mapNpcMarkers, setMapNpcMarkers] = useState<MapNpcMarker[]>([]);
   const [selectedNpcEntryKey, setSelectedNpcEntryKey] = useState("");
   const [isPlacingNpc, setIsPlacingNpc] = useState(false);
   const [isSendingToDesktop, setIsSendingToDesktop] = useState(false);
@@ -167,6 +161,33 @@ export function MapEditor() {
   const canSendToDesktop = runtime.isMobile && Boolean(runtime.sessionOrigin && runtime.pairingToken);
   const selectedObject = map.objects.find((item) => item.id === selectedObjectId) ?? null;
   const selectedZone = map.zones.find((item) => item.id === selectedZoneId) ?? null;
+  const npcEntries = summaryStates.npc.entries;
+  const mapNpcMarkers = useMemo(
+    () =>
+      npcEntries
+        .map<MapNpcMarker | null>((entry) => {
+          const mapId = typeof entry.summaryData?.mapId === "string" ? entry.summaryData.mapId : "";
+          const tileX = typeof entry.summaryData?.tileX === "number" ? entry.summaryData.tileX : null;
+          const tileY = typeof entry.summaryData?.tileY === "number" ? entry.summaryData.tileY : null;
+
+          if (!mapId || tileX === null || tileY === null) {
+            return null;
+          }
+
+          return {
+            entryKey: entry.entryKey,
+            contentId: entry.contentId,
+            name: entry.title.trim() || entry.contentId,
+            mapId,
+            tileX,
+            tileY,
+            origin: entry.origin,
+            sourceFile: entry.sourceFile
+          };
+        })
+        .filter((entry): entry is MapNpcMarker => entry !== null && entry.mapId === map.id),
+    [map.id, npcEntries]
+  );
   const selectedNpcEntry = npcEntries.find((entry) => entry.entryKey === selectedNpcEntryKey) ?? null;
   const cellSize = Math.max(28, Math.round(map.tileSize * 0.72 * zoom));
   const gridGap = 1;
@@ -207,94 +228,22 @@ export function MapEditor() {
   }, [isPainting, panState, setMap, zoneDrag]);
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function loadNpcMarker(entry: ChaosCoreDatabaseEntry) {
-      try {
-        const loaded = await loadChaosCoreDatabaseEntry(repoPath.trim(), "npc", entry.entryKey);
-        const parsed = JSON.parse(loaded.editorContent ?? loaded.sourceContent ?? loaded.runtimeContent);
-        if (!isNpcDocument(parsed)) {
-          return null;
-        }
-
-        const marker: MapNpcMarker = {
-          entryKey: entry.entryKey,
-          contentId: entry.contentId,
-          name: parsed.name || entry.title || entry.contentId,
-          mapId: parsed.mapId,
-          tileX: Number(parsed.tileX ?? 0),
-          tileY: Number(parsed.tileY ?? 0),
-          origin: entry.origin,
-          sourceFile: entry.sourceFile
-        };
-
-        return marker;
-      } catch {
-        return null;
-      }
+    if (!desktopEnabled || !repoPath.trim()) {
+      setSelectedNpcEntryKey("");
+      return;
     }
 
-    async function yieldToUi() {
-      await new Promise<void>((resolve) => {
-        window.setTimeout(resolve, 0);
-      });
-    }
+    void ensureSummaries("npc");
+  }, [desktopEnabled, ensureSummaries, repoPath]);
 
-    async function refreshMapNpcs() {
-      if (!isTauriRuntime() || !repoPath.trim()) {
-        setNpcEntries([]);
-        setMapNpcMarkers([]);
-        setSelectedNpcEntryKey("");
-        return;
+  useEffect(() => {
+    setSelectedNpcEntryKey((current) => {
+      if (current && npcEntries.some((entry) => entry.entryKey === current)) {
+        return current;
       }
-
-      try {
-        const entries = await listChaosCoreDatabase(repoPath.trim(), "npc");
-        if (cancelled) {
-          return;
-        }
-
-        setNpcEntries(entries);
-        setMapNpcMarkers([]);
-        setSelectedNpcEntryKey((current) => {
-          if (current && entries.some((entry) => entry.entryKey === current)) {
-            return current;
-          }
-          return entries[0]?.entryKey ?? "";
-        });
-
-        const collectedMarkers: MapNpcMarker[] = [];
-        for (let index = 0; index < entries.length; index += MAP_NPC_BATCH_SIZE) {
-          if (cancelled) {
-            return;
-          }
-
-          const batch = entries.slice(index, index + MAP_NPC_BATCH_SIZE);
-          const loadedBatch = await Promise.all(batch.map((entry) => loadNpcMarker(entry)));
-
-          if (cancelled) {
-            return;
-          }
-
-          collectedMarkers.push(...loadedBatch.filter((entry): entry is MapNpcMarker => entry !== null));
-          setMapNpcMarkers(collectedMarkers.filter((entry) => entry.mapId === map.id));
-          await yieldToUi();
-        }
-      } catch {
-        if (!cancelled) {
-          setNpcEntries([]);
-          setMapNpcMarkers([]);
-          setSelectedNpcEntryKey("");
-        }
-      }
-    }
-
-    void refreshMapNpcs();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [map.id, repoPath]);
+      return npcEntries[0]?.entryKey ?? "";
+    });
+  }, [npcEntries]);
 
   useEffect(() => {
     function handleMobileInboxOpen(event: Event) {
@@ -324,7 +273,7 @@ export function MapEditor() {
   }, [setMap]);
 
   async function placeNpcOnMap(x: number, y: number) {
-    if (!isTauriRuntime()) {
+    if (!desktopEnabled) {
       notify("NPC placement writes directly into the Chaos Core repo and requires Technica desktop mode.");
       return;
     }
@@ -341,7 +290,7 @@ export function MapEditor() {
 
     setIsPlacingNpc(true);
     try {
-      const loaded = await loadChaosCoreDatabaseEntry(repoPath.trim(), "npc", selectedNpcEntry.entryKey);
+      const loaded = await loadEntry("npc", selectedNpcEntry.entryKey);
       const parsed = JSON.parse(loaded.editorContent ?? loaded.sourceContent ?? loaded.runtimeContent);
       if (!isNpcDocument(parsed)) {
         notify("The selected NPC entry is not in a Technica-compatible NPC format.");
@@ -364,19 +313,8 @@ export function MapEditor() {
         loaded.sourceFile
       );
 
-      setMapNpcMarkers((current) => [
-        ...current.filter((marker) => marker.entryKey !== selectedNpcEntry.entryKey),
-        {
-          entryKey: selectedNpcEntry.entryKey,
-          contentId: selectedNpcEntry.contentId,
-          name: nextNpcDocument.name,
-          mapId: nextNpcDocument.mapId,
-          tileX: nextNpcDocument.tileX,
-          tileY: nextNpcDocument.tileY,
-          origin: selectedNpcEntry.origin,
-          sourceFile: selectedNpcEntry.sourceFile
-        }
-      ]);
+      await ensureSummaries("npc", { force: true });
+      emitChaosCoreDatabaseUpdate("npc");
       notify(`Placed '${nextNpcDocument.name}' at ${x}, ${y} on '${map.name}'.`);
     } catch (error) {
       notify(error instanceof Error ? error.message : "Could not place the selected NPC on this map.");
@@ -829,7 +767,7 @@ export function MapEditor() {
           title="NPC Placement"
           subtitle="Select an NPC from the Chaos Core database, switch to the NPC tool, and click a tile to place them on this map."
         >
-          {!isTauriRuntime() ? (
+          {!desktopEnabled ? (
             <div className="empty-state compact">
               Open Technica in desktop mode to place NPCs directly into the Chaos Core repo.
             </div>
@@ -841,7 +779,7 @@ export function MapEditor() {
               <select
                 value={selectedNpcEntryKey}
                 onChange={(event) => setSelectedNpcEntryKey(event.target.value)}
-                disabled={!isTauriRuntime() || npcEntries.length === 0}
+                disabled={!desktopEnabled || npcEntries.length === 0}
               >
                 {npcEntries.length === 0 ? <option value="">No NPCs found</option> : null}
                 {npcEntries.map((entry) => (

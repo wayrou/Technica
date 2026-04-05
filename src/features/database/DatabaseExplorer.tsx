@@ -1,21 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { Panel } from "../../components/Panel";
-import { usePersistentState } from "../../hooks/usePersistentState";
-import { useTechnicaRuntime } from "../../hooks/useTechnicaRuntime";
-import type { EditorKind } from "../../types/common";
-import {
-  discoverChaosCoreRepo,
-  isTauriRuntime,
-  listChaosCoreDatabase,
-  listChaosCoreDatabaseFromSession,
-  loadChaosCoreDatabaseEntry,
-  loadChaosCoreDatabaseEntryFromSession,
-  type ChaosCoreDatabaseEntry,
-  type LoadedChaosCoreDatabaseEntry
-} from "../../utils/chaosCoreDatabase";
+import { useChaosCoreDatabase } from "../../hooks/useChaosCoreDatabase";
+import type { DatabaseContentType } from "../../types/common";
+import type { ChaosCoreDatabaseEntry, LoadedChaosCoreDatabaseEntry } from "../../utils/chaosCoreDatabase";
 import { notify } from "../../utils/dialogs";
 
-const DATABASE_CONTENT_TYPES: EditorKind[] = [
+const DATABASE_CONTENT_TYPES: DatabaseContentType[] = [
   "dialogue",
   "quest",
   "map",
@@ -25,10 +15,11 @@ const DATABASE_CONTENT_TYPES: EditorKind[] = [
   "card",
   "unit",
   "operation",
-  "class"
+  "class",
+  "schema"
 ];
 
-const EDITOR_STORAGE_KEYS: Record<EditorKind, string> = {
+const EDITOR_STORAGE_KEYS: Record<DatabaseContentType, string> = {
   dialogue: "technica.dialogue.document",
   quest: "technica.quest.document",
   map: "technica.map.document",
@@ -38,22 +29,23 @@ const EDITOR_STORAGE_KEYS: Record<EditorKind, string> = {
   card: "technica.card.document",
   unit: "technica.unit.document",
   operation: "technica.operation.document",
-  class: "technica.class.document"
+  class: "technica.class.document",
+  schema: "technica.schema.document"
 };
 
 type DatabaseSummaryEntry = ChaosCoreDatabaseEntry & {
-  contentType: EditorKind;
+  contentType: DatabaseContentType;
 };
 
 type DatabaseLoadedEntry = LoadedChaosCoreDatabaseEntry & {
-  contentType: EditorKind;
+  contentType: DatabaseContentType;
   runtimeData: unknown;
 };
 
 type CrossReference = {
   entryKey: string;
   contentId: string;
-  contentType: EditorKind;
+  contentType: DatabaseContentType;
   title: string;
   origin: "game" | "technica";
 };
@@ -101,17 +93,23 @@ function sleepFrame() {
 }
 
 interface DatabaseExplorerProps {
-  onOpenEditor: (contentType: EditorKind) => void;
+  onOpenEditor: (contentType: DatabaseContentType) => void;
 }
 
 export function DatabaseExplorer({ onOpenEditor }: DatabaseExplorerProps) {
-  const runtime = useTechnicaRuntime();
-  const desktopEnabled = isTauriRuntime();
-  const mobileSessionEnabled = runtime.isMobile && Boolean(runtime.sessionOrigin && runtime.pairingToken);
-  const databaseEnabled = desktopEnabled || mobileSessionEnabled;
-  const loadedEntryCache = useRef(new Map<string, DatabaseLoadedEntry>());
-  const [repoPath, setRepoPath] = usePersistentState("technica.chaosCoreRepoPath", "");
-  const [entries, setEntries] = useState<DatabaseSummaryEntry[]>([]);
+  const {
+    databaseEnabled,
+    desktopEnabled,
+    sessionEnabled,
+    repoPath,
+    repoPathDraft,
+    setRepoPathDraft,
+    commitRepoPath,
+    detectRepo,
+    summaryStates,
+    ensureAllSummaries,
+    loadEntry
+  } = useChaosCoreDatabase();
   const [selectedEntryKey, setSelectedEntryKey] = useState("");
   const [selectedEntry, setSelectedEntry] = useState<DatabaseLoadedEntry | null>(null);
   const [filterText, setFilterText] = useState("");
@@ -119,6 +117,26 @@ export function DatabaseExplorer({ onOpenEditor }: DatabaseExplorerProps) {
   const [isLoadingSelected, setIsLoadingSelected] = useState(false);
   const [isScanningReferences, setIsScanningReferences] = useState(false);
   const [inboundReferences, setInboundReferences] = useState<CrossReference[]>([]);
+
+  const entries = useMemo(
+    () =>
+      DATABASE_CONTENT_TYPES.flatMap((contentType) =>
+        summaryStates[contentType].entries.map((entry) => ({
+          ...entry,
+          contentType
+        }))
+      ).sort((left, right) =>
+        `${left.contentType}:${left.title}:${left.contentId}`.localeCompare(
+          `${right.contentType}:${right.title}:${right.contentId}`
+        )
+      ),
+    [summaryStates]
+  );
+
+  const isAnySummaryLoading = DATABASE_CONTENT_TYPES.some(
+    (contentType) => summaryStates[contentType].status === "loading"
+  );
+  const hasAnyStaleType = DATABASE_CONTENT_TYPES.some((contentType) => summaryStates[contentType].stale);
 
   const visibleEntries = useMemo(() => {
     const query = filterText.trim().toLowerCase();
@@ -153,157 +171,107 @@ export function DatabaseExplorer({ onOpenEditor }: DatabaseExplorerProps) {
       .map(summarizeReference);
   }, [entries, selectedEntry]);
 
-  async function getLoadedEntry(summary: DatabaseSummaryEntry) {
-    const cached = loadedEntryCache.current.get(summary.entryKey);
-    if (cached) {
-      return cached;
-    }
-
-    const loaded = mobileSessionEnabled && runtime.sessionOrigin && runtime.pairingToken
-      ? (
-          await loadChaosCoreDatabaseEntryFromSession(
-            runtime.sessionOrigin,
-            runtime.pairingToken,
-            summary.contentType,
-            summary.entryKey
-          )
-        ).entry
-      : await loadChaosCoreDatabaseEntry(repoPath.trim(), summary.contentType, summary.entryKey);
-    const nextLoaded = {
-      ...loaded,
-      contentType: summary.contentType,
-      runtimeData: parseRuntimeData(loaded.runtimeContent)
-    } satisfies DatabaseLoadedEntry;
-
-    loadedEntryCache.current.set(summary.entryKey, nextLoaded);
-    return nextLoaded;
-  }
-
-  async function handleDiscoverRepo() {
-    if (mobileSessionEnabled) {
-      notify("The mobile database browser uses the connected desktop session automatically.");
-      return;
-    }
-
-    if (!desktopEnabled) {
-      notify("Open Technica in desktop mode to browse the live Chaos Core database.");
-      return;
-    }
-
-    try {
-      const discovered = await discoverChaosCoreRepo();
-      if (discovered) {
-        setRepoPath(discovered);
-      } else {
-        notify("Could not automatically find a Chaos Core repo. Paste the repo path below.");
-      }
-    } catch (error) {
-      notify(error instanceof Error ? error.message : "Could not detect the Chaos Core repo path.");
-    }
-  }
-
-  async function refreshDatabase(nextRepoPath = repoPath) {
-    if (mobileSessionEnabled && runtime.sessionOrigin && runtime.pairingToken) {
-      setIsRefreshing(true);
-      try {
-        const summariesByType = await Promise.all(
-          DATABASE_CONTENT_TYPES.map(async (contentType) => {
-            const response = await listChaosCoreDatabaseFromSession(
-              runtime.sessionOrigin!,
-              runtime.pairingToken!,
-              contentType
-            );
-            return {
-              contentType,
-              repoPath: response.repoPath,
-              summaries: response.entries
-            };
-          })
-        );
-
-        const resolvedRepoPath = summariesByType.find((result) => result.repoPath)?.repoPath ?? "";
-        if (resolvedRepoPath && resolvedRepoPath !== repoPath) {
-          setRepoPath(resolvedRepoPath);
-        }
-
-        const nextEntries = summariesByType
-          .flatMap(({ contentType, summaries }) =>
-            summaries.map((summary) => ({
-              ...summary,
-              contentType
-            }))
-          )
-          .sort((left, right) =>
-            `${left.contentType}:${left.title}:${left.contentId}`.localeCompare(
-              `${right.contentType}:${right.title}:${right.contentId}`
-            )
-          );
-
-        loadedEntryCache.current.clear();
-        setEntries(nextEntries);
-        setSelectedEntry(null);
-        setInboundReferences([]);
-        setSelectedEntryKey((current) => {
-          if (current && nextEntries.some((entry) => entry.entryKey === current)) {
-            return current;
-          }
-          return nextEntries[0]?.entryKey ?? "";
-        });
-      } catch (error) {
-        notify(error instanceof Error ? error.message : "Could not refresh the Chaos Core database.");
-      } finally {
-        setIsRefreshing(false);
-      }
-      return;
-    }
-
-    if (!desktopEnabled || !nextRepoPath.trim()) {
-      loadedEntryCache.current.clear();
-      setEntries([]);
+  useEffect(() => {
+    if (!databaseEnabled) {
       setSelectedEntryKey("");
       setSelectedEntry(null);
       setInboundReferences([]);
       return;
     }
 
-    setIsRefreshing(true);
-    try {
-      const summariesByType = await Promise.all(
-        DATABASE_CONTENT_TYPES.map(async (contentType) => ({
-          contentType,
-          summaries: await listChaosCoreDatabase(nextRepoPath.trim(), contentType)
-        }))
-      );
+    let cancelled = false;
 
-      const nextEntries = summariesByType
-        .flatMap(({ contentType, summaries }) =>
-          summaries.map((summary) => ({
-            ...summary,
-            contentType
-          }))
-        )
-        .sort((left, right) =>
-          `${left.contentType}:${left.title}:${left.contentId}`.localeCompare(
-            `${right.contentType}:${right.title}:${right.contentId}`
-          )
-        );
-
-      loadedEntryCache.current.clear();
-      setEntries(nextEntries);
-      setSelectedEntry(null);
-      setInboundReferences([]);
-      setSelectedEntryKey((current) => {
-        if (current && nextEntries.some((entry) => entry.entryKey === current)) {
-          return current;
+    async function loadSummaries() {
+      if (!sessionEnabled && !repoPath.trim()) {
+        if (desktopEnabled) {
+          try {
+            const discovered = await detectRepo();
+            if (!discovered || cancelled) {
+              return;
+            }
+          } catch (error) {
+            if (!cancelled) {
+              notify(error instanceof Error ? error.message : "Could not detect the Chaos Core repo path.");
+            }
+            return;
+          }
+        } else {
+          return;
         }
-        return nextEntries[0]?.entryKey ?? "";
-      });
-    } catch (error) {
-      notify(error instanceof Error ? error.message : "Could not refresh the Chaos Core database.");
-    } finally {
-      setIsRefreshing(false);
+      }
+
+      try {
+        await ensureAllSummaries();
+      } catch (error) {
+        if (!cancelled) {
+          notify(error instanceof Error ? error.message : "Could not refresh the Chaos Core database.");
+        }
+      }
     }
-  }
+
+    void loadSummaries();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [databaseEnabled, desktopEnabled, detectRepo, ensureAllSummaries, repoPath, sessionEnabled]);
+
+  useEffect(() => {
+    setSelectedEntryKey((current) => {
+      if (current && entries.some((entry) => entry.entryKey === current)) {
+        return current;
+      }
+      return entries[0]?.entryKey ?? "";
+    });
+  }, [entries]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSelectedEntry() {
+      if (!selectedEntryKey) {
+        setSelectedEntry(null);
+        setInboundReferences([]);
+        return;
+      }
+
+      const summary = entries.find((entry) => entry.entryKey === selectedEntryKey);
+      if (!summary) {
+        setSelectedEntry(null);
+        setInboundReferences([]);
+        return;
+      }
+
+      setIsLoadingSelected(true);
+      try {
+        const loaded = await loadEntry(summary.contentType, summary.entryKey);
+        if (!cancelled) {
+          setSelectedEntry({
+            ...loaded,
+            contentType: summary.contentType,
+            runtimeData: parseRuntimeData(loaded.runtimeContent)
+          });
+          setInboundReferences([]);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setSelectedEntry(null);
+          setInboundReferences([]);
+          notify(error instanceof Error ? error.message : "Could not load the selected database record.");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingSelected(false);
+        }
+      }
+    }
+
+    void loadSelectedEntry();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [entries, loadEntry, selectedEntryKey]);
 
   function handleOpenInEditor() {
     if (!selectedEntry || typeof window === "undefined") {
@@ -321,126 +289,60 @@ export function DatabaseExplorer({ onOpenEditor }: DatabaseExplorerProps) {
     notify(`Loaded '${selectedEntry.title}' into ${selectedEntry.contentType} editor.`);
   }
 
-  useEffect(() => {
-    if (!databaseEnabled) {
-      loadedEntryCache.current.clear();
-      setEntries([]);
-      setSelectedEntryKey("");
-      setSelectedEntry(null);
+  async function handleRefresh() {
+    setIsRefreshing(true);
+    try {
+      await ensureAllSummaries({ force: true });
       setInboundReferences([]);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Could not refresh the Chaos Core database.");
+    } finally {
+      setIsRefreshing(false);
+    }
+  }
+
+  async function handleScanInboundReferences() {
+    if (!selectedEntry) {
       return;
     }
 
-    if (mobileSessionEnabled) {
-      void refreshDatabase(repoPath);
-      return;
+    setIsScanningReferences(true);
+    try {
+      const knownIds = new Set(entries.map((entry) => entry.contentId));
+      const nextInbound: CrossReference[] = [];
+
+      for (const [index, summary] of entries.entries()) {
+        if (summary.entryKey === selectedEntry.entryKey) {
+          continue;
+        }
+
+        const loaded = await loadEntry(summary.contentType, summary.entryKey);
+        const refs = new Set<string>();
+        collectStringReferences(parseRuntimeData(loaded.runtimeContent), knownIds, refs);
+        if (refs.has(selectedEntry.contentId)) {
+          nextInbound.push(summarizeReference(summary));
+        }
+
+        if (index % 12 === 0) {
+          await sleepFrame();
+        }
+      }
+
+      setInboundReferences(nextInbound);
+    } catch (error) {
+      setInboundReferences([]);
+      notify(error instanceof Error ? error.message : "Could not scan inbound references.");
+    } finally {
+      setIsScanningReferences(false);
     }
+  }
 
-    if (!repoPath.trim()) {
-      void handleDiscoverRepo();
-      return;
+  function handleRepoPathKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      commitRepoPath();
     }
-
-    void refreshDatabase(repoPath);
-  }, [databaseEnabled, desktopEnabled, mobileSessionEnabled, repoPath, runtime.pairingToken, runtime.sessionOrigin]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadSelectedEntry() {
-      if ((!desktopEnabled && !mobileSessionEnabled) || (!repoPath.trim() && !mobileSessionEnabled) || !selectedEntryKey) {
-        setSelectedEntry(null);
-        setInboundReferences([]);
-        return;
-      }
-
-      const summary = entries.find((entry) => entry.entryKey === selectedEntryKey);
-      if (!summary) {
-        setSelectedEntry(null);
-        setInboundReferences([]);
-        return;
-      }
-
-      setIsLoadingSelected(true);
-      try {
-        const loaded = await getLoadedEntry(summary);
-        if (!cancelled) {
-          setSelectedEntry(loaded);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setSelectedEntry(null);
-          notify(error instanceof Error ? error.message : "Could not load the selected database record.");
-        }
-      } finally {
-        if (!cancelled) {
-          setIsLoadingSelected(false);
-        }
-      }
-    }
-
-    void loadSelectedEntry();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [desktopEnabled, entries, mobileSessionEnabled, repoPath, selectedEntryKey, runtime.pairingToken, runtime.sessionOrigin]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function scanInboundReferences() {
-      if (!selectedEntry || (!repoPath.trim() && !mobileSessionEnabled) || (!desktopEnabled && !mobileSessionEnabled)) {
-        setInboundReferences([]);
-        return;
-      }
-
-      setIsScanningReferences(true);
-      try {
-        const knownIds = new Set(entries.map((entry) => entry.contentId));
-        const nextInbound: CrossReference[] = [];
-
-        for (const [index, summary] of entries.entries()) {
-          if (cancelled) {
-            return;
-          }
-
-          if (summary.entryKey === selectedEntry.entryKey) {
-            continue;
-          }
-
-          const loaded = await getLoadedEntry(summary);
-          const refs = new Set<string>();
-          collectStringReferences(loaded.runtimeData, knownIds, refs);
-          if (refs.has(selectedEntry.contentId)) {
-            nextInbound.push(summarizeReference(summary));
-          }
-
-          if (index % 12 === 0) {
-            await sleepFrame();
-          }
-        }
-
-        if (!cancelled) {
-          setInboundReferences(nextInbound);
-        }
-      } catch {
-        if (!cancelled) {
-          setInboundReferences([]);
-        }
-      } finally {
-        if (!cancelled) {
-          setIsScanningReferences(false);
-        }
-      }
-    }
-
-    void scanInboundReferences();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [desktopEnabled, entries, mobileSessionEnabled, repoPath, selectedEntry, runtime.pairingToken, runtime.sessionOrigin]);
+  }
 
   return (
     <div className="workspace-grid blueprint-grid">
@@ -451,16 +353,19 @@ export function DatabaseExplorer({ onOpenEditor }: DatabaseExplorerProps) {
           actions={
             <div className="toolbar">
               {desktopEnabled ? (
-                <button type="button" className="ghost-button" onClick={() => void handleDiscoverRepo()}>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() =>
+                    void detectRepo().catch((error) =>
+                      notify(error instanceof Error ? error.message : "Could not detect the Chaos Core repo path.")
+                    )
+                  }
+                >
                   Detect repo
                 </button>
               ) : null}
-              <button
-                type="button"
-                className="ghost-button"
-                onClick={() => void refreshDatabase()}
-                disabled={isRefreshing}
-              >
+              <button type="button" className="ghost-button" onClick={() => void handleRefresh()} disabled={isRefreshing}>
                 {isRefreshing ? "Refreshing..." : "Refresh"}
               </button>
             </div>
@@ -476,11 +381,18 @@ export function DatabaseExplorer({ onOpenEditor }: DatabaseExplorerProps) {
             {desktopEnabled ? (
               <label className="field full">
                 <span>Chaos Core repo path</span>
-                <input
-                  value={repoPath}
-                  onChange={(event) => setRepoPath(event.target.value)}
-                  placeholder="/absolute/path/to/chaos-core"
-                />
+                <div className="toolbar repo-path-toolbar">
+                  <input
+                    value={repoPathDraft}
+                    onChange={(event) => setRepoPathDraft(event.target.value)}
+                    onBlur={() => commitRepoPath()}
+                    onKeyDown={handleRepoPathKeyDown}
+                    placeholder="/absolute/path/to/chaos-core"
+                  />
+                  <button type="button" className="ghost-button" onClick={() => commitRepoPath()}>
+                    Apply
+                  </button>
+                </div>
               </label>
             ) : (
               <div className="field full">
@@ -503,9 +415,10 @@ export function DatabaseExplorer({ onOpenEditor }: DatabaseExplorerProps) {
           <div className="chip-row">
             <span className="pill">{visibleEntries.length} visible</span>
             <span className="pill">{entries.length} total</span>
-            {mobileSessionEnabled ? <span className="pill">Desktop session</span> : null}
+            {sessionEnabled ? <span className="pill">Desktop session</span> : null}
+            {hasAnyStaleType ? <span className="pill warning">Stale cache</span> : null}
             {selectedEntry ? <span className="pill accent">{selectedEntry.contentType}</span> : null}
-            {isLoadingSelected ? <span className="pill">Loading record...</span> : null}
+            {isLoadingSelected || isAnySummaryLoading ? <span className="pill">Loading...</span> : null}
           </div>
 
           <div className="database-browser-list">
@@ -522,7 +435,7 @@ export function DatabaseExplorer({ onOpenEditor }: DatabaseExplorerProps) {
                   <strong>{entry.title}</strong>
                   <span>{entry.contentId}</span>
                   <small>
-                    {entry.contentType} · {entry.origin === "game" ? "Game" : "Technica"}
+                    {entry.contentType} | {entry.origin === "game" ? "Game" : "Technica"}
                   </small>
                 </button>
               ))
@@ -536,14 +449,14 @@ export function DatabaseExplorer({ onOpenEditor }: DatabaseExplorerProps) {
           title="Selected Record"
           subtitle="Inspect where this record lives and open it in the matching editor for a live balancing pass."
           actions={
-            <button
-              type="button"
-              className="primary-button"
-              onClick={handleOpenInEditor}
-              disabled={!selectedEntry}
-            >
-              Open in editor
-            </button>
+            <div className="toolbar">
+              <button type="button" className="ghost-button" onClick={() => void handleScanInboundReferences()} disabled={!selectedEntry || isScanningReferences}>
+                {isScanningReferences ? "Scanning..." : "Scan references"}
+              </button>
+              <button type="button" className="primary-button" onClick={handleOpenInEditor} disabled={!selectedEntry}>
+                Open in editor
+              </button>
+            </div>
           }
         >
           {selectedEntry ? (
@@ -591,7 +504,7 @@ export function DatabaseExplorer({ onOpenEditor }: DatabaseExplorerProps) {
                         <strong>{entry.title}</strong>
                         <span>{entry.contentId}</span>
                         <small>
-                          {entry.contentType} · {entry.origin === "game" ? "Game" : "Technica"}
+                          {entry.contentType} | {entry.origin === "game" ? "Game" : "Technica"}
                         </small>
                       </button>
                     ))
@@ -604,13 +517,12 @@ export function DatabaseExplorer({ onOpenEditor }: DatabaseExplorerProps) {
                   <h3>Used by</h3>
                   <div className="chip-row">
                     <span className="pill">{inboundReferences.length}</span>
-                    {isScanningReferences ? <span className="pill">Scanning...</span> : null}
                   </div>
                 </div>
                 <div className="database-reference-list">
                   {inboundReferences.length === 0 ? (
                     <div className="empty-state compact">
-                      {isScanningReferences ? "Scanning for inbound references..." : "No inbound references found."}
+                      {isScanningReferences ? "Scanning for inbound references..." : "Run Scan references to find inbound links."}
                     </div>
                   ) : (
                     inboundReferences.map((entry) => (
@@ -623,7 +535,7 @@ export function DatabaseExplorer({ onOpenEditor }: DatabaseExplorerProps) {
                         <strong>{entry.title}</strong>
                         <span>{entry.contentId}</span>
                         <small>
-                          {entry.contentType} · {entry.origin === "game" ? "Game" : "Technica"}
+                          {entry.contentType} | {entry.origin === "game" ? "Game" : "Technica"}
                         </small>
                       </button>
                     ))

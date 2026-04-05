@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod database_daemon;
 mod mobile_server;
 mod mobile_session;
 mod mobile_state;
@@ -24,6 +25,7 @@ pub(crate) struct DatabaseEntrySummary {
     runtime_file: String,
     source_file: Option<String>,
     origin: String,
+    summary_data: Option<Value>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -34,10 +36,18 @@ pub(crate) struct LoadedDatabaseEntry {
     title: String,
     runtime_file: String,
     origin: String,
+    summary_data: Option<Value>,
     runtime_content: String,
     source_file: Option<String>,
     source_content: Option<String>,
     editor_content: Option<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DatabaseListAllResponse {
+    repo_path: String,
+    entries_by_type: std::collections::BTreeMap<String, Vec<DatabaseEntrySummary>>,
 }
 
 #[derive(Deserialize)]
@@ -69,7 +79,7 @@ struct PublishResult {
 
 fn normalize_content_type(content_type: &str) -> Result<&str, String> {
     match content_type {
-        "dialogue" | "quest" | "map" | "npc" | "item" | "gear" | "card" | "unit" | "operation" | "class" => {
+        "dialogue" | "quest" | "map" | "npc" | "item" | "gear" | "card" | "unit" | "operation" | "class" | "schema" => {
             Ok(content_type)
         }
         _ => Err(format!("Unsupported Chaos Core content type '{}'.", content_type)),
@@ -136,6 +146,7 @@ fn built_in_source_file(content_type: &str) -> Option<&'static str> {
         "npc" => Some("src/field/npcs.ts"),
         "quest" => Some("src/quests/questData.ts"),
         "class" => Some("src/core/classes.ts"),
+        "schema" => Some("src/core/schemaSystem.ts"),
         "unit" | "operation" => Some("src/core/initialState.ts"),
         _ => None,
     }
@@ -160,60 +171,6 @@ fn tsx_binary_path() -> Result<PathBuf, String> {
     let technica_root = technica_root()?;
     let binary_name = if cfg!(target_os = "windows") { "tsx.cmd" } else { "tsx" };
     Ok(technica_root.join("node_modules").join(".bin").join(binary_name))
-}
-
-fn run_database_snapshot(
-    command: &str,
-    repo_path: &str,
-    content_type: &str,
-    entry_key: Option<&str>,
-) -> Result<Vec<u8>, String> {
-    let tsx_binary = tsx_binary_path()?;
-    let snapshot_script = database_snapshot_script_path()?;
-
-    if !tsx_binary.exists() {
-        return Err(format!(
-            "Could not find the tsx runtime at '{}'. Run npm install in Technica first.",
-            tsx_binary.display()
-        ));
-    }
-
-    if !snapshot_script.exists() {
-        return Err(format!(
-            "Could not find the Chaos Core snapshot script at '{}'.",
-            snapshot_script.display()
-        ));
-    }
-
-    let mut process = Command::new(&tsx_binary);
-    process
-        .arg(&snapshot_script)
-        .arg(command)
-        .arg(repo_path)
-        .arg(content_type);
-
-    if let Some(entry_key) = entry_key {
-        process.arg(entry_key);
-    }
-
-    let output = process
-        .output()
-        .map_err(|error| format!("Could not run the Chaos Core snapshot script: {}", error))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let detail = if !stderr.is_empty() {
-            stderr
-        } else if !stdout.is_empty() {
-            stdout
-        } else {
-            format!("Snapshot script exited with status {}.", output.status)
-        };
-        return Err(detail);
-    }
-
-    Ok(output.stdout)
 }
 
 fn run_database_writeback(
@@ -474,27 +431,47 @@ fn discover_chaos_core_repo() -> Result<Option<String>, String> {
 pub(crate) fn list_chaos_core_database_entries(
     repo_path: String,
     content_type: String,
+    force: bool,
 ) -> Result<Vec<DatabaseEntrySummary>, String> {
     let content_type = normalize_content_type(&content_type)?;
-    let stdout = run_database_snapshot("list", &repo_path, content_type, None)?;
-    serde_json::from_slice::<Vec<DatabaseEntrySummary>>(&stdout)
-        .map_err(|error| format!("Could not parse the Chaos Core database list: {}", error))
+    database_daemon::list_chaos_core_database_entries(repo_path, content_type.to_string(), force)
 }
 
 #[tauri::command]
-fn list_chaos_core_database(repo_path: String, content_type: String) -> Result<Vec<DatabaseEntrySummary>, String> {
-    list_chaos_core_database_entries(repo_path, content_type)
+fn list_chaos_core_database(
+    repo_path: String,
+    content_type: String,
+    force: Option<bool>,
+) -> Result<Vec<DatabaseEntrySummary>, String> {
+    list_chaos_core_database_entries(repo_path, content_type, force.unwrap_or(false))
+}
+
+pub(crate) fn list_all_chaos_core_database(
+    repo_path: String,
+    force: bool,
+) -> Result<DatabaseListAllResponse, String> {
+    Ok(DatabaseListAllResponse {
+        entries_by_type: database_daemon::list_all_chaos_core_database_entries(repo_path.clone(), force)?,
+        repo_path,
+    })
+}
+
+#[tauri::command]
+fn list_all_chaos_core_database_command(
+    repo_path: String,
+    force: Option<bool>,
+) -> Result<DatabaseListAllResponse, String> {
+    list_all_chaos_core_database(repo_path, force.unwrap_or(false))
 }
 
 pub(crate) fn load_chaos_core_database_record(
     repo_path: String,
     content_type: String,
     entry_key: String,
+    force: bool,
 ) -> Result<LoadedDatabaseEntry, String> {
     let content_type = normalize_content_type(&content_type)?;
-    let stdout = run_database_snapshot("load", &repo_path, content_type, Some(&entry_key))?;
-    serde_json::from_slice::<LoadedDatabaseEntry>(&stdout)
-        .map_err(|error| format!("Could not parse the selected Chaos Core database entry: {}", error))
+    database_daemon::load_chaos_core_database_record(repo_path, content_type.to_string(), entry_key, force)
 }
 
 #[tauri::command]
@@ -502,8 +479,9 @@ fn load_chaos_core_database_entry(
     repo_path: String,
     content_type: String,
     entry_key: String,
+    force: Option<bool>,
 ) -> Result<LoadedDatabaseEntry, String> {
-    load_chaos_core_database_record(repo_path, content_type, entry_key)
+    load_chaos_core_database_record(repo_path, content_type, entry_key, force.unwrap_or(false))
 }
 
 #[tauri::command]
@@ -587,6 +565,7 @@ fn publish_chaos_core_bundle(request: PublishBundleRequest) -> Result<PublishRes
                 let _ = fs::remove_file(&temp_payload_path);
                 let stdout = writeback_output?;
                 touch_generated_version(&repo_root, content_type, &content_id)?;
+                let _ = database_daemon::invalidate_chaos_core_database_cache(&request.repo_path, Some(content_type));
 
                 return serde_json::from_slice::<PublishResult>(&stdout)
                     .map_err(|error| format!("Could not parse the Chaos Core write-back result: {}", error))
@@ -656,6 +635,7 @@ fn publish_chaos_core_bundle(request: PublishBundleRequest) -> Result<PublishRes
     }
 
     touch_generated_version(&repo_root, content_type, &content_id)?;
+    let _ = database_daemon::invalidate_chaos_core_database_cache(&request.repo_path, Some(content_type));
 
     Ok(PublishResult {
         entry_key: format!("technica:{}", content_id),
@@ -685,6 +665,7 @@ fn remove_chaos_core_database_entry(
             remove_matching_files(&source_root(&repo_root, content_type), content_id)?;
             remove_matching_files(&manifest_root(&repo_root, content_type), content_id)?;
             touch_generated_version(&repo_root, content_type, content_id)?;
+            let _ = database_daemon::invalidate_chaos_core_database_cache(&repo_path, Some(content_type));
             Ok(())
         }
         "game" => {
@@ -705,7 +686,9 @@ fn remove_chaos_core_database_entry(
                 &disabled_dir.join(format!("{}.disabled.json", content_id)),
                 &serde_json::to_string_pretty(&tombstone).unwrap_or_default(),
             )?;
-            touch_generated_version(&repo_root, content_type, content_id)
+            touch_generated_version(&repo_root, content_type, content_id)?;
+            let _ = database_daemon::invalidate_chaos_core_database_cache(&repo_path, Some(content_type));
+            Ok(())
         }
         _ => Err(format!("Unsupported Chaos Core entry origin '{}'.", origin)),
     }
@@ -757,6 +740,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             discover_chaos_core_repo,
             list_chaos_core_database,
+            list_all_chaos_core_database_command,
             load_chaos_core_database_entry,
             publish_chaos_core_bundle,
             remove_chaos_core_database_entry,
@@ -769,4 +753,5 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running Technica");
+    database_daemon::shutdown_chaos_core_database_daemon();
 }

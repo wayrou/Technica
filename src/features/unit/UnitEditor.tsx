@@ -1,25 +1,16 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { ChaosCoreDatabasePanel } from "../../components/ChaosCoreDatabasePanel";
 import { Panel } from "../../components/Panel";
 import { createBlankUnit, createSampleUnit } from "../../data/sampleUnit";
-import { usePersistentState } from "../../hooks/usePersistentState";
+import { useChaosCoreDatabase } from "../../hooks/useChaosCoreDatabase";
 import { StructuredDocumentStudio } from "../content/StructuredDocumentStudio";
-import type { ExportTarget } from "../../types/common";
-import type { UnitDocument } from "../../types/unit";
+import type { UnitDocument, UnitSpawnRole } from "../../types/unit";
 import { isoNow } from "../../utils/date";
 import { notify } from "../../utils/dialogs";
 import { buildUnitBundleForTarget } from "../../utils/exporters";
 import { validateUnitDocument } from "../../utils/contentValidation";
 import { parseCommaList, parseKeyValueLines, serializeCommaList, serializeKeyValueLines } from "../../utils/records";
-import {
-  CHAOS_CORE_DATABASE_UPDATE_EVENT,
-  CHAOS_CORE_DATABASE_UPDATE_STORAGE_KEY,
-  isTauriRuntime,
-  listChaosCoreDatabase,
-  loadChaosCoreDatabaseEntry,
-  parseChaosCoreDatabaseUpdate,
-  type LoadedChaosCoreDatabaseEntry
-} from "../../utils/chaosCoreDatabase";
+import { type LoadedChaosCoreDatabaseEntry } from "../../utils/chaosCoreDatabase";
 
 type UnitLoadoutField = keyof UnitDocument["loadout"];
 type UnitGearSlot = "weapon" | "helmet" | "chestpiece" | "accessory";
@@ -77,6 +68,43 @@ function readBoolean(value: unknown, fallback: boolean) {
   return typeof value === "boolean" ? value : fallback;
 }
 
+function readSpawnRole(value: unknown, fallback: UnitSpawnRole): UnitSpawnRole {
+  return value === "enemy" || value === "player" ? value : fallback;
+}
+
+function normalizeFloorOrdinals(value: unknown): number[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const next = value
+    .map((entry) => {
+      if (typeof entry === "number" && Number.isInteger(entry)) {
+        return entry;
+      }
+      if (typeof entry === "string" && entry.trim()) {
+        return Number(entry.trim());
+      }
+      return NaN;
+    })
+    .filter((entry) => Number.isInteger(entry) && entry > 0);
+
+  return Array.from(new Set(next)).sort((left, right) => left - right);
+}
+
+function parseFloorOrdinals(value: string): number[] {
+  return normalizeFloorOrdinals(
+    value
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+  );
+}
+
+function serializeFloorOrdinals(value: number[]): string {
+  return normalizeFloorOrdinals(value).join(", ");
+}
+
 function normalizeUnitDocument(value: unknown): UnitDocument {
   const fallback = createBlankUnit();
   const record = toRecord(value);
@@ -96,6 +124,8 @@ function normalizeUnitDocument(value: unknown): UnitDocument {
     name: readString(record.name, fallback.name),
     description: readString(record.description, fallback.description),
     currentClassId: readString(record.currentClassId, fallback.currentClassId),
+    spawnRole: readSpawnRole(record.spawnRole, fallback.spawnRole),
+    enemySpawnFloorOrdinals: normalizeFloorOrdinals(record.enemySpawnFloorOrdinals),
     stats: {
       maxHp: readNumber(stats?.maxHp, fallback.stats.maxHp),
       atk: readNumber(stats?.atk, fallback.stats.atk),
@@ -135,17 +165,6 @@ function isUnitDocument(value: unknown): value is UnitDocument {
   );
 }
 
-function isGearPayload(value: unknown): value is { id: string; name?: string; slot: UnitGearSlot } {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      "id" in value &&
-      "slot" in value &&
-      (value as { slot?: string }).slot &&
-      ["weapon", "helmet", "chestpiece", "accessory"].includes((value as { slot: string }).slot)
-  );
-}
-
 function formatReferenceSummary(option: UnitReferenceOption | null) {
   if (!option) {
     return null;
@@ -154,138 +173,64 @@ function formatReferenceSummary(option: UnitReferenceOption | null) {
   return `${option.name} (${option.id}) - ${option.origin === "game" ? "Game" : "Technica"}`;
 }
 
-function getPreferredDatabasePayload(loaded: LoadedChaosCoreDatabaseEntry) {
-  return loaded.runtimeContent || loaded.editorContent || loaded.sourceContent || null;
-}
-
 export function UnitEditor() {
-  const [storedRepoPath] = usePersistentState("technica.chaosCoreRepoPath", "");
-  const repoPath = typeof storedRepoPath === "string" ? storedRepoPath : "";
-  const desktopEnabled = isTauriRuntime();
-  const [classOptions, setClassOptions] = useState<UnitReferenceOption[]>([]);
-  const [gearOptions, setGearOptions] = useState<UnitGearOption[]>([]);
+  const { desktopEnabled, repoPath, summaryStates, ensureSummaries } = useChaosCoreDatabase();
 
-  const refreshReferenceOptions = useCallback(async (
-    shouldCommit: () => boolean = () => true,
-    includeGear = false
-  ) => {
+  useEffect(() => {
     if (!desktopEnabled || !repoPath.trim()) {
-      if (shouldCommit()) {
-        setClassOptions([]);
-        if (includeGear) {
-          setGearOptions([]);
-        }
-      }
       return;
     }
 
-    try {
-      const classEntries = await listChaosCoreDatabase(repoPath.trim(), "class");
+    void Promise.all([
+      ensureSummaries("class"),
+      ensureSummaries("gear"),
+      ensureSummaries("operation")
+    ]);
+  }, [desktopEnabled, ensureSummaries, repoPath]);
 
-      const nextClassOptions = classEntries
+  const classOptions = useMemo(
+    () =>
+      summaryStates.class.entries
         .map<UnitReferenceOption>((entry) => ({
           id: entry.contentId,
           name: entry.title.trim() || entry.contentId,
           origin: entry.origin
         }))
-        .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
+        .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id)),
+    [summaryStates.class.entries]
+  );
 
-      let nextGearOptions: UnitGearOption[] | null = null;
-      if (includeGear) {
-        const gearEntries = await listChaosCoreDatabase(repoPath.trim(), "gear");
-        nextGearOptions = (
-          await Promise.all(
-            gearEntries.map(async (entry) => {
-              try {
-                const loaded = await loadChaosCoreDatabaseEntry(repoPath.trim(), "gear", entry.entryKey);
-                const payload = getPreferredDatabasePayload(loaded);
-                if (!payload) {
-                  return null;
-                }
+  const gearOptions = useMemo(
+    () =>
+      summaryStates.gear.entries
+        .map<UnitGearOption | null>((entry) => {
+          const slot = typeof entry.summaryData?.slot === "string" ? entry.summaryData.slot : null;
+          if (!slot || !["weapon", "helmet", "chestpiece", "accessory"].includes(slot)) {
+            return null;
+          }
 
-                const parsed = JSON.parse(payload);
-                if (!isGearPayload(parsed)) {
-                  return null;
-                }
+          return {
+            id: entry.contentId,
+            name: entry.title.trim() || entry.contentId,
+            origin: entry.origin,
+            slot: slot as UnitGearSlot
+          };
+        })
+        .filter((option): option is UnitGearOption => option !== null)
+        .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id)),
+    [summaryStates.gear.entries]
+  );
 
-                return {
-                  id: entry.contentId,
-                  name: parsed.name?.trim() || entry.title.trim() || entry.contentId,
-                  origin: entry.origin,
-                  slot: parsed.slot
-                } satisfies UnitGearOption;
-              } catch {
-                return null;
-              }
-            })
-          )
-        )
-          .filter((option): option is UnitGearOption => option !== null)
-          .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
-      }
+  const floorOrdinalOptions = useMemo(() => {
+    const highestImportedFloor = Math.max(
+      3,
+      ...summaryStates.operation.entries.map((entry) =>
+        typeof entry.summaryData?.floorCount === "number" ? entry.summaryData.floorCount : 0
+      )
+    );
 
-      if (shouldCommit()) {
-        setClassOptions(nextClassOptions);
-        if (nextGearOptions) {
-          setGearOptions(nextGearOptions);
-        }
-      }
-    } catch {
-      if (shouldCommit()) {
-        setClassOptions([]);
-        if (includeGear) {
-          setGearOptions([]);
-        }
-      }
-    }
-  }, [desktopEnabled, repoPath]);
-
-  useEffect(() => {
-    let isCancelled = false;
-
-    async function refreshSafely() {
-      await refreshReferenceOptions(() => !isCancelled);
-    }
-
-    function handleChaosCoreUpdate(event: Event) {
-      const update = event as CustomEvent<{ contentType?: string }>;
-      if (update.detail?.contentType === "gear" || update.detail?.contentType === "class") {
-        void refreshReferenceOptions(() => !isCancelled, false);
-      }
-    }
-
-    function handleStorageUpdate(event: StorageEvent) {
-      if (event.key !== CHAOS_CORE_DATABASE_UPDATE_STORAGE_KEY) {
-        return;
-      }
-
-      const update = parseChaosCoreDatabaseUpdate(event.newValue);
-      if (update?.contentType === "gear" || update?.contentType === "class") {
-        void refreshReferenceOptions(() => !isCancelled, false);
-      }
-    }
-
-    function handleFocus() {
-      void refreshReferenceOptions(() => !isCancelled, false);
-    }
-
-    void refreshReferenceOptions(() => !isCancelled, false);
-
-    if (typeof window !== "undefined") {
-      window.addEventListener(CHAOS_CORE_DATABASE_UPDATE_EVENT, handleChaosCoreUpdate);
-      window.addEventListener("storage", handleStorageUpdate);
-      window.addEventListener("focus", handleFocus);
-    }
-
-    return () => {
-      isCancelled = true;
-      if (typeof window !== "undefined") {
-        window.removeEventListener(CHAOS_CORE_DATABASE_UPDATE_EVENT, handleChaosCoreUpdate);
-        window.removeEventListener("storage", handleStorageUpdate);
-        window.removeEventListener("focus", handleFocus);
-      }
-    };
-  }, [refreshReferenceOptions]);
+    return Array.from({ length: highestImportedFloor }, (_, index) => index + 1);
+  }, [summaryStates.operation.entries]);
 
   const gearOptionsBySlot = useMemo<Record<UnitGearSlot, UnitGearOption[]>>(
     () => ({
@@ -330,6 +275,7 @@ export function UnitEditor() {
         <>
           {(() => {
             const unit = normalizeUnitDocument(document);
+            const isEnemyUnit = unit.spawnRole === "enemy";
             const patchUnit = (updater: (current: UnitDocument) => UnitDocument) =>
               patchDocument((current) => updater(normalizeUnitDocument(current)));
             const selectedClass = classOptions.find((option) => option.id === unit.currentClassId) ?? null;
@@ -342,19 +288,20 @@ export function UnitEditor() {
 
             return (
           <Panel
-            title="Unit Setup"
-            subtitle="Create roster-ready unit templates with explicit class, stats, loadout, and staging flags."
-            actions={
-              <div className="toolbar">
-                <button type="button" className="ghost-button" onClick={() => void refreshReferenceOptions()}>
-                  Refresh class suggestions
-                </button>
+                title="Unit Setup"
+                subtitle="Create either player roster units or tactical enemy units with explicit class, stats, loadout, and spawn behavior."
+                actions={
+                  <div className="toolbar">
                 <button
                   type="button"
                   className="ghost-button"
-                  onClick={() => void refreshReferenceOptions(() => true, true)}
+                  onClick={() => void Promise.all([
+                    ensureSummaries("class", { force: true }),
+                    ensureSummaries("gear", { force: true }),
+                    ensureSummaries("operation", { force: true })
+                  ])}
                 >
-                  Load gear suggestions
+                  Refresh repo suggestions
                 </button>
                 <button type="button" className="ghost-button" onClick={loadSample}>
                   Load sample
@@ -398,6 +345,28 @@ export function UnitEditor() {
                       : desktopEnabled && repoPath.trim()
                         ? "No class suggestions found in the current Chaos Core repo."
                         : "Set the Chaos Core repo path to pull class suggestions."}
+                </small>
+              </label>
+              <label className="field">
+                <span>Unit role</span>
+                <select
+                  value={unit.spawnRole}
+                  onChange={(event) =>
+                    patchUnit((current) => ({
+                      ...current,
+                      spawnRole: event.target.value as UnitSpawnRole,
+                      startingInRoster: event.target.value === "enemy" ? false : current.startingInRoster,
+                      deployInParty: event.target.value === "enemy" ? false : current.deployInParty,
+                    }))
+                  }
+                >
+                  <option value="player">Player roster unit</option>
+                  <option value="enemy">Enemy tactical unit</option>
+                </select>
+                <small className="muted">
+                  {isEnemyUnit
+                    ? "Enemy units spawn into tactical battles on the selected floor ordinals."
+                    : "Player units can be staged into the roster and party."}
                 </small>
               </label>
               <label className="field">
@@ -527,7 +496,7 @@ export function UnitEditor() {
             </div>
 
             <div className="subsection">
-              <h4>Loadout & Staging</h4>
+              <h4>{isEnemyUnit ? "Loadout & Enemy Spawns" : "Loadout & Staging"}</h4>
               <div className="form-grid">
                 {(Object.keys(unit.loadout) as UnitLoadoutField[]).map((field) => {
                   const slot = LOADOUT_SLOT_BY_FIELD[field];
@@ -571,26 +540,76 @@ export function UnitEditor() {
                     </label>
                   );
                 })}
-                <label className="field field-inline">
-                  <span>Starting in roster</span>
-                  <input
-                    type="checkbox"
-                    checked={unit.startingInRoster}
-                    onChange={(event) =>
-                      patchUnit((current) => ({ ...current, startingInRoster: event.target.checked }))
-                    }
-                  />
-                </label>
-                <label className="field field-inline">
-                  <span>Deploy in party</span>
-                  <input
-                    type="checkbox"
-                    checked={unit.deployInParty}
-                    onChange={(event) =>
-                      patchUnit((current) => ({ ...current, deployInParty: event.target.checked }))
-                    }
-                  />
-                </label>
+                {isEnemyUnit ? (
+                  <>
+                    <label className="field full">
+                      <span>Enemy spawn floors</span>
+                      <input
+                        value={serializeFloorOrdinals(unit.enemySpawnFloorOrdinals)}
+                        placeholder="1, 2, 3"
+                        onChange={(event) =>
+                          patchUnit((current) => ({
+                            ...current,
+                            enemySpawnFloorOrdinals: parseFloorOrdinals(event.target.value)
+                          }))
+                        }
+                      />
+                      <small className="muted">
+                        Use 1-based floor numbers. This enemy unit can appear in tactical battles on those floor ordinals across Chaos Core operations.
+                      </small>
+                    </label>
+                    <div className="field full">
+                      <span>Quick select floors</span>
+                      <div className="chip-row">
+                        {floorOrdinalOptions.map((floorOrdinal) => {
+                          const isSelected = unit.enemySpawnFloorOrdinals.includes(floorOrdinal);
+                          return (
+                            <button
+                              key={floorOrdinal}
+                              type="button"
+                              className={isSelected ? "secondary-button" : "ghost-button"}
+                              onClick={() =>
+                                patchUnit((current) => ({
+                                  ...current,
+                                  enemySpawnFloorOrdinals: normalizeFloorOrdinals(
+                                    isSelected
+                                      ? current.enemySpawnFloorOrdinals.filter((entry) => entry !== floorOrdinal)
+                                      : [...current.enemySpawnFloorOrdinals, floorOrdinal]
+                                  )
+                                }))
+                              }
+                            >
+                              Floor {floorOrdinal}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <label className="field field-inline">
+                      <span>Starting in roster</span>
+                      <input
+                        type="checkbox"
+                        checked={unit.startingInRoster}
+                        onChange={(event) =>
+                          patchUnit((current) => ({ ...current, startingInRoster: event.target.checked }))
+                        }
+                      />
+                    </label>
+                    <label className="field field-inline">
+                      <span>Deploy in party</span>
+                      <input
+                        type="checkbox"
+                        checked={unit.deployInParty}
+                        onChange={(event) =>
+                          patchUnit((current) => ({ ...current, deployInParty: event.target.checked }))
+                        }
+                      />
+                    </label>
+                  </>
+                )}
                 <label className="field full">
                   <span>Metadata</span>
                   <textarea
@@ -611,6 +630,7 @@ export function UnitEditor() {
               <div className="chip-row">
                 <span className="pill">{unit.currentClassId}</span>
                 <span className="pill">{unit.traits.length} trait(s)</span>
+                <span className="pill">{isEnemyUnit ? "Enemy unit" : "Player unit"}</span>
                 <span className="pill accent">Chaos Core export</span>
               </div>
               <div className="toolbar">

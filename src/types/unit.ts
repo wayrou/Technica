@@ -10,6 +10,8 @@ export interface UnitLoadoutDocument {
   accessory2: string;
 }
 
+export type UnitSpawnRole = "player" | "enemy";
+
 export interface UnitDocument {
   schemaVersion: string;
   sourceApp: "Technica";
@@ -17,6 +19,8 @@ export interface UnitDocument {
   name: string;
   description: string;
   currentClassId: string;
+  spawnRole: UnitSpawnRole;
+  enemySpawnFloorOrdinals: number[];
   stats: {
     maxHp: number;
     atk: GearStats["atk"];

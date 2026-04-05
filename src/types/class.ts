@@ -17,6 +17,17 @@ export interface ClassUnlockConditionDocument {
   description?: string;
 }
 
+export interface ClassTrainingGridNodeDocument {
+  id: string;
+  name: string;
+  description: string;
+  cost: number;
+  row: number;
+  col: number;
+  requires?: string[];
+  benefit?: string;
+}
+
 export interface ClassDocument {
   schemaVersion: string;
   sourceApp: "Technica";
@@ -34,6 +45,7 @@ export interface ClassDocument {
   weaponTypes: SupportedWeaponType[];
   unlockConditions: ClassUnlockConditionDocument[];
   innateAbility: string;
+  trainingGrid: ClassTrainingGridNodeDocument[];
   metadata: KeyValueRecord;
   createdAt: string;
   updatedAt: string;

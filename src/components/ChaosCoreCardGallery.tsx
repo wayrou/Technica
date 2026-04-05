@@ -1,31 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import type { ChaosCoreDatabaseEntry, LoadedChaosCoreDatabaseEntry } from "../utils/chaosCoreDatabase";
-import { loadChaosCoreDatabaseEntry } from "../utils/chaosCoreDatabase";
-
-type RuntimeCardEffect = {
-  type?: unknown;
-  amount?: unknown;
-  duration?: unknown;
-  stat?: unknown;
-  tiles?: unknown;
-};
-
-type RuntimeCardRecord = {
-  id: string;
-  name: string;
-  description?: string;
-  type?: string;
-  rarity?: string;
-  category?: string;
-  strainCost?: number;
-  targetType?: string;
-  range?: number;
-  damage?: number;
-  effects?: RuntimeCardEffect[];
-  sourceClassId?: string;
-  sourceEquipmentId?: string;
-  artPath?: string;
-};
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { ChaosCoreDatabaseEntry } from "../utils/chaosCoreDatabase";
 
 type CardGalleryPreview = {
   entryKey: string;
@@ -33,7 +7,6 @@ type CardGalleryPreview = {
   contentId: string;
   runtimeFile: string;
   origin: "game" | "technica";
-  categoryLabel: string;
   categoryBadge: string;
   artGlyph: string;
   rarityLabel: string;
@@ -43,7 +16,7 @@ type CardGalleryPreview = {
   targetLabel: string;
   rangeLabel: string;
   sourceLabel: string;
-  artSrc?: string;
+  artPath?: string;
 };
 
 interface ChaosCoreCardGalleryProps {
@@ -53,8 +26,10 @@ interface ChaosCoreCardGalleryProps {
   onSelectEntryKey: (entryKey: string) => void;
 }
 
-const CARD_PREVIEW_BATCH_SIZE = 8;
-const CARD_PREVIEW_INITIAL_BATCHES = 2;
+const CARD_TILE_MIN_WIDTH = 220;
+const CARD_TILE_ROW_HEIGHT = 430;
+const CARD_TILE_GAP = 16;
+const CARD_TILE_OVERSCAN_ROWS = 2;
 let cachedConvertFileSrc: ((filePath: string) => string) | null = null;
 
 function humanizeToken(value: string) {
@@ -81,81 +56,6 @@ function joinWindowsPath(...segments: string[]) {
     })
     .filter(Boolean)
     .join("\\");
-}
-
-function toNumber(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function toStringValue(value: unknown) {
-  return typeof value === "string" ? value : undefined;
-}
-
-function formatTurns(duration?: number) {
-  if (!duration || duration <= 0) {
-    return "";
-  }
-
-  return duration === 1 ? " for 1 turn" : ` for ${duration} turns`;
-}
-
-function formatCardEffect(effect: RuntimeCardEffect) {
-  const effectType = toStringValue(effect.type)?.trim().toLowerCase();
-  const amount = toNumber(effect.amount);
-  const duration = toNumber(effect.duration);
-  const tiles = toNumber(effect.tiles);
-  const stat = toStringValue(effect.stat);
-
-  if (!effectType) {
-    return "Custom effect.";
-  }
-
-  switch (effectType) {
-    case "damage":
-    case "deal_damage":
-      return amount ? `Deal ${amount} damage.` : "Deal damage.";
-    case "heal":
-      return amount ? `Restore ${amount} HP.` : "Restore HP.";
-    case "def_up":
-      return `Gain +${amount ?? 0} DEF${formatTurns(duration)}.`;
-    case "atk_up":
-      return `Gain +${amount ?? 0} ATK${formatTurns(duration)}.`;
-    case "acc_up":
-      return `Gain +${amount ?? 0} ACC${formatTurns(duration)}.`;
-    case "agi_up":
-      return `Gain +${amount ?? 0} AGI${formatTurns(duration)}.`;
-    case "def_down":
-      return `Inflict -${amount ?? 0} DEF${formatTurns(duration)}.`;
-    case "atk_down":
-      return `Inflict -${amount ?? 0} ATK${formatTurns(duration)}.`;
-    case "acc_down":
-      return `Inflict -${amount ?? 0} ACC${formatTurns(duration)}.`;
-    case "push":
-      return `Push ${tiles ?? amount ?? 1} tile${(tiles ?? amount ?? 1) === 1 ? "" : "s"}.`;
-    case "move":
-      return `Move ${tiles ?? amount ?? 1} tile${(tiles ?? amount ?? 1) === 1 ? "" : "s"}.`;
-    case "stun":
-      return `Stun${formatTurns(duration || 1)}.`;
-    case "burn":
-      return amount
-        ? `Inflict Burn for ${amount} damage${formatTurns(duration)}.`
-        : `Inflict Burn${formatTurns(duration)}.`;
-    case "set_flag":
-      return "Set a scenario flag.";
-    case "end_turn":
-      return "End the target's turn.";
-    default: {
-      const details = [
-        amount !== undefined ? `${amount}` : "",
-        stat ? humanizeToken(stat) : "",
-        tiles !== undefined ? `${tiles} tile${tiles === 1 ? "" : "s"}` : "",
-        duration !== undefined ? `${duration} turn${duration === 1 ? "" : "s"}` : ""
-      ]
-        .filter(Boolean)
-        .join(" ");
-      return details ? `${humanizeToken(effectType)} ${details}.` : `${humanizeToken(effectType)}.`;
-    }
-  }
 }
 
 function getCardGlyph(category: string | undefined) {
@@ -197,6 +97,43 @@ function buildCardCopy(description: string, effectLines: string[]) {
   return dedupedEffects;
 }
 
+function toSummaryPreview(entry: ChaosCoreDatabaseEntry): CardGalleryPreview {
+  const summary = entry.summaryData ?? {};
+  const category = typeof summary.category === "string" ? summary.category : "card";
+  const effectLines = Array.isArray(summary.effectLines)
+    ? summary.effectLines.filter(
+        (line): line is string => typeof line === "string" && line.trim().length > 0
+      )
+    : [];
+  const sourceLabel = typeof summary.sourceClassId === "string"
+    ? `Class: ${humanizeToken(summary.sourceClassId)}`
+    : typeof summary.sourceEquipmentId === "string"
+      ? `Gear: ${humanizeToken(summary.sourceEquipmentId)}`
+      : entry.origin === "game"
+        ? "Built into Chaos Core"
+        : "Published from Technica";
+
+  return {
+    entryKey: entry.entryKey,
+    title: entry.title,
+    contentId: entry.contentId,
+    runtimeFile: entry.runtimeFile,
+    origin: entry.origin,
+    categoryBadge: getCardGlyph(category),
+    artGlyph: getCardGlyph(category),
+    rarityLabel: typeof summary.rarity === "string" ? humanizeToken(summary.rarity) : entry.origin === "game" ? "Game" : "Technica",
+    strainCostLabel:
+      typeof summary.strainCost === "number" ? `${summary.strainCost}` : "?",
+    description: typeof summary.description === "string" ? summary.description : "",
+    effectLines,
+    targetLabel: typeof summary.targetType === "string" ? humanizeToken(summary.targetType) : "Unknown",
+    rangeLabel:
+      typeof summary.range === "number" ? `Range ${summary.range}` : "Range ?",
+    sourceLabel,
+    artPath: typeof summary.artPath === "string" ? summary.artPath : undefined
+  };
+}
+
 async function resolveCardArtSrc(repoPath: string, artPath: string | undefined) {
   const trimmed = artPath?.trim();
   if (!trimmed) {
@@ -221,121 +158,6 @@ async function resolveCardArtSrc(repoPath: string, artPath: string | undefined) 
   }
 
   return cachedConvertFileSrc(localPath);
-}
-
-function normalizeRuntimeCardRecord(value: unknown): RuntimeCardRecord | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-
-  const record = value as Record<string, unknown>;
-  const id = toStringValue(record.id);
-  const name = toStringValue(record.name);
-  const strainCost = toNumber(record.strainCost);
-  const type = toStringValue(record.type) ?? toStringValue(record.cardType);
-
-  if (!id || !name || strainCost === undefined || !type) {
-    return null;
-  }
-
-  return {
-    id,
-    name,
-    description: toStringValue(record.description),
-    type,
-    rarity: toStringValue(record.rarity),
-    category: toStringValue(record.category),
-    strainCost,
-    targetType: toStringValue(record.targetType),
-    range: toNumber(record.range),
-    damage: toNumber(record.damage),
-    effects: Array.isArray(record.effects) ? (record.effects as RuntimeCardEffect[]) : [],
-    sourceClassId: toStringValue(record.sourceClassId),
-    sourceEquipmentId: toStringValue(record.sourceEquipmentId),
-    artPath: toStringValue(record.artPath)
-  };
-}
-
-function extractRuntimeCardRecord(entry: LoadedChaosCoreDatabaseEntry) {
-  for (const candidate of [entry.runtimeContent, entry.editorContent, entry.sourceContent]) {
-    if (!candidate) {
-      continue;
-    }
-
-    try {
-      const parsed = JSON.parse(candidate) as unknown;
-      const normalized = normalizeRuntimeCardRecord(parsed);
-      if (normalized) {
-        return normalized;
-      }
-    } catch {
-      // Ignore non-JSON or non-card payloads here.
-    }
-  }
-
-  return null;
-}
-
-function buildFallbackPreview(entry: ChaosCoreDatabaseEntry): CardGalleryPreview {
-  return {
-    entryKey: entry.entryKey,
-    title: entry.title,
-    contentId: entry.contentId,
-    runtimeFile: entry.runtimeFile,
-    origin: entry.origin,
-    categoryLabel: "Card",
-    categoryBadge: "CRD",
-    artGlyph: "CRD",
-    rarityLabel: entry.origin === "game" ? "Game" : "Technica",
-    strainCostLabel: "?",
-    description: "Load the runtime card record to preview the in-game face.",
-    effectLines: [],
-    targetLabel: "Unknown",
-    rangeLabel: "Range ?",
-    sourceLabel: entry.origin === "game" ? "Built into Chaos Core" : "Published from Technica"
-  };
-}
-
-async function buildRuntimePreview(
-  repoPath: string,
-  entry: ChaosCoreDatabaseEntry,
-  record: RuntimeCardRecord
-): Promise<CardGalleryPreview> {
-  const effectLines = (record.effects ?? [])
-    .map((effect) => formatCardEffect(effect))
-    .filter(Boolean);
-  const categoryBadge = getCardGlyph(record.category ?? record.type);
-
-  if (record.damage !== undefined && !effectLines.some((line) => line.toLowerCase().includes("damage"))) {
-    effectLines.unshift(`Deal ${record.damage} damage.`);
-  }
-
-  const sourceLabel = record.sourceClassId
-    ? `Class: ${humanizeToken(record.sourceClassId)}`
-    : record.sourceEquipmentId
-      ? `Gear: ${humanizeToken(record.sourceEquipmentId)}`
-      : entry.origin === "game"
-        ? "Built into Chaos Core"
-        : "Published from Technica";
-
-  return {
-    entryKey: entry.entryKey,
-    title: record.name,
-    contentId: record.id,
-    runtimeFile: entry.runtimeFile,
-    origin: entry.origin,
-    categoryLabel: humanizeToken(record.category ?? record.type ?? "card"),
-    categoryBadge,
-    artGlyph: categoryBadge,
-    rarityLabel: humanizeToken(record.rarity ?? "common"),
-    strainCostLabel: `${record.strainCost ?? 0}`,
-    description: record.description?.trim() ?? "",
-    effectLines,
-    targetLabel: humanizeToken(record.targetType ?? "self"),
-    rangeLabel: `Range ${record.range ?? 0}`,
-    sourceLabel,
-    artSrc: await resolveCardArtSrc(repoPath, record.artPath)
-  };
 }
 
 function CardArt({ artSrc, title, glyph }: { artSrc?: string; title: string; glyph: string }) {
@@ -366,98 +188,97 @@ export function ChaosCoreCardGallery({
   selectedEntryKey,
   onSelectEntryKey
 }: ChaosCoreCardGalleryProps) {
-  const previewCacheRef = useRef(new Map<string, CardGalleryPreview>());
-  const [previews, setPreviews] = useState<CardGalleryPreview[]>([]);
-  const [isLoadingPreviewData, setIsLoadingPreviewData] = useState(false);
-  const [resolvedPreviewCount, setResolvedPreviewCount] = useState(0);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const artSrcCacheRef = useRef(new Map<string, string | undefined>());
+  const [artSrcVersion, setArtSrcVersion] = useState(0);
+  const [viewportWidth, setViewportWidth] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(640);
+  const [scrollTop, setScrollTop] = useState(0);
+
+  const previews = useMemo(() => entries.map((entry) => toSummaryPreview(entry)), [entries]);
+  const columnCount = Math.max(
+    1,
+    Math.floor((Math.max(viewportWidth, CARD_TILE_MIN_WIDTH) + CARD_TILE_GAP) / (CARD_TILE_MIN_WIDTH + CARD_TILE_GAP))
+  );
+  const totalRows = Math.ceil(previews.length / columnCount);
+  const startRow = Math.max(0, Math.floor(scrollTop / CARD_TILE_ROW_HEIGHT) - CARD_TILE_OVERSCAN_ROWS);
+  const endRow = Math.min(
+    totalRows,
+    Math.ceil((scrollTop + viewportHeight) / CARD_TILE_ROW_HEIGHT) + CARD_TILE_OVERSCAN_ROWS
+  );
+  const startIndex = startRow * columnCount;
+  const endIndex = Math.min(previews.length, endRow * columnCount);
+  const visiblePreviews = previews.slice(startIndex, endIndex);
 
   useEffect(() => {
-    previewCacheRef.current.clear();
-  }, [repoPath]);
-
-  useEffect(() => {
-    setPreviews(entries.map((entry) => previewCacheRef.current.get(entry.entryKey) ?? buildFallbackPreview(entry)));
-    setResolvedPreviewCount(entries.filter((entry) => previewCacheRef.current.has(entry.entryKey)).length);
-
-    if (!repoPath.trim() || entries.length === 0) {
-      setIsLoadingPreviewData(false);
-      setResolvedPreviewCount(0);
+    if (!viewportRef.current || typeof ResizeObserver === "undefined") {
       return;
     }
 
+    const viewport = viewportRef.current;
+    const observer = new ResizeObserver((entriesToMeasure) => {
+      const nextEntry = entriesToMeasure[0];
+      if (!nextEntry) {
+        return;
+      }
+
+      setViewportWidth(nextEntry.contentRect.width);
+      setViewportHeight(nextEntry.contentRect.height);
+    });
+
+    observer.observe(viewport);
+    setViewportWidth(viewport.clientWidth);
+    setViewportHeight(viewport.clientHeight);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    artSrcCacheRef.current.clear();
+    setArtSrcVersion((current) => current + 1);
+  }, [repoPath]);
+
+  useEffect(() => {
     let cancelled = false;
 
-    async function loadPreview(entry: ChaosCoreDatabaseEntry) {
-      const cached = previewCacheRef.current.get(entry.entryKey);
-      if (cached) {
-        return cached;
+    async function hydrateVisibleArt() {
+      if (!repoPath.trim()) {
+        return;
       }
 
-      try {
-        const loaded = await loadChaosCoreDatabaseEntry(repoPath.trim(), "card", entry.entryKey);
-        const record = extractRuntimeCardRecord(loaded);
-        const preview = record ? await buildRuntimePreview(repoPath.trim(), entry, record) : buildFallbackPreview(entry);
-        previewCacheRef.current.set(entry.entryKey, preview);
-        return preview;
-      } catch {
-        const preview = buildFallbackPreview(entry);
-        previewCacheRef.current.set(entry.entryKey, preview);
-        return preview;
-      }
-    }
+      const pendingPreviews = visiblePreviews.filter(
+        (preview) => preview.artPath && !artSrcCacheRef.current.has(preview.entryKey)
+      );
 
-    async function yieldToUi() {
-      await new Promise<void>((resolve) => {
-        window.setTimeout(resolve, 0);
+      if (pendingPreviews.length === 0) {
+        return;
+      }
+
+      const resolvedEntries = await Promise.all(
+        pendingPreviews.map(async (preview) => ({
+          entryKey: preview.entryKey,
+          artSrc: await resolveCardArtSrc(repoPath.trim(), preview.artPath)
+        }))
+      );
+
+      if (cancelled) {
+        return;
+      }
+
+      resolvedEntries.forEach(({ entryKey, artSrc }) => {
+        artSrcCacheRef.current.set(entryKey, artSrc);
       });
+      setArtSrcVersion((current) => current + 1);
     }
 
-    async function loadPreviews() {
-      setIsLoadingPreviewData(true);
-      try {
-        const queue = entries.filter((entry) => !previewCacheRef.current.has(entry.entryKey));
-        const eagerLoadCount = Math.min(queue.length, CARD_PREVIEW_BATCH_SIZE * CARD_PREVIEW_INITIAL_BATCHES);
-
-        if (eagerLoadCount > 0) {
-          const initialEntries = queue.slice(0, eagerLoadCount);
-          await Promise.all(initialEntries.map((entry) => loadPreview(entry)));
-
-          if (!cancelled) {
-            setResolvedPreviewCount(entries.filter((entry) => previewCacheRef.current.has(entry.entryKey)).length);
-            setPreviews(entries.map((entry) => previewCacheRef.current.get(entry.entryKey) ?? buildFallbackPreview(entry)));
-          }
-        }
-
-        for (let index = eagerLoadCount; index < queue.length; index += CARD_PREVIEW_BATCH_SIZE) {
-          if (cancelled) {
-            return;
-          }
-
-          const batch = queue.slice(index, index + CARD_PREVIEW_BATCH_SIZE);
-          await Promise.all(batch.map((entry) => loadPreview(entry)));
-
-          if (cancelled) {
-            return;
-          }
-
-          setResolvedPreviewCount(entries.filter((entry) => previewCacheRef.current.has(entry.entryKey)).length);
-          setPreviews(entries.map((entry) => previewCacheRef.current.get(entry.entryKey) ?? buildFallbackPreview(entry)));
-          await yieldToUi();
-        }
-      } finally {
-        if (!cancelled) {
-          setResolvedPreviewCount(entries.filter((entry) => previewCacheRef.current.has(entry.entryKey)).length);
-          setIsLoadingPreviewData(false);
-        }
-      }
-    }
-
-    void loadPreviews();
+    void hydrateVisibleArt();
 
     return () => {
       cancelled = true;
     };
-  }, [entries, repoPath]);
+  }, [repoPath, visiblePreviews]);
+
+  const topSpacerHeight = startRow * CARD_TILE_ROW_HEIGHT;
+  const bottomSpacerHeight = Math.max(0, (totalRows - endRow) * CARD_TILE_ROW_HEIGHT);
 
   return (
     <div className="database-card-gallery-shell">
@@ -467,59 +288,73 @@ export function ChaosCoreCardGallery({
 
       {entries.length > 0 ? (
         <div className="chip-row">
-          <span className="pill">{previews.length} cards</span>
-          {isLoadingPreviewData ? <span className="pill">Loading card faces {resolvedPreviewCount}/{entries.length}</span> : null}
+          <span className="pill">{entries.length} cards</span>
+          <span className="pill">Summary-driven</span>
         </div>
       ) : null}
 
       {entries.length > 0 ? (
-        <div className="database-card-gallery">
-          {previews.map((preview) => {
-            const selected = preview.entryKey === selectedEntryKey;
-            const rarityClass = preview.rarityLabel.toLowerCase().replace(/\s+/g, "-");
-            const copyLines = buildCardCopy(preview.description, preview.effectLines);
+        <div
+          ref={viewportRef}
+          className="database-card-gallery-viewport"
+          onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+        >
+          {topSpacerHeight > 0 ? <div style={{ height: `${topSpacerHeight}px` }} /> : null}
+          <div
+            className="database-card-gallery"
+            style={{ gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }}
+          >
+            {visiblePreviews.map((preview) => {
+              const selected = preview.entryKey === selectedEntryKey;
+              const rarityClass = preview.rarityLabel.toLowerCase().replace(/\s+/g, "-");
+              const copyLines = buildCardCopy(preview.description, preview.effectLines);
+              const artSrc = artSrcCacheRef.current.get(preview.entryKey);
 
-            return (
-              <button
-                key={preview.entryKey}
-                type="button"
-                className={`database-card-tile rarity-${rarityClass}${selected ? " active" : ""}`}
-                onClick={() => onSelectEntryKey(preview.entryKey)}
-              >
-                <div className={`database-card-face${selected ? " selected" : ""}`}>
-                  <div className="database-card-face-cost">{preview.strainCostLabel}</div>
-                  <div className="database-card-face-type">{preview.categoryBadge}</div>
-                  <div className="database-card-face-art">
-                    <CardArt artSrc={preview.artSrc} title={preview.title} glyph={preview.artGlyph} />
-                  </div>
-                  <div className="database-card-face-rulebox">
-                    <div className="database-card-face-title">{preview.title}</div>
-                    <div className="database-card-face-copy">
-                      {copyLines.length > 0 ? (
-                        copyLines.map((line, index) => (
-                          <p key={`${preview.entryKey}:${index}`} className="database-card-face-copy-line">
-                            {line}
-                          </p>
-                        ))
-                      ) : (
-                        <p className="database-card-face-copy-line muted">No structured effect lines found.</p>
-                      )}
+              return (
+                <button
+                  key={preview.entryKey}
+                  type="button"
+                  className={`database-card-tile rarity-${rarityClass}${selected ? " active" : ""}`}
+                  onClick={() => onSelectEntryKey(preview.entryKey)}
+                >
+                  <div className={`database-card-face${selected ? " selected" : ""}`}>
+                    <div className="database-card-face-cost">{preview.strainCostLabel}</div>
+                    <div className="database-card-face-type">{preview.categoryBadge}</div>
+                    <div className="database-card-face-art">
+                      <CardArt artSrc={artSrc} title={preview.title} glyph={preview.artGlyph} />
                     </div>
-                    <div className="database-card-face-detail-row">
-                      <span>{preview.rangeLabel}</span>
-                      <span>{preview.rarityLabel}</span>
+                    <div className="database-card-face-rulebox">
+                      <div className="database-card-face-title">{preview.title}</div>
+                      <div className="database-card-face-copy">
+                        {copyLines.length > 0 ? (
+                          copyLines.map((line, index) => (
+                            <p key={`${preview.entryKey}:${index}:${artSrcVersion}`} className="database-card-face-copy-line">
+                              {line}
+                            </p>
+                          ))
+                        ) : (
+                          <p className="database-card-face-copy-line muted">No structured effect lines found.</p>
+                        )}
+                      </div>
+                      <div className="database-card-face-detail-row">
+                        <span>{preview.rangeLabel}</span>
+                        <span>{preview.rarityLabel}</span>
+                      </div>
+                      <div className="database-card-face-target">{preview.targetLabel}</div>
                     </div>
-                    <div className="database-card-face-target">{preview.targetLabel}</div>
                   </div>
-                </div>
-                <div className="database-card-meta">
-                  <strong>{preview.contentId}</strong>
-                  <span>{preview.sourceLabel}</span>
-                  <small>{preview.origin === "game" ? "Game" : "Technica"} | {preview.runtimeFile}</small>
-                </div>
-              </button>
-            );
-          })}
+                  <div className="database-card-meta">
+                    <strong>{preview.contentId}</strong>
+                    <span>{preview.sourceLabel}</span>
+                    <small>
+                      {preview.origin === "game" ? "Game" : "Technica"} | {preview.runtimeFile}
+                    </small>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          {bottomSpacerHeight > 0 ? <div style={{ height: `${bottomSpacerHeight}px` }} /> : null}
         </div>
       ) : null}
     </div>

@@ -2,8 +2,9 @@ import type { EditorKind } from "../types/common";
 import { isTauriRuntime } from "./chaosCoreDatabase";
 
 export type TechnicaTabId = EditorKind | "database";
+export type TechnicaPopoutId = TechnicaTabId | "card-preview" | "class-preview";
 
-export function getRequestedPopoutTab(): TechnicaTabId | null {
+export function getRequestedPopoutTab(): TechnicaPopoutId | null {
   if (typeof window === "undefined") {
     return null;
   }
@@ -21,11 +22,17 @@ export function getRequestedPopoutTab(): TechnicaTabId | null {
     tab === "npc" ||
     tab === "gear" ||
     tab === "item" ||
+    tab === "crafting" ||
+    tab === "dish" ||
+    tab === "fieldmod" ||
+    tab === "schema" ||
     tab === "card" ||
     tab === "unit" ||
     tab === "operation" ||
     tab === "class" ||
-    tab === "database"
+    tab === "database" ||
+    tab === "card-preview" ||
+    tab === "class-preview"
   ) {
     return tab;
   }
@@ -33,7 +40,7 @@ export function getRequestedPopoutTab(): TechnicaTabId | null {
   return null;
 }
 
-export async function openTechnicaPopout(tab: TechnicaTabId, title: string) {
+export async function openTechnicaPopout(tab: TechnicaPopoutId, title: string) {
   if (typeof window === "undefined") {
     return;
   }

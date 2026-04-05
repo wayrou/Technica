@@ -1,4 +1,4 @@
-import type { EditorKind, ExportBundle } from "../types/common";
+import type { DatabaseContentType, ExportBundle } from "../types/common";
 
 export const CHAOS_CORE_DATABASE_UPDATE_EVENT = "technica:chaos-core-database-update";
 export const CHAOS_CORE_DATABASE_UPDATE_STORAGE_KEY = "technica.chaosCoreDatabaseUpdate";
@@ -10,6 +10,7 @@ export interface ChaosCoreDatabaseEntry {
   runtimeFile: string;
   sourceFile?: string;
   origin: "game" | "technica";
+  summaryData?: Record<string, unknown>;
 }
 
 export interface LoadedChaosCoreDatabaseEntry {
@@ -18,6 +19,7 @@ export interface LoadedChaosCoreDatabaseEntry {
   title: string;
   origin: "game" | "technica";
   runtimeFile: string;
+  summaryData?: Record<string, unknown>;
   runtimeContent: string;
   sourceFile?: string;
   sourceContent?: string;
@@ -31,7 +33,7 @@ type PublishResult = {
 };
 
 export interface ChaosCoreDatabaseUpdateEvent {
-  contentType: EditorKind;
+  contentType: DatabaseContentType;
   updatedAt: string;
 }
 
@@ -71,6 +73,11 @@ interface SessionDatabaseListResponse {
   entries: ChaosCoreDatabaseEntry[];
 }
 
+export interface ChaosCoreDatabaseListAllResponse {
+  repoPath: string;
+  entriesByType: Partial<Record<DatabaseContentType, ChaosCoreDatabaseEntry[]>>;
+}
+
 interface SessionDatabaseLoadResponse {
   repoPath: string;
   entry: LoadedChaosCoreDatabaseEntry;
@@ -82,52 +89,79 @@ export async function discoverChaosCoreRepo(): Promise<string | null> {
 
 export async function listChaosCoreDatabase(
   repoPath: string,
-  contentType: EditorKind
+  contentType: DatabaseContentType,
+  options?: { force?: boolean }
 ): Promise<ChaosCoreDatabaseEntry[]> {
   return invokeCommand("list_chaos_core_database", {
     repoPath,
-    contentType
+    contentType,
+    force: options?.force
+  });
+}
+
+export async function listAllChaosCoreDatabase(
+  repoPath: string,
+  options?: { force?: boolean }
+): Promise<ChaosCoreDatabaseListAllResponse> {
+  return invokeCommand("list_all_chaos_core_database_command", {
+    repoPath,
+    force: options?.force
   });
 }
 
 export async function loadChaosCoreDatabaseEntry(
   repoPath: string,
-  contentType: EditorKind,
-  entryKey: string
+  contentType: DatabaseContentType,
+  entryKey: string,
+  options?: { force?: boolean }
 ): Promise<LoadedChaosCoreDatabaseEntry> {
   return invokeCommand("load_chaos_core_database_entry", {
     repoPath,
     contentType,
-    entryKey
+    entryKey,
+    force: options?.force
   });
 }
 
 export async function listChaosCoreDatabaseFromSession(
   sessionOrigin: string,
   pairingToken: string,
-  contentType: EditorKind
+  contentType: DatabaseContentType,
+  options?: { force?: boolean }
 ): Promise<SessionDatabaseListResponse> {
   return fetchSessionDatabaseJson(
     sessionOrigin,
-    `/api/database/list?token=${encodeURIComponent(pairingToken)}&contentType=${encodeURIComponent(contentType)}`
+    `/api/database/list?token=${encodeURIComponent(pairingToken)}&contentType=${encodeURIComponent(contentType)}${options?.force ? "&force=1" : ""}`
+  );
+}
+
+export async function listAllChaosCoreDatabaseFromSession(
+  sessionOrigin: string,
+  pairingToken: string,
+  options?: { force?: boolean }
+): Promise<ChaosCoreDatabaseListAllResponse> {
+  return fetchSessionDatabaseJson(
+    sessionOrigin,
+    `/api/database/list-all?token=${encodeURIComponent(pairingToken)}${options?.force ? "&force=1" : ""}`
   );
 }
 
 export async function loadChaosCoreDatabaseEntryFromSession(
   sessionOrigin: string,
   pairingToken: string,
-  contentType: EditorKind,
-  entryKey: string
+  contentType: DatabaseContentType,
+  entryKey: string,
+  options?: { force?: boolean }
 ): Promise<SessionDatabaseLoadResponse> {
   return fetchSessionDatabaseJson(
     sessionOrigin,
-    `/api/database/load?token=${encodeURIComponent(pairingToken)}&contentType=${encodeURIComponent(contentType)}&entryKey=${encodeURIComponent(entryKey)}`
+    `/api/database/load?token=${encodeURIComponent(pairingToken)}&contentType=${encodeURIComponent(contentType)}&entryKey=${encodeURIComponent(entryKey)}${options?.force ? "&force=1" : ""}`
   );
 }
 
 export async function publishChaosCoreBundle(
   repoPath: string,
-  contentType: EditorKind,
+  contentType: DatabaseContentType,
   bundle: ExportBundle,
   targetEntryKey?: string,
   targetSourceFile?: string
@@ -146,7 +180,7 @@ export async function publishChaosCoreBundle(
 
 export async function removeChaosCoreDatabaseEntry(
   repoPath: string,
-  contentType: EditorKind,
+  contentType: DatabaseContentType,
   entryKey: string
 ): Promise<void> {
   return invokeCommand("remove_chaos_core_database_entry", {
@@ -156,7 +190,7 @@ export async function removeChaosCoreDatabaseEntry(
   });
 }
 
-export function emitChaosCoreDatabaseUpdate(contentType: EditorKind) {
+export function emitChaosCoreDatabaseUpdate(contentType: DatabaseContentType) {
   if (typeof window === "undefined") {
     return;
   }

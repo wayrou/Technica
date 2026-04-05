@@ -1,4 +1,5 @@
 import type { ClassDocument } from "../types/class";
+import { createDefaultTrainingGrid } from "../utils/classTrainingGrid";
 import { isoNow } from "../utils/date";
 
 export function createBlankClass(): ClassDocument {
@@ -25,6 +26,12 @@ export function createBlankClass(): ClassDocument {
       }
     ],
     innateAbility: "",
+    trainingGrid: createDefaultTrainingGrid({
+      name: "Untitled Class",
+      weaponTypes: ["sword"],
+      innateAbility: "",
+      tier: 1
+    }),
     metadata: {},
     createdAt: timestamp,
     updatedAt: timestamp
@@ -61,6 +68,12 @@ export function createSampleClass(): ClassDocument {
       }
     ],
     innateAbility: "Relay Burst: Adjacent allies gain +1 movement after this unit acts.",
+    trainingGrid: createDefaultTrainingGrid({
+      name: "Relay Marshal",
+      weaponTypes: ["gun", "shortsword"],
+      innateAbility: "Relay Burst: Adjacent allies gain +1 movement after this unit acts.",
+      tier: 2
+    }),
     metadata: {
       branch: "signal"
     },

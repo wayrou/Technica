@@ -7,7 +7,7 @@ import { parseDialogueSource } from "../src/utils/dialogueParser";
 import { isoNow } from "../src/utils/date";
 import { runtimeId } from "../src/utils/id";
 
-type ContentType =
+export type ContentType =
   | "dialogue"
   | "quest"
   | "map"
@@ -17,20 +17,22 @@ type ContentType =
   | "card"
   | "unit"
   | "operation"
-  | "class";
+  | "class"
+  | "schema";
 
 type EntryOrigin = "game" | "technica";
 
-type DatabaseEntrySummary = {
+export type DatabaseEntrySummary = {
   entryKey: string;
   contentId: string;
   title: string;
   runtimeFile: string;
   sourceFile?: string;
   origin: EntryOrigin;
+  summaryData?: Record<string, unknown>;
 };
 
-type LoadedDatabaseEntry = DatabaseEntrySummary & {
+export type LoadedDatabaseEntry = DatabaseEntrySummary & {
   runtimeContent: string;
   sourceContent?: string;
   editorContent?: string;
@@ -109,6 +111,20 @@ type TsExpressionMarker = {
   __technicaTsExpression: string;
 };
 
+export const CONTENT_TYPES: ContentType[] = [
+  "dialogue",
+  "quest",
+  "map",
+  "npc",
+  "item",
+  "gear",
+  "card",
+  "unit",
+  "operation",
+  "class",
+  "schema"
+];
+
 const CONTENT_EXTENSIONS: Record<ContentType, string> = {
   dialogue: ".dialogue.json",
   quest: ".quest.json",
@@ -119,12 +135,13 @@ const CONTENT_EXTENSIONS: Record<ContentType, string> = {
   card: ".card.json",
   unit: ".unit.json",
   operation: ".operation.json",
-  class: ".class.json"
+  class: ".class.json",
+  schema: ".schema.json"
 };
 
 const BUILT_IN_MAP_IDS = ["base_camp", "free_zone_1", "quarters"];
 
-function installNodeStubs() {
+export function installNodeStubs() {
   const root = globalThis as Record<string, unknown>;
 
   if (!("window" in root)) {
@@ -581,6 +598,72 @@ function runtimeClassToEditorDocument(runtimeClass: any) {
   };
 }
 
+function createSchemaWalletFromPartialWallet(wallet: Record<string, unknown> | undefined) {
+  return {
+    metalScrap: Number(wallet?.metalScrap ?? 0),
+    wood: Number(wallet?.wood ?? 0),
+    chaosShards: Number(wallet?.chaosShards ?? 0),
+    steamComponents: Number(wallet?.steamComponents ?? 0)
+  };
+}
+
+function createSchemaOperationalRequirementsFromRuntime(value: Record<string, unknown> | undefined) {
+  return {
+    powerWatts: Number(value?.powerWatts ?? 0),
+    commsBw: Number(value?.commsBw ?? 0),
+    supplyCrates: Number(value?.supplyCrates ?? 0)
+  };
+}
+
+function runtimeSchemaToEditorDocument(runtimeSchema: any) {
+  const isFortification = runtimeSchema.kind === "fortification";
+
+  return {
+    ...createDocumentBase(),
+    id: String(runtimeSchema.id ?? "schema_entry"),
+    name: String(runtimeSchema.name ?? runtimeSchema.displayName ?? runtimeSchema.id ?? "Schema Entry"),
+    kind: isFortification ? "fortification" : "core",
+    shortCode: String(runtimeSchema.shortCode ?? ""),
+    category: isFortification ? "" : String(runtimeSchema.category ?? "logistics"),
+    description: String(runtimeSchema.description ?? ""),
+    operationalRequirements: createSchemaOperationalRequirementsFromRuntime(runtimeSchema.operationalRequirements),
+    powerOutputWatts: Number(runtimeSchema.powerOutputWatts ?? 0),
+    powerOutputMode: runtimeSchema.powerOutputMode === "add_input" ? "add_input" : "fixed",
+    commsOutputBw: Number(runtimeSchema.commsOutputBw ?? 0),
+    commsOutputMode: runtimeSchema.commsOutputMode === "add_input" ? "add_input" : "fixed",
+    supplyOutputCrates: Number(runtimeSchema.supplyOutputCrates ?? 0),
+    supplyOutputMode: runtimeSchema.supplyOutputMode === "add_input" ? "add_input" : "fixed",
+    buildCost: createSchemaWalletFromPartialWallet(runtimeSchema.buildCost),
+    upkeep: createSchemaWalletFromPartialWallet(runtimeSchema.upkeep),
+    wadUpkeepPerTick: isFortification ? 0 : Number(runtimeSchema.wadUpkeepPerTick ?? 0),
+    incomePerTick: isFortification
+      ? createSchemaWalletFromPartialWallet(undefined)
+      : createSchemaWalletFromPartialWallet(runtimeSchema.incomePerTick),
+    supportRadius: Number(runtimeSchema.supportRadius ?? 0),
+    unlockSource: runtimeSchema.unlockSource === "starter" ? "starter" : "schema",
+    unlockCost: createSchemaWalletFromPartialWallet(runtimeSchema.unlockCost),
+    unlockWadCost: Number(runtimeSchema.unlockWadCost ?? 0),
+    preferredRoomTags: Array.isArray(runtimeSchema.preferredRoomTags)
+      ? runtimeSchema.preferredRoomTags.map(String)
+      : [],
+    tagOutputModifiers: Array.isArray(runtimeSchema.tagOutputModifiers)
+      ? runtimeSchema.tagOutputModifiers
+          .filter((modifier): modifier is Record<string, unknown> => Boolean(modifier && typeof modifier === "object"))
+          .map((modifier, index) => ({
+            id: String(modifier.id ?? `schema_modifier_${index + 1}`),
+            tag: String(modifier.tag ?? ""),
+            output: createSchemaWalletFromPartialWallet(
+              modifier.output && typeof modifier.output === "object" && !Array.isArray(modifier.output)
+                ? (modifier.output as Record<string, unknown>)
+                : undefined
+            ),
+            note: String(modifier.note ?? "")
+          }))
+      : [],
+    placeholder: Boolean(runtimeSchema.placeholder)
+  };
+}
+
 function runtimeUnitToEditorDocument(runtimeUnit: any, state: any) {
   const rosterIds = new Set(state.profile?.rosterUnitIds ?? []);
   const partyIds = new Set(state.partyUnitIds ?? []);
@@ -691,11 +774,15 @@ function buildEditorDocumentFromRuntime(contentType: ContentType, runtimeData: a
       return runtimeOperationToEditorDocument(runtimeData);
     case "class":
       return runtimeClassToEditorDocument(runtimeData);
+    case "schema":
+      return runtimeSchemaToEditorDocument(runtimeData);
   }
 }
 
 async function importRepoModule<TModule>(repoPath: string, relativePath: string): Promise<TModule> {
-  const moduleUrl = pathToFileURL(path.join(repoPath, relativePath)).href;
+  const absolutePath = path.join(repoPath, relativePath);
+  const stats = await fs.stat(absolutePath);
+  const moduleUrl = `${pathToFileURL(absolutePath).href}?v=${stats.mtimeMs}`;
   return import(moduleUrl) as Promise<TModule>;
 }
 
@@ -732,6 +819,159 @@ function parseContentId(value: any, fallback: string) {
 function parseTitle(value: any, fallback: string) {
   return String(value?.title ?? value?.name ?? value?.codename ?? fallback);
 }
+
+function toSummaryNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function toSummaryString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function formatSummaryTurns(duration?: number) {
+  if (!duration || duration <= 0) {
+    return "";
+  }
+
+  return duration === 1 ? " for 1 turn" : ` for ${duration} turns`;
+}
+
+function formatCardEffectLine(effect: Record<string, unknown>) {
+  const effectType = toSummaryString(effect.type)?.trim().toLowerCase();
+  const amount = toSummaryNumber(effect.amount);
+  const duration = toSummaryNumber(effect.duration);
+  const tiles = toSummaryNumber(effect.tiles);
+  const stat = toSummaryString(effect.stat);
+
+  if (!effectType) {
+    return "Custom effect.";
+  }
+
+  switch (effectType) {
+    case "damage":
+    case "deal_damage":
+      return amount ? `Deal ${amount} damage.` : "Deal damage.";
+    case "heal":
+      return amount ? `Restore ${amount} HP.` : "Restore HP.";
+    case "def_up":
+      return `Gain +${amount ?? 0} DEF${formatSummaryTurns(duration)}.`;
+    case "atk_up":
+      return `Gain +${amount ?? 0} ATK${formatSummaryTurns(duration)}.`;
+    case "acc_up":
+      return `Gain +${amount ?? 0} ACC${formatSummaryTurns(duration)}.`;
+    case "agi_up":
+      return `Gain +${amount ?? 0} AGI${formatSummaryTurns(duration)}.`;
+    case "def_down":
+      return `Inflict -${amount ?? 0} DEF${formatSummaryTurns(duration)}.`;
+    case "atk_down":
+      return `Inflict -${amount ?? 0} ATK${formatSummaryTurns(duration)}.`;
+    case "acc_down":
+      return `Inflict -${amount ?? 0} ACC${formatSummaryTurns(duration)}.`;
+    case "push":
+      return `Push ${tiles ?? amount ?? 1} tile${(tiles ?? amount ?? 1) === 1 ? "" : "s"}.`;
+    case "move":
+      return `Move ${tiles ?? amount ?? 1} tile${(tiles ?? amount ?? 1) === 1 ? "" : "s"}.`;
+    case "stun":
+      return `Stun${formatSummaryTurns(duration || 1)}.`;
+    case "burn":
+      return amount
+        ? `Inflict Burn for ${amount} damage${formatSummaryTurns(duration)}.`
+        : `Inflict Burn${formatSummaryTurns(duration)}.`;
+    default: {
+      const details = [
+        amount !== undefined ? `${amount}` : "",
+        stat ? humanizeId(stat) : "",
+        tiles !== undefined ? `${tiles} tile${tiles === 1 ? "" : "s"}` : "",
+        duration !== undefined ? `${duration} turn${duration === 1 ? "" : "s"}` : ""
+      ]
+        .filter(Boolean)
+        .join(" ");
+      return details ? `${humanizeId(effectType)} ${details}.` : `${humanizeId(effectType)}.`;
+    }
+  }
+}
+
+function buildCardEffectLines(runtimeData: any) {
+  const effectLines = Array.isArray(runtimeData.effects)
+    ? runtimeData.effects
+        .filter((effect: unknown): effect is Record<string, unknown> => Boolean(effect) && typeof effect === "object")
+        .map((effect) => formatCardEffectLine(effect))
+        .filter(Boolean)
+    : [];
+
+  if (
+    typeof runtimeData.damage === "number" &&
+    !effectLines.some((line) => line.toLowerCase().includes("damage"))
+  ) {
+    effectLines.unshift(`Deal ${runtimeData.damage} damage.`);
+  }
+
+  return effectLines;
+}
+
+function buildEntrySummaryData(contentType: ContentType, runtimeData: any, editorData?: any) {
+  switch (contentType) {
+    case "npc": {
+      return {
+        mapId: String(editorData?.mapId ?? runtimeData?.mapId ?? ""),
+        tileX: Number(editorData?.tileX ?? runtimeData?.tileX ?? runtimeData?.x ?? 0),
+        tileY: Number(editorData?.tileY ?? runtimeData?.tileY ?? runtimeData?.y ?? 0)
+      };
+    }
+    case "gear": {
+      const slot = toSummaryString(runtimeData?.slot);
+      return slot ? { slot } : undefined;
+    }
+    case "card": {
+      return {
+        strainCost: Number(runtimeData?.strainCost ?? 0),
+        category: String(runtimeData?.category ?? runtimeData?.type ?? runtimeData?.cardType ?? "card"),
+        rarity: String(runtimeData?.rarity ?? "common"),
+        targetType: String(runtimeData?.targetType ?? "self"),
+        range: Number(runtimeData?.range ?? 0),
+        description: String(runtimeData?.description ?? ""),
+        effectLines: buildCardEffectLines(runtimeData),
+        artPath: typeof runtimeData?.artPath === "string" ? runtimeData.artPath : undefined,
+        sourceClassId: typeof runtimeData?.sourceClassId === "string" ? runtimeData.sourceClassId : undefined,
+        sourceEquipmentId:
+          typeof runtimeData?.sourceEquipmentId === "string" ? runtimeData.sourceEquipmentId : undefined
+      };
+    }
+    case "operation": {
+      return {
+        floorCount: Array.isArray(editorData?.floors)
+          ? editorData.floors.length
+          : Array.isArray(runtimeData?.floors)
+            ? runtimeData.floors.length
+            : runtimeData?.floor
+              ? 1
+              : 0
+      };
+    }
+    case "class": {
+      return typeof runtimeData?.tier === "number" ? { tier: runtimeData.tier } : undefined;
+    }
+      case "schema": {
+        return {
+          kind: String(editorData?.kind ?? runtimeData?.kind ?? "core"),
+          category:
+            typeof editorData?.category === "string" && editorData.category.trim()
+              ? editorData.category
+              : typeof runtimeData?.category === "string" && runtimeData.category.trim()
+                ? runtimeData.category
+                : undefined,
+          unlockSource:
+            typeof editorData?.unlockSource === "string" && editorData.unlockSource.trim()
+              ? editorData.unlockSource
+              : typeof runtimeData?.unlockSource === "string" && runtimeData.unlockSource.trim()
+                ? runtimeData.unlockSource
+                : undefined
+        };
+      }
+      default:
+        return undefined;
+    }
+  }
 
 async function readGeneratedRecords(repoPath: string, contentType: ContentType) {
   const runtimeDir = path.join(repoPath, "src", "content", "technica", "generated", contentType);
@@ -813,9 +1053,211 @@ function buildSnapshotEntry(
     runtimeFile,
     sourceFile,
     origin,
+    summaryData: buildEntrySummaryData(contentType, runtimeData, editorData),
     runtimeData,
     editorData
   } satisfies SnapshotEntry;
+}
+
+function hasTopLevelObjectEntry(sourceText: string, declarationName: string, key: string) {
+  const sourceFile = ts.createSourceFile(
+    `${declarationName}.ts`,
+    sourceText,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS
+  );
+  const objectLiteral = findObjectLiteralInitializer(sourceFile, declarationName);
+  if (!objectLiteral) {
+    return false;
+  }
+
+  return objectLiteral.properties.some((property) => getObjectPropertyName(property) === key);
+}
+
+function pruneSchemaSourceWallet(value: Record<string, unknown> | undefined) {
+  return Object.fromEntries(
+    Object.entries({
+      metalScrap: Number(value?.metalScrap ?? 0),
+      wood: Number(value?.wood ?? 0),
+      chaosShards: Number(value?.chaosShards ?? 0),
+      steamComponents: Number(value?.steamComponents ?? 0)
+    }).filter(([, amount]) => Number.isFinite(amount) && amount > 0)
+  );
+}
+
+function pruneSchemaRoomTags(value: unknown) {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const tags = value
+    .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+    .filter(Boolean);
+
+  return tags.length > 0 ? tags : undefined;
+}
+
+function pruneSchemaOperationalRequirements(value: Record<string, unknown> | undefined) {
+  const requirements = Object.fromEntries(
+    Object.entries({
+      powerWatts: Number(value?.powerWatts ?? 0),
+      commsBw: Number(value?.commsBw ?? 0),
+      supplyCrates: Number(value?.supplyCrates ?? 0)
+    }).filter(([, amount]) => Number.isFinite(amount) && amount > 0)
+  );
+
+  return Object.keys(requirements).length > 0 ? requirements : undefined;
+}
+
+function pruneSchemaTagOutputModifiers(value: unknown) {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const modifiers = value
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object"))
+    .map((entry) => {
+      const tag = typeof entry.tag === "string" ? entry.tag.trim() : "";
+      if (!tag) {
+        return undefined;
+      }
+
+      return pruneEmpty({
+        tag,
+        output: pruneSchemaSourceWallet(
+          entry.output && typeof entry.output === "object" && !Array.isArray(entry.output)
+            ? (entry.output as Record<string, unknown>)
+            : undefined
+        ),
+        note: typeof entry.note === "string" && entry.note.trim() ? entry.note.trim() : undefined
+      });
+    })
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry));
+
+  return modifiers.length > 0 ? modifiers : undefined;
+}
+
+function normalizeBuiltInSchemaForSource(runtimeData: any, existingValue: any) {
+  const isFortification = runtimeData?.kind === "fortification";
+  const baseRecord =
+    existingValue && typeof existingValue === "object" && !Array.isArray(existingValue) ? existingValue : {};
+  const nextRecord: Record<string, unknown> = {
+    ...baseRecord,
+    id: String(runtimeData?.id ?? baseRecord.id ?? "schema_entry"),
+    displayName: String(runtimeData?.name ?? baseRecord.displayName ?? baseRecord.id ?? "Schema Entry"),
+    description: String(runtimeData?.description ?? baseRecord.description ?? ""),
+    buildCost: pruneSchemaSourceWallet(runtimeData?.buildCost),
+    unlockSource: runtimeData?.unlockSource === "starter" ? "starter" : "schema"
+  };
+
+  const preferredRoomTags = pruneSchemaRoomTags(runtimeData?.preferredRoomTags);
+  if (preferredRoomTags) {
+    nextRecord.preferredRoomTags = preferredRoomTags;
+  } else {
+    delete nextRecord.preferredRoomTags;
+  }
+
+  if (nextRecord.unlockSource === "schema") {
+    nextRecord.unlockCost = pruneSchemaSourceWallet(runtimeData?.unlockCost);
+    nextRecord.unlockWadCost = Number(runtimeData?.unlockWadCost ?? baseRecord.unlockWadCost ?? 0);
+  } else {
+    delete nextRecord.unlockCost;
+    delete nextRecord.unlockWadCost;
+  }
+
+  if (runtimeData?.placeholder) {
+    nextRecord.placeholder = true;
+  } else {
+    delete nextRecord.placeholder;
+  }
+
+  if (isFortification) {
+    delete nextRecord.shortCode;
+    delete nextRecord.category;
+    delete nextRecord.operationalRequirements;
+    delete nextRecord.powerOutputWatts;
+    delete nextRecord.powerOutputMode;
+    delete nextRecord.commsOutputBw;
+    delete nextRecord.commsOutputMode;
+    delete nextRecord.supplyOutputCrates;
+    delete nextRecord.supplyOutputMode;
+    delete nextRecord.upkeep;
+    delete nextRecord.wadUpkeepPerTick;
+    delete nextRecord.incomePerTick;
+    delete nextRecord.supportRadius;
+    delete nextRecord.tagOutputModifiers;
+  } else {
+    const shortCode = String(runtimeData?.shortCode ?? baseRecord.shortCode ?? "").trim();
+    const operationalRequirements = pruneSchemaOperationalRequirements(runtimeData?.operationalRequirements);
+    const tagOutputModifiers = pruneSchemaTagOutputModifiers(runtimeData?.tagOutputModifiers);
+    const powerOutputWatts = Number(runtimeData?.powerOutputWatts ?? 0);
+    const powerOutputMode = runtimeData?.powerOutputMode === "add_input" ? "add_input" : "fixed";
+    const commsOutputBw = Number(runtimeData?.commsOutputBw ?? 0);
+    const commsOutputMode = runtimeData?.commsOutputMode === "add_input" ? "add_input" : "fixed";
+    const supplyOutputCrates = Number(runtimeData?.supplyOutputCrates ?? 0);
+    const supplyOutputMode = runtimeData?.supplyOutputMode === "add_input" ? "add_input" : "fixed";
+
+    if (shortCode) {
+      nextRecord.shortCode = shortCode;
+    } else {
+      delete nextRecord.shortCode;
+    }
+
+    nextRecord.category = String(runtimeData?.category ?? baseRecord.category ?? "logistics");
+
+    if (operationalRequirements) {
+      nextRecord.operationalRequirements = operationalRequirements;
+    } else {
+      delete nextRecord.operationalRequirements;
+    }
+
+    if (powerOutputWatts > 0) {
+      nextRecord.powerOutputWatts = powerOutputWatts;
+    } else {
+      delete nextRecord.powerOutputWatts;
+    }
+    if (powerOutputMode === "add_input") {
+      nextRecord.powerOutputMode = "add_input";
+    } else {
+      delete nextRecord.powerOutputMode;
+    }
+
+    if (commsOutputBw > 0) {
+      nextRecord.commsOutputBw = commsOutputBw;
+    } else {
+      delete nextRecord.commsOutputBw;
+    }
+    if (commsOutputMode === "add_input") {
+      nextRecord.commsOutputMode = "add_input";
+    } else {
+      delete nextRecord.commsOutputMode;
+    }
+
+    if (supplyOutputCrates > 0) {
+      nextRecord.supplyOutputCrates = supplyOutputCrates;
+    } else {
+      delete nextRecord.supplyOutputCrates;
+    }
+    if (supplyOutputMode === "add_input") {
+      nextRecord.supplyOutputMode = "add_input";
+    } else {
+      delete nextRecord.supplyOutputMode;
+    }
+
+    nextRecord.upkeep = pruneSchemaSourceWallet(runtimeData?.upkeep);
+    nextRecord.wadUpkeepPerTick = Number(runtimeData?.wadUpkeepPerTick ?? baseRecord.wadUpkeepPerTick ?? 0);
+    nextRecord.incomePerTick = pruneSchemaSourceWallet(runtimeData?.incomePerTick);
+    nextRecord.supportRadius = Number(runtimeData?.supportRadius ?? baseRecord.supportRadius ?? 0);
+
+    if (tagOutputModifiers) {
+      nextRecord.tagOutputModifiers = tagOutputModifiers;
+    } else {
+      delete nextRecord.tagOutputModifiers;
+    }
+  }
+
+  return nextRecord;
 }
 
 function normalizeClassId(value: string) {
@@ -1197,6 +1639,51 @@ async function listBuiltInEntries(
         );
     }
 
+    case "schema": {
+      const generated = await readGeneratedRecords(repoPath, "schema");
+      const {
+        SCHEMA_CORE_DEFINITIONS,
+        SCHEMA_FORTIFICATION_DEFINITIONS
+      } = await importRepoModule<{
+        SCHEMA_CORE_DEFINITIONS: Record<string, any>;
+        SCHEMA_FORTIFICATION_DEFINITIONS: Record<string, any>;
+      }>(repoPath, "src/core/schemaSystem.ts");
+
+      const coreEntries = Object.values(SCHEMA_CORE_DEFINITIONS)
+        .map((definition) => sanitizeJson({ ...definition, kind: "core", name: definition.displayName }))
+        .filter((runtimeData) => !generated.has(runtimeData.id) && !disabledIds.has(runtimeData.id))
+        .map((runtimeData) =>
+          buildSnapshotEntry(
+            "schema",
+            "game",
+            runtimeData.id,
+            runtimeData.name,
+            "src/core/schemaSystem.ts",
+            "src/core/schemaSystem.ts",
+            runtimeData,
+            runtimeSchemaToEditorDocument(runtimeData)
+          )
+        );
+
+      const fortificationEntries = Object.values(SCHEMA_FORTIFICATION_DEFINITIONS)
+        .map((definition) => sanitizeJson({ ...definition, kind: "fortification", name: definition.displayName }))
+        .filter((runtimeData) => !generated.has(runtimeData.id) && !disabledIds.has(runtimeData.id))
+        .map((runtimeData) =>
+          buildSnapshotEntry(
+            "schema",
+            "game",
+            runtimeData.id,
+            runtimeData.name,
+            "src/core/schemaSystem.ts",
+            "src/core/schemaSystem.ts",
+            runtimeData,
+            runtimeSchemaToEditorDocument(runtimeData)
+          )
+        );
+
+      return [...coreEntries, ...fortificationEntries];
+    }
+
     case "unit": {
       const { createNewGameState } = await importRepoModule<{ createNewGameState: () => any }>(repoPath, "src/core/initialState.ts");
       const state = createNewGameState();
@@ -1245,7 +1732,7 @@ async function listBuiltInEntries(
   }
 }
 
-async function buildSnapshot(repoPath: string, contentType: ContentType) {
+export async function buildSnapshot(repoPath: string, contentType: ContentType) {
   const generated = await readGeneratedRecords(repoPath, contentType);
   const disabledIds = await readDisabledContentIds(repoPath, contentType);
   const builtIn = await listBuiltInEntries(repoPath, contentType, disabledIds);
@@ -1289,21 +1776,32 @@ async function buildSnapshot(repoPath: string, contentType: ContentType) {
   };
 }
 
-async function listEntries(repoPath: string, contentType: ContentType) {
-  const snapshot = await buildSnapshot(repoPath, contentType);
-  return snapshot.entries.map((entry) => ({
+export async function listEntries(
+  repoPath: string,
+  contentType: ContentType,
+  snapshot?: Awaited<ReturnType<typeof buildSnapshot>>
+) {
+  const resolvedSnapshot = snapshot ?? (await buildSnapshot(repoPath, contentType));
+
+  return resolvedSnapshot.entries.map((entry) => ({
     entryKey: entry.entryKey,
     contentId: entry.contentId,
     title: entry.title,
     runtimeFile: entry.runtimeFile,
     sourceFile: entry.sourceFile,
-    origin: entry.origin
+    origin: entry.origin,
+    summaryData: entry.summaryData
   })) satisfies DatabaseEntrySummary[];
 }
 
-async function loadEntry(repoPath: string, contentType: ContentType, entryKey: string) {
-  const snapshot = await buildSnapshot(repoPath, contentType);
-  const entry = snapshot.entries.find((candidate) => candidate.entryKey === entryKey);
+export async function loadEntry(
+  repoPath: string,
+  contentType: ContentType,
+  entryKey: string,
+  snapshot?: Awaited<ReturnType<typeof buildSnapshot>>
+) {
+  const resolvedSnapshot = snapshot ?? (await buildSnapshot(repoPath, contentType));
+  const entry = resolvedSnapshot.entries.find((candidate) => candidate.entryKey === entryKey);
 
   if (!entry) {
     throw new Error(`Could not find '${entryKey}' in the Chaos Core ${contentType} database.`);
@@ -1314,7 +1812,7 @@ async function loadEntry(repoPath: string, contentType: ContentType, entryKey: s
     sourceContent = await readTextIfExists(path.join(repoPath, entry.sourceFile));
   }
 
-  const generatedRecord = snapshot.generated.get(entry.contentId);
+  const generatedRecord = resolvedSnapshot.generated.get(entry.contentId);
   if (generatedRecord && generatedRecord.entryKey === entryKey) {
     return {
       entryKey: generatedRecord.entryKey,
@@ -1341,10 +1839,24 @@ async function loadEntry(repoPath: string, contentType: ContentType, entryKey: s
     runtimeFile: entry.runtimeFile,
     sourceFile: entry.sourceFile,
     origin: entry.origin,
+    summaryData: entry.summaryData,
     runtimeContent: prettyJson(entry.runtimeData),
     sourceContent,
     editorContent: entry.editorData ? prettyJson(entry.editorData) : undefined
   } satisfies LoadedDatabaseEntry;
+}
+
+export async function listAllEntries(repoPath: string) {
+  const entriesByType = await Promise.all(
+    CONTENT_TYPES.map(async (contentType) => ({
+      contentType,
+      entries: await listEntries(repoPath, contentType)
+    }))
+  );
+
+  return Object.fromEntries(
+    entriesByType.map(({ contentType, entries }) => [contentType, entries])
+  ) as Record<ContentType, DatabaseEntrySummary[]>;
 }
 
 function getObjectPropertyName(property: ts.ObjectLiteralElementLike) {
@@ -2534,6 +3046,74 @@ async function writeBuiltInCardEntry(
   };
 }
 
+async function writeBuiltInSchemaEntry(
+  repoPath: string,
+  previousContentId: string,
+  sourceRelativePath: string,
+  runtimeData: any
+) {
+  if (sourceRelativePath !== "src/core/schemaSystem.ts") {
+    throw new Error(
+      `Built-in schema '${previousContentId}' must be written back through 'src/core/schemaSystem.ts'.`
+    );
+  }
+
+  const nextContentId = String(runtimeData.id ?? previousContentId);
+  if (nextContentId !== previousContentId) {
+    throw new Error(
+      `Renaming built-in schema '${previousContentId}' is not supported yet because Chaos Core core/fortification ids are fixed type keys.`
+    );
+  }
+
+  const sourcePath = path.join(repoPath, "src", "core", "schemaSystem.ts");
+  const sourceText = await fs.readFile(sourcePath, "utf8");
+  const existsInCore = hasTopLevelObjectEntry(sourceText, "SCHEMA_CORE_DEFINITIONS", previousContentId);
+  const existsInFortifications = hasTopLevelObjectEntry(
+    sourceText,
+    "SCHEMA_FORTIFICATION_DEFINITIONS",
+    previousContentId
+  );
+
+  if (!existsInCore && !existsInFortifications) {
+    throw new Error(`Could not find built-in schema '${previousContentId}' in Chaos Core's schema definitions.`);
+  }
+
+  const currentKind = existsInFortifications ? "fortification" : "core";
+  const nextKind = runtimeData?.kind === "fortification" ? "fortification" : "core";
+  if (currentKind !== nextKind) {
+    throw new Error(
+      `Changing built-in schema '${previousContentId}' between core and fortification is not supported yet. Keep the same authorization type for live game edits.`
+    );
+  }
+
+  const declarationName =
+    currentKind === "fortification" ? "SCHEMA_FORTIFICATION_DEFINITIONS" : "SCHEMA_CORE_DEFINITIONS";
+  const schemaModule = await importRepoModule<{
+    SCHEMA_CORE_DEFINITIONS: Record<string, any>;
+    SCHEMA_FORTIFICATION_DEFINITIONS: Record<string, any>;
+  }>(repoPath, "src/core/schemaSystem.ts");
+  const existingValue =
+    currentKind === "fortification"
+      ? schemaModule.SCHEMA_FORTIFICATION_DEFINITIONS[previousContentId]
+      : schemaModule.SCHEMA_CORE_DEFINITIONS[previousContentId];
+  const nextPayload = normalizeBuiltInSchemaForSource({ ...runtimeData, kind: nextKind }, existingValue);
+  const nextSourceText = upsertTopLevelObjectEntry(
+    sourceText,
+    declarationName,
+    previousContentId,
+    nextContentId,
+    nextPayload
+  );
+
+  await fs.writeFile(sourcePath, nextSourceText, "utf8");
+
+  return {
+    entryKey: `game:${nextContentId}`,
+    contentId: nextContentId,
+    runtimeFile: "src/core/schemaSystem.ts"
+  };
+}
+
 async function writeBuiltInUnitEntry(
   repoPath: string,
   previousContentId: string,
@@ -2779,6 +3359,13 @@ async function writeBuiltInEntry(
         id: nextContentId
       });
       break;
+    case "schema":
+      return writeBuiltInSchemaEntry(
+        repoPath,
+        previousContentId,
+        sourceRelativePath || "src/core/schemaSystem.ts",
+        runtimeData
+      );
     case "gear":
       return writeBuiltInGearEntry(
         repoPath,
@@ -2859,7 +3446,7 @@ async function writeBuiltInEntry(
   };
 }
 
-async function main() {
+export async function main() {
   installNodeStubs();
 
   const [, , command, repoPath, contentType, entryKey, payloadPath, sourceRelativePath] = process.argv;
@@ -2893,8 +3480,13 @@ async function main() {
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }
 
-main().catch((error) => {
-  const message = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`${message}\n`);
-  process.exit(1);
-});
+const isDirectExecution =
+  Boolean(process.argv[1]) && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
+
+if (isDirectExecution) {
+  void main().catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`${message}\n`);
+    process.exit(1);
+  });
+}

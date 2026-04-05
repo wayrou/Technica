@@ -1,20 +1,14 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { ChaosCoreDatabasePanel } from "../../components/ChaosCoreDatabasePanel";
 import { IssueList } from "../../components/IssueList";
 import { Panel } from "../../components/Panel";
 import { createSampleDialogueDocument } from "../../data/sampleDialogue";
+import { useChaosCoreDatabase } from "../../hooks/useChaosCoreDatabase";
 import { useTechnicaRuntime } from "../../hooks/useTechnicaRuntime";
 import { usePersistentState } from "../../hooks/usePersistentState";
 import type { KeyValueRecord } from "../../types/common";
 import type { DialogueDocument, DialogueEntry, DialogueLabel } from "../../types/dialogue";
-import {
-  CHAOS_CORE_DATABASE_UPDATE_EVENT,
-  CHAOS_CORE_DATABASE_UPDATE_STORAGE_KEY,
-  isTauriRuntime,
-  listChaosCoreDatabase,
-  parseChaosCoreDatabaseUpdate,
-  type LoadedChaosCoreDatabaseEntry
-} from "../../utils/chaosCoreDatabase";
+import { type LoadedChaosCoreDatabaseEntry } from "../../utils/chaosCoreDatabase";
 import { isoNow } from "../../utils/date";
 import { confirmAction, notify } from "../../utils/dialogs";
 import {
@@ -94,9 +88,9 @@ function isDialogueDocumentPayload(value: unknown): value is DialogueDocument {
 
 export function DialogueStudio() {
   const runtime = useTechnicaRuntime();
+  const { desktopEnabled, repoPath, summaryStates, ensureSummaries } = useChaosCoreDatabase();
   const isPopout = getRequestedPopoutTab() === "dialogue";
   const [dialogue, setDialogue] = usePersistentState(DIALOGUE_STORAGE_KEY, loadInitialDialogueDocument());
-  const [npcOptions, setNpcOptions] = useState<DialogueNpcOption[]>([]);
   const [isSendingToDesktop, setIsSendingToDesktop] = useState(false);
   const importRef = useRef<HTMLInputElement | null>(null);
   const deferredDialogue = useDeferredValue(dialogue);
@@ -105,7 +99,16 @@ export function DialogueStudio() {
   const branchOptions = getBranchLabelOptions(dialogue);
   const linkedNpcId = getLinkedNpcId(dialogue.metadata);
   const canSendToDesktop = runtime.isMobile && Boolean(runtime.sessionOrigin && runtime.pairingToken);
-  const refreshNpcSpeakers = useCallback(async (shouldCommit: () => boolean = () => true) => {
+
+  useEffect(() => {
+    if (!desktopEnabled || !repoPath.trim()) {
+      return;
+    }
+
+    void ensureSummaries("npc");
+  }, [desktopEnabled, ensureSummaries, repoPath]);
+
+  const npcOptions = useMemo(() => {
     const optionsById = new Map<string, DialogueNpcOption>();
 
     if (typeof window !== "undefined") {
@@ -124,31 +127,17 @@ export function DialogueStudio() {
       }
     }
 
-    if (isTauriRuntime() && typeof window !== "undefined") {
-      const repoPath = window.localStorage.getItem("technica.chaosCoreRepoPath")?.trim();
-      if (repoPath) {
-        try {
-          const npcEntries = await listChaosCoreDatabase(repoPath, "npc");
-          npcEntries.forEach((entry) => {
-            optionsById.set(entry.contentId, {
-              id: entry.contentId,
-              name: entry.title.trim() || entry.contentId
-            });
-          });
-        } catch {
-          // Speaker suggestions are best-effort; dialogue editing should still work offline.
-        }
-      }
-    }
+    summaryStates.npc.entries.forEach((entry) => {
+      optionsById.set(entry.contentId, {
+        id: entry.contentId,
+        name: entry.title.trim() || entry.contentId
+      });
+    });
 
-    if (shouldCommit()) {
-      setNpcOptions(
-        Array.from(optionsById.values()).sort((left, right) =>
-          left.name.localeCompare(right.name) || left.id.localeCompare(right.id)
-        )
-      );
-    }
-  }, []);
+    return Array.from(optionsById.values()).sort((left, right) =>
+      left.name.localeCompare(right.name) || left.id.localeCompare(right.id)
+    );
+  }, [summaryStates.npc.entries]);
   const speakerOptions = useMemo(() => {
     const names = new Set<string>(["Narrator"]);
     npcOptions.forEach((npc) => {
@@ -179,53 +168,6 @@ export function DialogueStudio() {
       ...npcOptions
     ];
   }, [linkedNpcId, npcOptions]);
-
-  useEffect(() => {
-    let isCancelled = false;
-
-    async function refreshSafely() {
-      await refreshNpcSpeakers(() => !isCancelled);
-    }
-
-    function handleChaosCoreUpdate(event: Event) {
-      const update = event as CustomEvent<{ contentType?: string }>;
-      if (update.detail?.contentType === "npc") {
-        void refreshSafely();
-      }
-    }
-
-    function handleStorageUpdate(event: StorageEvent) {
-      if (event.key !== CHAOS_CORE_DATABASE_UPDATE_STORAGE_KEY) {
-        return;
-      }
-
-      const update = parseChaosCoreDatabaseUpdate(event.newValue);
-      if (update?.contentType === "npc") {
-        void refreshSafely();
-      }
-    }
-
-    function handleFocus() {
-      void refreshSafely();
-    }
-
-    void refreshSafely();
-
-    if (typeof window !== "undefined") {
-      window.addEventListener(CHAOS_CORE_DATABASE_UPDATE_EVENT, handleChaosCoreUpdate);
-      window.addEventListener("storage", handleStorageUpdate);
-      window.addEventListener("focus", handleFocus);
-    }
-
-    return () => {
-      isCancelled = true;
-      if (typeof window !== "undefined") {
-        window.removeEventListener(CHAOS_CORE_DATABASE_UPDATE_EVENT, handleChaosCoreUpdate);
-        window.removeEventListener("storage", handleStorageUpdate);
-        window.removeEventListener("focus", handleFocus);
-      }
-    };
-  }, [refreshNpcSpeakers]);
 
   useEffect(() => {
     function handleMobileInboxOpen(event: Event) {
@@ -835,7 +777,7 @@ export function DialogueStudio() {
           title="Dialogue Setup"
           actions={
             <div className="toolbar">
-              <button type="button" className="ghost-button" onClick={() => void refreshNpcSpeakers()}>
+              <button type="button" className="ghost-button" onClick={() => void ensureSummaries("npc", { force: true })}>
                 Refresh NPC speakers
               </button>
               <button type="button" className="ghost-button" onClick={handleLoadSample}>

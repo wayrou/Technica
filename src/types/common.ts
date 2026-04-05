@@ -12,7 +12,12 @@ export type EditorKind =
   | "card"
   | "unit"
   | "operation"
-  | "class";
+  | "class"
+  | "crafting"
+  | "dish"
+  | "fieldmod"
+  | "schema";
+export type DatabaseContentType = Exclude<EditorKind, "crafting" | "dish" | "fieldmod">;
 export type Severity = "error" | "warning";
 export type KeyValueRecord = Record<string, string>;
 export type ExportTarget = "generic" | "chaos-core";

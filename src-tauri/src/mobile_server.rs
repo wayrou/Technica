@@ -356,7 +356,7 @@ fn handle_request(mut request: Request, store: &MobileSessionStore) {
         return;
     }
 
-    if request.method() == &Method::Get && url.starts_with("/api/database/list") {
+    if request.method() == &Method::Get && (url == "/api/database/list" || url.starts_with("/api/database/list?")) {
         let Some(token) = parse_token(&request) else {
             respond_json(request, StatusCode(401), json!({ "error": "Missing pairing token." }));
             return;
@@ -387,9 +387,51 @@ fn handle_request(mut request: Request, store: &MobileSessionStore) {
             }
         };
 
-        match crate::list_chaos_core_database_entries(repo_path.clone(), content_type) {
+        match crate::list_chaos_core_database_entries(repo_path.clone(), content_type, false) {
             Ok(entries) => {
                 respond_json(request, StatusCode(200), json!({ "repoPath": repo_path, "entries": entries }));
+            }
+            Err(error) => {
+                respond_json(request, StatusCode(500), json!({ "error": error }));
+            }
+        }
+        return;
+    }
+
+    if request.method() == &Method::Get && url.starts_with("/api/database/list-all") {
+        let Some(token) = parse_token(&request) else {
+            respond_json(request, StatusCode(401), json!({ "error": "Missing pairing token." }));
+            return;
+        };
+
+        if !is_pairing_token_valid(&session, &token) {
+            respond_json(request, StatusCode(401), json!({ "error": "Invalid or expired pairing token." }));
+            return;
+        }
+
+        let repo_path = match crate::discover_chaos_core_repo_path() {
+            Ok(Some(repo_path)) => repo_path,
+            Ok(None) => {
+                respond_json(
+                    request,
+                    StatusCode(404),
+                    json!({ "error": "Could not locate a Chaos Core repo from the desktop session." }),
+                );
+                return;
+            }
+            Err(error) => {
+                respond_json(request, StatusCode(500), json!({ "error": error }));
+                return;
+            }
+        };
+
+        match crate::list_all_chaos_core_database(repo_path.clone(), false) {
+            Ok(response) => {
+                respond_json(
+                    request,
+                    StatusCode(200),
+                    json!({ "repoPath": repo_path, "entriesByType": response.entries_by_type }),
+                );
             }
             Err(error) => {
                 respond_json(request, StatusCode(500), json!({ "error": error }));
@@ -433,7 +475,7 @@ fn handle_request(mut request: Request, store: &MobileSessionStore) {
             }
         };
 
-        match crate::load_chaos_core_database_record(repo_path.clone(), content_type, entry_key) {
+        match crate::load_chaos_core_database_record(repo_path.clone(), content_type, entry_key, false) {
             Ok(entry) => {
                 respond_json(request, StatusCode(200), json!({ "repoPath": repo_path, "entry": entry }));
             }

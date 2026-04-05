@@ -19,6 +19,7 @@ import { downloadBundle, downloadDraftFile } from "../../utils/exporters";
 import { readTextFile } from "../../utils/file";
 import { TECHNICA_MOBILE_INBOX_OPEN_EVENT, type MobileInboxEntry } from "../../utils/mobileProtocol";
 import { submitMobileInboxEntry } from "../../utils/mobileSession";
+import { TECHNICA_WORKSPACE_COMMAND_EVENT, type WorkspaceCommand } from "../../utils/workspaceShortcuts";
 
 interface StructuredStudioContext<TDocument> {
   document: TDocument;
@@ -189,6 +190,36 @@ export function StructuredDocumentStudio<TDocument>({
       }
     };
   }, [draftType, isImportPayload, setDocument, touchDocument]);
+
+  useEffect(() => {
+    function handleWorkspaceCommand(event: Event) {
+      const customEvent = event as CustomEvent<{ command?: WorkspaceCommand }>;
+      const command = customEvent.detail?.command;
+      if (!command || runtime.isMobile) {
+        return;
+      }
+
+      if (command === "import-draft") {
+        importRef.current?.click();
+      }
+      if (command === "save-draft") {
+        downloadDraftFile(draftType, getTitle(document), document);
+      }
+      if (command === "export-bundle") {
+        void exportBundle();
+      }
+    }
+
+    if (typeof window !== "undefined") {
+      window.addEventListener(TECHNICA_WORKSPACE_COMMAND_EVENT, handleWorkspaceCommand);
+    }
+
+    return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener(TECHNICA_WORKSPACE_COMMAND_EVENT, handleWorkspaceCommand);
+      }
+    };
+  }, [document, draftType, exportBundle, getTitle, runtime.isMobile]);
 
   const context: StructuredStudioContext<TDocument> = {
     document,

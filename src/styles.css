@@ -22,6 +22,14 @@
   --ink-soft: #a8b7bb;
   --danger: #ec6b6b;
   --warning: #f1b24d;
+  --surface-glow-left: rgba(14, 115, 101, 0.22);
+  --surface-glow-right: rgba(245, 164, 74, 0.16);
+  --surface-core-top: #101b1f;
+  --surface-core-bottom: #0a1114;
+  --surface-sheen-a: rgba(255, 255, 255, 0.035);
+  --surface-sheen-b: rgba(255, 255, 255, 0.03);
+  --surface-ring: rgba(255, 255, 255, 0.025);
+  --surface-stripe: rgba(255, 255, 255, 0.018);
 }
 
 * {
@@ -88,15 +96,194 @@ textarea.authoring-editor {
   position: relative;
   min-height: 100vh;
   padding: 32px;
+  background:
+    radial-gradient(circle at top left, var(--surface-glow-left), transparent 32%),
+    radial-gradient(circle at top right, var(--surface-glow-right), transparent 28%),
+    linear-gradient(180deg, var(--surface-core-top) 0%, var(--surface-core-bottom) 100%);
+  transition: background 220ms ease;
 }
 
 .app-backdrop {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.035), transparent 45%),
-    linear-gradient(45deg, transparent 65%, rgba(255, 255, 255, 0.03));
+    linear-gradient(135deg, var(--surface-sheen-a), transparent 45%),
+    linear-gradient(45deg, transparent 65%, var(--surface-sheen-b)),
+    radial-gradient(circle at 18% 24%, var(--surface-ring), transparent 30%),
+    repeating-linear-gradient(
+      135deg,
+      transparent 0 22px,
+      var(--surface-stripe) 22px 24px,
+      transparent 24px 58px
+    );
   pointer-events: none;
+}
+
+.app-shell[data-active-tab="dialogue"] {
+  --surface-glow-left: rgba(15, 178, 140, 0.24);
+  --surface-glow-right: rgba(247, 183, 101, 0.16);
+  --surface-core-top: #101d21;
+  --surface-core-bottom: #081114;
+  --surface-sheen-a: rgba(173, 255, 238, 0.045);
+  --surface-sheen-b: rgba(255, 214, 158, 0.032);
+  --surface-ring: rgba(126, 255, 221, 0.028);
+  --surface-stripe: rgba(162, 231, 215, 0.02);
+}
+
+.app-shell[data-active-tab="quest"] {
+  --surface-glow-left: rgba(241, 178, 77, 0.18);
+  --surface-glow-right: rgba(222, 112, 72, 0.18);
+  --surface-core-top: #1d1814;
+  --surface-core-bottom: #0d0b0a;
+  --surface-sheen-a: rgba(255, 219, 162, 0.04);
+  --surface-sheen-b: rgba(255, 154, 112, 0.03);
+  --surface-ring: rgba(255, 196, 122, 0.028);
+  --surface-stripe: rgba(255, 211, 151, 0.018);
+}
+
+.app-shell[data-active-tab="map"] {
+  --surface-glow-left: rgba(84, 173, 109, 0.22);
+  --surface-glow-right: rgba(78, 152, 119, 0.16);
+  --surface-core-top: #111b16;
+  --surface-core-bottom: #08100c;
+  --surface-sheen-a: rgba(185, 255, 192, 0.04);
+  --surface-sheen-b: rgba(126, 227, 172, 0.028);
+  --surface-ring: rgba(121, 255, 173, 0.024);
+  --surface-stripe: rgba(161, 243, 181, 0.018);
+}
+
+.app-shell[data-active-tab="npc"] {
+  --surface-glow-left: rgba(232, 122, 94, 0.18);
+  --surface-glow-right: rgba(194, 126, 72, 0.14);
+  --surface-core-top: #1b1514;
+  --surface-core-bottom: #0d0b0b;
+  --surface-sheen-a: rgba(255, 214, 202, 0.038);
+  --surface-sheen-b: rgba(255, 168, 125, 0.026);
+  --surface-ring: rgba(255, 184, 160, 0.024);
+  --surface-stripe: rgba(255, 201, 179, 0.016);
+}
+
+.app-shell[data-active-tab="gear"] {
+  --surface-glow-left: rgba(110, 186, 215, 0.18);
+  --surface-glow-right: rgba(83, 124, 199, 0.16);
+  --surface-core-top: #101921;
+  --surface-core-bottom: #090d14;
+  --surface-sheen-a: rgba(202, 235, 255, 0.04);
+  --surface-sheen-b: rgba(123, 164, 255, 0.028);
+  --surface-ring: rgba(151, 216, 255, 0.025);
+  --surface-stripe: rgba(182, 224, 255, 0.018);
+}
+
+.app-shell[data-active-tab="item"] {
+  --surface-glow-left: rgba(202, 128, 84, 0.2);
+  --surface-glow-right: rgba(236, 183, 94, 0.14);
+  --surface-core-top: #1b1611;
+  --surface-core-bottom: #0d0b09;
+  --surface-sheen-a: rgba(255, 225, 186, 0.038);
+  --surface-sheen-b: rgba(255, 176, 112, 0.03);
+  --surface-ring: rgba(255, 196, 139, 0.024);
+  --surface-stripe: rgba(255, 224, 181, 0.016);
+}
+
+.app-shell[data-active-tab="crafting"] {
+  --surface-glow-left: rgba(196, 151, 82, 0.18);
+  --surface-glow-right: rgba(111, 169, 124, 0.14);
+  --surface-core-top: #191710;
+  --surface-core-bottom: #0c0b08;
+  --surface-sheen-a: rgba(255, 230, 183, 0.038);
+  --surface-sheen-b: rgba(182, 234, 185, 0.026);
+  --surface-ring: rgba(237, 208, 150, 0.024);
+  --surface-stripe: rgba(225, 232, 189, 0.016);
+}
+
+.app-shell[data-active-tab="dish"] {
+  --surface-glow-left: rgba(214, 108, 78, 0.18);
+  --surface-glow-right: rgba(233, 177, 84, 0.16);
+  --surface-core-top: #1d1410;
+  --surface-core-bottom: #0c0908;
+  --surface-sheen-a: rgba(255, 221, 195, 0.038);
+  --surface-sheen-b: rgba(255, 208, 145, 0.028);
+  --surface-ring: rgba(255, 196, 151, 0.022);
+  --surface-stripe: rgba(255, 225, 186, 0.016);
+}
+
+.app-shell[data-active-tab="fieldmod"] {
+  --surface-glow-left: rgba(131, 98, 204, 0.18);
+  --surface-glow-right: rgba(86, 167, 192, 0.14);
+  --surface-core-top: #151328;
+  --surface-core-bottom: #090a14;
+  --surface-sheen-a: rgba(225, 214, 255, 0.038);
+  --surface-sheen-b: rgba(182, 235, 255, 0.026);
+  --surface-ring: rgba(197, 188, 255, 0.022);
+  --surface-stripe: rgba(222, 221, 255, 0.016);
+}
+
+.app-shell[data-active-tab="schema"] {
+  --surface-glow-left: rgba(84, 164, 214, 0.18);
+  --surface-glow-right: rgba(214, 169, 92, 0.14);
+  --surface-core-top: #101822;
+  --surface-core-bottom: #090c12;
+  --surface-sheen-a: rgba(209, 231, 255, 0.038);
+  --surface-sheen-b: rgba(255, 219, 165, 0.026);
+  --surface-ring: rgba(173, 212, 255, 0.022);
+  --surface-stripe: rgba(223, 235, 255, 0.016);
+}
+
+.app-shell[data-active-tab="card"],
+.app-shell[data-active-tab="card-preview"] {
+  --surface-glow-left: rgba(94, 118, 222, 0.2);
+  --surface-glow-right: rgba(240, 185, 89, 0.16);
+  --surface-core-top: #111523;
+  --surface-core-bottom: #090b14;
+  --surface-sheen-a: rgba(210, 221, 255, 0.042);
+  --surface-sheen-b: rgba(255, 210, 130, 0.03);
+  --surface-ring: rgba(155, 179, 255, 0.024);
+  --surface-stripe: rgba(214, 224, 255, 0.018);
+}
+
+.app-shell[data-active-tab="unit"] {
+  --surface-glow-left: rgba(169, 87, 107, 0.22);
+  --surface-glow-right: rgba(112, 142, 190, 0.14);
+  --surface-core-top: #1a1418;
+  --surface-core-bottom: #0c0b10;
+  --surface-sheen-a: rgba(255, 206, 219, 0.036);
+  --surface-sheen-b: rgba(173, 199, 255, 0.026);
+  --surface-ring: rgba(255, 180, 206, 0.022);
+  --surface-stripe: rgba(234, 210, 255, 0.015);
+}
+
+.app-shell[data-active-tab="operation"] {
+  --surface-glow-left: rgba(83, 137, 232, 0.18);
+  --surface-glow-right: rgba(245, 138, 69, 0.18);
+  --surface-core-top: #101722;
+  --surface-core-bottom: #0a0b11;
+  --surface-sheen-a: rgba(205, 225, 255, 0.04);
+  --surface-sheen-b: rgba(255, 182, 131, 0.03);
+  --surface-ring: rgba(140, 190, 255, 0.026);
+  --surface-stripe: rgba(198, 220, 255, 0.017);
+}
+
+.app-shell[data-active-tab="class"],
+.app-shell[data-active-tab="class-preview"] {
+  --surface-glow-left: rgba(117, 112, 217, 0.2);
+  --surface-glow-right: rgba(96, 184, 211, 0.15);
+  --surface-core-top: #131528;
+  --surface-core-bottom: #090b15;
+  --surface-sheen-a: rgba(222, 216, 255, 0.04);
+  --surface-sheen-b: rgba(175, 231, 255, 0.028);
+  --surface-ring: rgba(190, 183, 255, 0.024);
+  --surface-stripe: rgba(216, 228, 255, 0.017);
+}
+
+.app-shell[data-active-tab="database"] {
+  --surface-glow-left: rgba(57, 154, 140, 0.18);
+  --surface-glow-right: rgba(112, 146, 166, 0.14);
+  --surface-core-top: #10181c;
+  --surface-core-bottom: #090d10;
+  --surface-sheen-a: rgba(193, 240, 232, 0.038);
+  --surface-sheen-b: rgba(189, 212, 228, 0.028);
+  --surface-ring: rgba(165, 231, 218, 0.022);
+  --surface-stripe: rgba(187, 222, 232, 0.016);
 }
 
 .app-header,
@@ -412,6 +599,27 @@ textarea.authoring-editor {
 
 .workspace-column.wide {
   min-width: 0;
+}
+
+.tool-suite-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.7fr) minmax(320px, 0.8fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.tool-suite-grid.tool-suite-grid-dual {
+  grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.78fr);
+}
+
+.tool-suite-column {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.tool-suite-column-narrow {
+  align-self: start;
 }
 
 .panel {
@@ -734,6 +942,12 @@ textarea.authoring-editor {
   align-items: start;
 }
 
+.database-card-gallery-viewport {
+  max-height: 72vh;
+  overflow: auto;
+  padding-right: 4px;
+}
+
 .database-card-tile {
   display: grid;
   gap: 12px;
@@ -944,6 +1158,130 @@ textarea.authoring-editor {
   text-transform: uppercase;
 }
 
+.card-workbench-preview {
+  display: grid;
+  gap: 16px;
+}
+
+.card-workbench-preview .database-card-face {
+  max-width: 260px;
+  justify-self: center;
+}
+
+.card-preview-script-shell {
+  display: grid;
+  gap: 8px;
+}
+
+.card-preview-script-title,
+.class-grid-preview-title {
+  color: var(--gold);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.card-preview-script {
+  margin: 0;
+  min-height: 160px;
+}
+
+.class-grid-preview-shell {
+  display: grid;
+  gap: 12px;
+}
+
+.class-grid-preview-board {
+  display: grid;
+  gap: 12px;
+  align-items: stretch;
+}
+
+.class-grid-preview-node {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(17, 33, 39, 0.9), rgba(7, 14, 17, 0.9));
+  box-shadow: inset 0 0 0 1px rgba(15, 178, 140, 0.08);
+}
+
+.class-grid-preview-node strong {
+  font-size: 0.95rem;
+}
+
+.class-grid-preview-node p,
+.class-grid-preview-node small {
+  margin: 0;
+  color: var(--ink-soft);
+}
+
+.class-grid-preview-cost {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(243, 181, 98, 0.12);
+  color: #f8d48a;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.workspace-bar {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 18px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid var(--panel-border);
+  background: rgba(8, 17, 20, 0.82);
+  box-shadow: var(--panel-shadow);
+  backdrop-filter: blur(12px);
+}
+
+.workspace-shortcuts-overlay {
+  position: fixed;
+  right: 32px;
+  bottom: 28px;
+  z-index: 70;
+  width: min(520px, calc(100vw - 64px));
+}
+
+.shortcut-list {
+  display: grid;
+  gap: 10px;
+}
+
+.shortcut-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.shortcut-row strong {
+  color: #edf4f2;
+  font-size: 0.86rem;
+}
+
+.shortcut-row span {
+  color: var(--ink-soft);
+  text-align: right;
+}
+
 .rarity-uncommon .database-card-face {
   border-color: #a07f58;
 }
@@ -972,7 +1310,8 @@ textarea.authoring-editor {
 }
 
 .primary-button,
-.ghost-button {
+.ghost-button,
+.secondary-button {
   padding: 10px 14px;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.03);
@@ -986,8 +1325,16 @@ textarea.authoring-editor {
   font-weight: 700;
 }
 
+.secondary-button {
+  background: rgba(15, 178, 140, 0.12);
+  border-color: rgba(15, 178, 140, 0.34);
+  color: #9aeedb;
+  font-weight: 700;
+}
+
 .ghost-button:hover,
-.primary-button:hover {
+.primary-button:hover,
+.secondary-button:hover {
   transform: translateY(-1px);
 }
 
@@ -1060,6 +1407,14 @@ textarea.authoring-editor {
   padding: 11px 12px;
 }
 
+.field input:disabled,
+.field textarea:disabled,
+.field select:disabled {
+  opacity: 0.54;
+  cursor: not-allowed;
+  background: rgba(16, 20, 24, 0.84);
+}
+
 .field textarea {
   resize: vertical;
 }
@@ -1094,6 +1449,16 @@ textarea.authoring-editor {
 
 .nested-card {
   background: rgba(255, 255, 255, 0.02);
+}
+
+.section-disabled {
+  opacity: 0.76;
+}
+
+.section-disabled .nested-card,
+.section-disabled .field.full,
+.section-disabled .field {
+  filter: saturate(0.78);
 }
 
 .item-card-header {
@@ -1558,6 +1923,23 @@ textarea.authoring-editor {
   color: #9aeedb;
 }
 
+.pill.warning {
+  background: rgba(241, 178, 77, 0.14);
+  color: #ffd186;
+}
+
+.repo-path-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  width: 100%;
+  align-items: center;
+}
+
+.repo-path-toolbar input {
+  min-width: 0;
+  width: 100%;
+}
+
 .issue-list {
   display: grid;
   gap: 12px;
@@ -1620,6 +2002,10 @@ textarea.authoring-editor {
     grid-template-columns: 1fr;
   }
 
+  .tool-suite-grid {
+    grid-template-columns: 1fr;
+  }
+
   .workspace-grid.workspace-dialogue,
   .workspace-grid.workspace-dialogue.validation-collapsed {
     grid-template-columns: 1fr;
@@ -1674,6 +2060,11 @@ textarea.authoring-editor {
 
   .mobile-tab-nav {
     top: 0;
+  }
+
+  .workspace-bar {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 
@@ -1735,6 +2126,12 @@ textarea.authoring-editor {
 
   .database-card-gallery {
     grid-template-columns: 1fr;
+  }
+
+  .workspace-shortcuts-overlay {
+    left: 18px;
+    right: 18px;
+    width: auto;
   }
 
   .database-card-tile .database-card-face {

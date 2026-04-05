@@ -12,21 +12,29 @@ import {
 } from "../types/common";
 import type { CardDocument } from "../types/card";
 import type { ClassDocument } from "../types/class";
+import type { CraftingDocument } from "../types/crafting";
 import type { DialogueDocument } from "../types/dialogue";
+import type { DishDocument } from "../types/dish";
+import type { FieldModDocument } from "../types/fieldmod";
 import type { GearDocument } from "../types/gear";
 import type { ItemDocument } from "../types/item";
 import type { MapDocument } from "../types/map";
 import type { NpcDocument } from "../types/npc";
 import type { OperationDocument } from "../types/operation";
 import type { QuestDocument } from "../types/quest";
+import type { SchemaDocument } from "../types/schema";
 import type { UnitDocument } from "../types/unit";
 import {
   buildChaosCoreCardBundle,
   buildChaosCoreClassBundle,
+  buildChaosCoreCraftingBundle,
+  buildChaosCoreDishBundle,
+  buildChaosCoreFieldModBundle,
   buildChaosCoreGearBundle,
   buildChaosCoreItemBundle,
   buildChaosCoreNpcBundle,
   buildChaosCoreOperationBundle,
+  buildChaosCoreSchemaBundle,
   buildChaosCoreUnitBundle
 } from "./chaosCoreContentExport";
 import {
@@ -229,7 +237,7 @@ Importer notes:
 function buildGenericBundle<TDocument>(
   document: TDocument,
   options: {
-    contentType: "gear" | "item" | "card" | "unit" | "operation" | "class";
+    contentType: "gear" | "item" | "card" | "unit" | "operation" | "class" | "crafting" | "dish" | "fieldmod" | "schema";
     title: string;
     fallbackId: string;
     targetSchemaVersion: string;
@@ -474,6 +482,90 @@ Importer notes:
   });
 }
 
+export function buildCraftingBundle(document: CraftingDocument): ExportBundle {
+  const contentId = runtimeId(document.id || document.name, "recipe");
+  return buildGenericBundle(document, {
+    contentType: "crafting",
+    title: document.name,
+    fallbackId: contentId,
+    targetSchemaVersion: "technica-crafting.v1",
+    description: "Crafting recipe export with resource costs, grant items, and unlock metadata.",
+    entryFile: "crafting.json",
+    readme: `# Technica Crafting Export
+
+Name: ${document.name}
+Id: ${document.id}
+
+Importer notes:
+- Preserve resource costs and all crafted grant items.
+- Acquisition metadata captures whether the recipe is purchased, floor-locked, found, rewarded, or known from the start.
+`
+  });
+}
+
+export function buildDishBundle(document: DishDocument): ExportBundle {
+  const contentId = runtimeId(document.id || document.name, "dish");
+  return buildGenericBundle(document, {
+    contentType: "dish",
+    title: document.name,
+    fallbackId: contentId,
+    targetSchemaVersion: "technica-dish.v1",
+    description: "Dish export for tavern or mess-hall meals.",
+    entryFile: "dish.json",
+    readme: `# Technica Dish Export
+
+Name: ${document.name}
+Id: ${document.id}
+
+Importer notes:
+- Preserve the visible effect text, purchase cost, unlock floor, and tavern-facing description.
+`
+  });
+}
+
+export function buildFieldModBundle(document: FieldModDocument): ExportBundle {
+  const contentId = runtimeId(document.id || document.name, "field_mod");
+  return buildGenericBundle(document, {
+    contentType: "fieldmod",
+    title: document.name,
+    fallbackId: contentId,
+    targetSchemaVersion: "technica-fieldmod.v1",
+    description: "Field mod export for black-market augments.",
+    entryFile: "fieldmod.json",
+    readme: `# Technica Field Mod Export
+
+Name: ${document.name}
+Id: ${document.id}
+
+Importer notes:
+- Preserve scope, rarity, cost, unlock floor, and the player-facing effect summary.
+`
+  });
+}
+
+export function buildSchemaBundle(document: SchemaDocument): ExportBundle {
+  const contentId = runtimeId(document.id || document.name, document.kind);
+  return buildGenericBundle(document, {
+    contentType: "schema",
+    title: document.name,
+    fallbackId: contentId,
+    targetSchemaVersion: "technica-schema.v1",
+    description: `Schema export for ${document.kind} authorization content.`,
+    entryFile: "schema.json",
+    readme: `# Technica Schema Export
+
+Name: ${document.name}
+Id: ${document.id}
+
+  Importer notes:
+  - Preserve whether this document defines a C.O.R.E. authorization or a fortification.
+  - The editable schema fields now mirror Chaos Core's native schema definitions.
+  - Core entries include category, operational requirements, outputs, upkeep, income, support radius, unlock data, and room-tag fields.
+  - Fortifications include build cost, unlock data, preferred room tags, and placeholder state.
+  `
+    });
+  }
+
 export function buildDialogueBundleForTarget(document: DialogueDocument, target: ExportTarget) {
   if (target === "chaos-core") {
     return buildChaosCoreDialogueBundle(
@@ -553,6 +645,38 @@ export function buildClassBundleForTarget(document: ClassDocument, target: Expor
   }
 
   return buildClassBundle(document);
+}
+
+export function buildCraftingBundleForTarget(document: CraftingDocument, target: ExportTarget) {
+  if (target === "chaos-core") {
+    return buildChaosCoreCraftingBundle(document);
+  }
+
+  return buildCraftingBundle(document);
+}
+
+export function buildDishBundleForTarget(document: DishDocument, target: ExportTarget) {
+  if (target === "chaos-core") {
+    return buildChaosCoreDishBundle(document);
+  }
+
+  return buildDishBundle(document);
+}
+
+export function buildFieldModBundleForTarget(document: FieldModDocument, target: ExportTarget) {
+  if (target === "chaos-core") {
+    return buildChaosCoreFieldModBundle(document);
+  }
+
+  return buildFieldModBundle(document);
+}
+
+export function buildSchemaBundleForTarget(document: SchemaDocument, target: ExportTarget) {
+  if (target === "chaos-core") {
+    return buildChaosCoreSchemaBundle(document);
+  }
+
+  return buildSchemaBundle(document);
 }
 
 export function buildNpcBundleForTarget(document: NpcDocument, target: ExportTarget) {

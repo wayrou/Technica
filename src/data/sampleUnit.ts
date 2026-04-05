@@ -11,6 +11,8 @@ export function createBlankUnit(): UnitDocument {
     name: "Untitled Unit",
     description: "",
     currentClassId: "squire",
+    spawnRole: "player",
+    enemySpawnFloorOrdinals: [],
     stats: {
       maxHp: 12,
       atk: 8,
@@ -47,6 +49,8 @@ export function createSampleUnit(): UnitDocument {
     name: "Brass Harrow",
     description: "A steady breach specialist prepared for early operation deployment.",
     currentClassId: "squire",
+    spawnRole: "player",
+    enemySpawnFloorOrdinals: [],
     stats: {
       maxHp: 15,
       atk: 9,
