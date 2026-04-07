@@ -10,6 +10,7 @@ import type {
 } from "../types/dialogue";
 import { isoNow } from "./date";
 import { parseDialogueSource } from "./dialogueParser";
+import { normalizeDialogueOccurrenceMetadataKey } from "./dialogueOccurrence";
 import { createSequentialId, runtimeId, slugify } from "./id";
 import { parseCommaList } from "./records";
 
@@ -30,7 +31,7 @@ function buildStats(labels: DialogueLabel[]) {
       return stats;
     },
     {
-      labelCount: labels.length,
+      labelCount: labels.filter((label) => !label.continuationForChoiceClusterId).length,
       lineCount: 0,
       choiceCount: 0
     }
@@ -84,10 +85,9 @@ function normalizeDocumentMetadata(metadata: KeyValueRecord) {
 
 function normalizeDialogueMetadataKey(key: string) {
   const trimmedKey = key.trim();
-  const collapsedKey = trimmedKey.replace(/[-_\s]/g, "").toLowerCase();
-
-  if (collapsedKey === "linkednpcid") {
-    return "linkedNpcId";
+  const occurrenceKey = normalizeDialogueOccurrenceMetadataKey(trimmedKey);
+  if (occurrenceKey !== trimmedKey) {
+    return occurrenceKey;
   }
 
   return /\s/.test(trimmedKey) ? runtimeId(trimmedKey, "meta") : trimmedKey;
@@ -162,12 +162,22 @@ function normalizeEntry(entry: DialogueEntry, index: number, knownBranches: stri
   };
 }
 
+function normalizeBranchTarget(value: string | undefined) {
+  const normalized = value?.trim();
+  return normalized ? normalizeBranchId(normalized, DEFAULT_BRANCH_ID) : undefined;
+}
+
 function normalizeLabels(labels: DialogueLabel[]) {
   const knownBranches = labels.map((label, index) => normalizeBranchId(label.label || label.id, `branch_${index + 1}`));
   return labels.map((label, index) => ({
     id: label.id || `branch_${index + 1}`,
     label: knownBranches[index],
-    entries: label.entries.map((entry, entryIndex) => normalizeEntry(entry, entryIndex, knownBranches))
+    entries: label.entries.map((entry, entryIndex) => normalizeEntry(entry, entryIndex, knownBranches)),
+    autoContinueTarget: normalizeBranchTarget(label.autoContinueTarget),
+    choiceClusterId: label.choiceClusterId?.trim() || undefined,
+    choiceSourceBranchId: label.choiceSourceBranchId?.trim() || undefined,
+    choiceSourceEntryId: label.choiceSourceEntryId?.trim() || undefined,
+    continuationForChoiceClusterId: label.continuationForChoiceClusterId?.trim() || undefined
   }));
 }
 
@@ -326,6 +336,10 @@ export function validateDialogueDocument(document: DialogueDocument): Validation
         queue.push(entry.target);
       }
     });
+    const autoContinueTarget = branchMap.get(currentBranch)?.autoContinueTarget;
+    if (autoContinueTarget && labelNameSet.has(autoContinueTarget) && !reachable.has(autoContinueTarget)) {
+      queue.push(autoContinueTarget);
+    }
   }
 
   normalizedDocument.labels.forEach((label) => {
@@ -342,6 +356,14 @@ export function validateDialogueDocument(document: DialogueDocument): Validation
         severity: "warning",
         field: label.label,
         message: `Branch '${label.label}' is unreachable from '${normalizedDocument.entryLabel}'.`
+      });
+    }
+
+    if (label.autoContinueTarget && !labelNameSet.has(label.autoContinueTarget)) {
+      issues.push({
+        severity: "error",
+        field: label.label,
+        message: `Post-choice continuation target '${label.autoContinueTarget}' does not match any branch.`
       });
     }
 
@@ -410,7 +432,44 @@ export function validateDialogueDocument(document: DialogueDocument): Validation
   return issues;
 }
 
-export function createDialogueBranch(label: string, existingLabels: string[] = []): DialogueLabel {
+export function canPublishDialogueAsBuiltInSource(document: DialogueDocument): boolean {
+  const normalizedDocument = refreshDialogueDocument(document);
+  const visibleLabels = normalizedDocument.labels.filter((label) => !label.continuationForChoiceClusterId);
+
+  if (visibleLabels.length !== 1) {
+    return false;
+  }
+
+  const [branch] = visibleLabels;
+  if (!branch || branch.autoContinueTarget) {
+    return false;
+  }
+
+  return branch.entries.every((entry) => {
+    if (entry.kind === "end") {
+      return true;
+    }
+
+    if (entry.kind !== "line") {
+      return false;
+    }
+
+    return (
+      !entry.mood &&
+      !entry.portraitKey &&
+      !entry.sceneId &&
+      !entry.condition &&
+      entry.tags.length === 0 &&
+      Object.keys(entry.metadata).length === 0
+    );
+  });
+}
+
+export function createDialogueBranch(
+  label: string,
+  existingLabels: string[] = [],
+  initialEntries?: DialogueEntry[]
+): DialogueLabel {
   const preferredLabel = normalizeBranchId(label, "branch");
   const normalizedLabel = existingLabels.map((entry) => normalizeBranchId(entry, "branch")).includes(preferredLabel)
     ? createSequentialId(preferredLabel, existingLabels)
@@ -419,7 +478,7 @@ export function createDialogueBranch(label: string, existingLabels: string[] = [
   return {
     id: normalizedLabel,
     label: normalizedLabel,
-    entries: [
+    entries: initialEntries ?? [
       {
         id: "line_1",
         kind: "line",

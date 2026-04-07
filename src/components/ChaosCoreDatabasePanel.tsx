@@ -18,6 +18,8 @@ interface ChaosCoreDatabasePanelProps<TDocument> {
   buildBundle: (document: TDocument) => Promise<ExportBundle> | ExportBundle;
   onLoadEntry: (entry: LoadedChaosCoreDatabaseEntry) => void;
   subtitle: string;
+  preferredPublishTargetEntryKey?: string;
+  preferredPublishTargetSourceFile?: string;
 }
 
 export function ChaosCoreDatabasePanel<TDocument>({
@@ -25,7 +27,9 @@ export function ChaosCoreDatabasePanel<TDocument>({
   currentDocument,
   buildBundle,
   onLoadEntry,
-  subtitle
+  subtitle,
+  preferredPublishTargetEntryKey,
+  preferredPublishTargetSourceFile
 }: ChaosCoreDatabasePanelProps<TDocument>) {
   const {
     databaseEnabled,
@@ -191,15 +195,25 @@ export function ChaosCoreDatabasePanel<TDocument>({
     setIsPublishing(true);
     try {
       const bundle = await buildBundle(currentDocument);
+      const matchingEntry = entries.find((entry) => entry.contentId === bundle.manifest.contentId) ?? null;
       const canWriteBackSelectedEntry = selectedEntry?.origin === "technica" || contentType !== "dialogue";
       const shouldUpdateSelectedEntry =
-        canWriteBackSelectedEntry && selectedEntry?.contentId === bundle.manifest.contentId;
+        !preferredPublishTargetEntryKey &&
+        !matchingEntry &&
+        canWriteBackSelectedEntry &&
+        selectedEntry?.contentId === bundle.manifest.contentId;
       const result = await publishChaosCoreBundle(
         repoPath.trim(),
         contentType,
         bundle,
-        shouldUpdateSelectedEntry ? selectedEntry?.entryKey : undefined,
-        shouldUpdateSelectedEntry ? selectedEntry?.sourceFile : undefined
+        preferredPublishTargetEntryKey ?? matchingEntry?.entryKey ?? (shouldUpdateSelectedEntry ? selectedEntry?.entryKey : undefined),
+        preferredPublishTargetEntryKey
+          ? preferredPublishTargetSourceFile
+          : matchingEntry
+            ? matchingEntry.sourceFile
+          : shouldUpdateSelectedEntry
+            ? selectedEntry?.sourceFile
+            : undefined
       );
       const nextEntries = await refreshEntries(true);
       emitChaosCoreDatabaseUpdate(contentType);

@@ -7,8 +7,10 @@ import { notify } from "../../utils/dialogs";
 
 const DATABASE_CONTENT_TYPES: DatabaseContentType[] = [
   "dialogue",
+  "mail",
   "quest",
   "map",
+  "field_enemy",
   "npc",
   "gear",
   "item",
@@ -16,13 +18,17 @@ const DATABASE_CONTENT_TYPES: DatabaseContentType[] = [
   "unit",
   "operation",
   "class",
-  "schema"
+  "fieldmod",
+  "schema",
+  "codex"
 ];
 
 const EDITOR_STORAGE_KEYS: Record<DatabaseContentType, string> = {
   dialogue: "technica.dialogue.document",
+  mail: "technica.mail.document",
   quest: "technica.quest.document",
   map: "technica.map.document",
+  field_enemy: "technica.fieldEnemy.document",
   npc: "technica.npc.document",
   gear: "technica.gear.document",
   item: "technica.item.document",
@@ -30,7 +36,9 @@ const EDITOR_STORAGE_KEYS: Record<DatabaseContentType, string> = {
   unit: "technica.unit.document",
   operation: "technica.operation.document",
   class: "technica.class.document",
-  schema: "technica.schema.document"
+  fieldmod: "technica.fieldmod.document",
+  schema: "technica.schema.document",
+  codex: "technica.codex.document"
 };
 
 type DatabaseSummaryEntry = ChaosCoreDatabaseEntry & {

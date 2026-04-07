@@ -72,6 +72,25 @@ export function validateMapDocument(document: MapDocument) {
         message: `Object '${item.id}' starts outside the map bounds.`
       });
     }
+
+    if (item.type.trim().toLowerCase() === "enemy") {
+      const hp = Number(item.metadata.hp ?? "3");
+      const speed = Number(item.metadata.speed ?? "90");
+
+      if (!Number.isFinite(hp) || hp <= 0) {
+        issues.push({
+          severity: "warning",
+          message: `Enemy '${item.id}' should have an HP value greater than 0.`
+        });
+      }
+
+      if (!Number.isFinite(speed) || speed <= 0) {
+        issues.push({
+          severity: "warning",
+          message: `Enemy '${item.id}' should have a movement speed greater than 0.`
+        });
+      }
+    }
   });
 
   const zoneIds = new Set<string>();

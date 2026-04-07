@@ -26,6 +26,14 @@ import { validateQuestDocument } from "../../utils/questValidation";
 
 const QUEST_STORAGE_KEY = "technica.quest.document";
 
+function sanitizeIdList(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [] as string[];
+  }
+
+  return Array.from(new Set(value.map(String).map((entry) => entry.trim()).filter(Boolean)));
+}
+
 function createBlankQuest(): QuestDocument {
   const timestamp = isoNow();
 
@@ -41,6 +49,7 @@ function createBlankQuest(): QuestDocument {
     status: "available",
     tags: [],
     prerequisites: [],
+    requiredQuestIds: [],
     followUpQuestIds: [],
     rewards: [],
     states: [
@@ -84,6 +93,20 @@ function touchQuest(document: QuestDocument) {
   };
 }
 
+function normalizeQuestDocument(document: Partial<QuestDocument> | null | undefined): QuestDocument {
+  const fallback = createBlankQuest();
+  const candidate = document ?? {};
+
+  return {
+    ...fallback,
+    ...candidate,
+    tags: sanitizeIdList(candidate.tags),
+    prerequisites: sanitizeIdList(candidate.prerequisites),
+    requiredQuestIds: sanitizeIdList(candidate.requiredQuestIds),
+    followUpQuestIds: sanitizeIdList(candidate.followUpQuestIds)
+  };
+}
+
 function isQuestDocumentPayload(value: unknown): value is QuestDocument {
   if (!value || typeof value !== "object") {
     return false;
@@ -100,11 +123,12 @@ function isQuestDocumentPayload(value: unknown): value is QuestDocument {
 
 export function QuestCreator() {
   const runtime = useTechnicaRuntime();
-  const [quest, setQuest] = usePersistentState(QUEST_STORAGE_KEY, createSampleQuest());
+  const [questState, setQuest] = usePersistentState(QUEST_STORAGE_KEY, createSampleQuest());
   const [isSendingToDesktop, setIsSendingToDesktop] = useState(false);
   const importRef = useRef<HTMLInputElement | null>(null);
-  const deferredQuest = useDeferredValue(quest);
-  const issues = useMemo(() => validateQuestDocument(deferredQuest), [deferredQuest]);
+  const quest = normalizeQuestDocument(questState);
+  const deferredQuest = useDeferredValue(questState);
+  const issues = useMemo(() => validateQuestDocument(normalizeQuestDocument(deferredQuest)), [deferredQuest]);
   const canSendToDesktop = runtime.isMobile && Boolean(runtime.sessionOrigin && runtime.pairingToken);
 
   useEffect(() => {
@@ -115,12 +139,12 @@ export function QuestCreator() {
         return;
       }
 
-      if (!isQuestDocumentPayload(entry.payload)) {
-        notify("The mobile quest draft could not be loaded because its payload is invalid.");
-        return;
-      }
+        if (!isQuestDocumentPayload(entry.payload)) {
+          notify("The mobile quest draft could not be loaded because its payload is invalid.");
+          return;
+        }
 
-      setQuest(touchQuest(entry.payload));
+      setQuest(touchQuest(normalizeQuestDocument(entry.payload)));
     }
 
     if (typeof window !== "undefined") {
@@ -135,7 +159,7 @@ export function QuestCreator() {
   }, [setQuest]);
 
   function patchQuest(updater: (current: QuestDocument) => QuestDocument) {
-    setQuest((current) => touchQuest(updater(current)));
+    setQuest((current) => touchQuest(normalizeQuestDocument(updater(normalizeQuestDocument(current)))));
   }
 
   function updateTopLevel<K extends keyof QuestDocument>(field: K, value: QuestDocument[K]) {
@@ -185,7 +209,7 @@ export function QuestCreator() {
       if (!payload.id || !payload.states || !payload.steps) {
         notify("That file does not look like a Technica quest draft or export.");
       } else if (confirmAction("Replace the current quest draft with the imported file?")) {
-        setQuest(payload as QuestDocument);
+        setQuest(touchQuest(normalizeQuestDocument(payload as QuestDocument)));
       }
     } catch {
       notify("Could not parse the selected quest JSON file.");
@@ -196,13 +220,13 @@ export function QuestCreator() {
 
   function handleResetSample() {
     if (confirmAction("Replace the current quest draft with the sample quest?")) {
-      setQuest(createSampleQuest());
+      setQuest(touchQuest(normalizeQuestDocument(createSampleQuest())));
     }
   }
 
   function handleClear() {
     if (confirmAction("Clear the current quest draft and replace it with a blank quest template?")) {
-      setQuest(createBlankQuest());
+      setQuest(touchQuest(createBlankQuest()));
     }
   }
 
@@ -214,7 +238,7 @@ export function QuestCreator() {
         notify("That Chaos Core quest entry does not match the Technica quest format.");
         return;
       }
-      setQuest(touchQuest(payload as QuestDocument));
+      setQuest(touchQuest(normalizeQuestDocument(payload as QuestDocument)));
     } catch {
       notify("Could not load the selected quest from the Chaos Core database.");
     }
@@ -352,6 +376,14 @@ export function QuestCreator() {
               />
             </label>
             <label className="field">
+              <span>Require completed quests</span>
+              <textarea
+                rows={4}
+                value={serializeMultilineList(quest.requiredQuestIds)}
+                onChange={(event) => updateTopLevel("requiredQuestIds", parseMultilineList(event.target.value))}
+              />
+            </label>
+            <label className="field">
               <span>Initial step id</span>
               <input
                 value={quest.initialStepId}
@@ -387,6 +419,7 @@ export function QuestCreator() {
               <span className="pill">{quest.objectives.length} objectives</span>
               <span className="pill">{quest.steps.length} steps</span>
               <span className="pill">{quest.states.length} states</span>
+              <span className="pill">{quest.requiredQuestIds.length} quest gate(s)</span>
               <span className="pill accent">Chaos Core export</span>
             </div>
             <div className="toolbar">

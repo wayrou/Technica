@@ -12,13 +12,17 @@ import {
 } from "../types/common";
 import type { CardDocument } from "../types/card";
 import type { ClassDocument } from "../types/class";
+import type { CodexDocument } from "../types/codex";
 import type { CraftingDocument } from "../types/crafting";
+import type { DecorationDocument } from "../types/decoration";
 import type { DialogueDocument } from "../types/dialogue";
 import type { DishDocument } from "../types/dish";
+import type { FieldEnemyDocument } from "../types/fieldEnemy";
 import type { FieldModDocument } from "../types/fieldmod";
 import type { GearDocument } from "../types/gear";
 import type { ItemDocument } from "../types/item";
 import type { MapDocument } from "../types/map";
+import type { MailDocument } from "../types/mail";
 import type { NpcDocument } from "../types/npc";
 import type { OperationDocument } from "../types/operation";
 import type { QuestDocument } from "../types/quest";
@@ -27,11 +31,14 @@ import type { UnitDocument } from "../types/unit";
 import {
   buildChaosCoreCardBundle,
   buildChaosCoreClassBundle,
+  buildChaosCoreCodexBundle,
   buildChaosCoreCraftingBundle,
   buildChaosCoreDishBundle,
+  buildChaosCoreFieldEnemyBundle,
   buildChaosCoreFieldModBundle,
   buildChaosCoreGearBundle,
   buildChaosCoreItemBundle,
+  buildChaosCoreMailBundle,
   buildChaosCoreNpcBundle,
   buildChaosCoreOperationBundle,
   buildChaosCoreSchemaBundle,
@@ -237,7 +244,21 @@ Importer notes:
 function buildGenericBundle<TDocument>(
   document: TDocument,
   options: {
-    contentType: "gear" | "item" | "card" | "unit" | "operation" | "class" | "crafting" | "dish" | "fieldmod" | "schema";
+    contentType:
+      | "gear"
+      | "item"
+      | "card"
+      | "unit"
+      | "operation"
+      | "class"
+      | "field_enemy"
+      | "crafting"
+      | "dish"
+      | "fieldmod"
+      | "schema"
+      | "codex"
+      | "mail"
+      | "decoration";
     title: string;
     fallbackId: string;
     targetSchemaVersion: string;
@@ -392,6 +413,30 @@ Importer notes:
  - Attached item icons export to \`assets/\` when present.
 `,
     extraFiles: iconAsset ? [iconAsset.file] : []
+  });
+}
+
+export function buildFieldEnemyBundle(document: FieldEnemyDocument): ExportBundle {
+  const contentId = runtimeId(document.id || document.name, "field_enemy");
+  const spriteAsset = document.spriteAsset ? createImageAssetExport(contentId, "sprite", document.spriteAsset) : null;
+  return buildGenericBundle(document, {
+    contentType: "field_enemy",
+    title: document.name,
+    fallbackId: contentId,
+    targetSchemaVersion: "technica-field-enemy.v1",
+    description: "Field enemy export with spawn rules, light-combat stats, drop data, and sprite metadata.",
+    entryFile: "field_enemy.json",
+    readme: `# Technica Field Enemy Export
+
+Name: ${document.name}
+Id: ${document.id}
+
+Importer notes:
+- Preserve spawn targets, floor rules, and per-map spawn count.
+- Sprite assets export to \`assets/\` when present.
+- Item drops use 0-1 chance values and explicit quantities.
+`,
+    extraFiles: spriteAsset ? [spriteAsset.file] : []
   });
 }
 
@@ -566,6 +611,74 @@ Id: ${document.id}
     });
   }
 
+export function buildCodexBundle(document: CodexDocument): ExportBundle {
+  const contentId = runtimeId(document.id || document.title, "codex_entry");
+  return buildGenericBundle(document, {
+    contentType: "codex",
+    title: document.title,
+    fallbackId: contentId,
+    targetSchemaVersion: "technica-codex.v1",
+    description: "Codex entry export with lore category, body copy, and unlock conditions.",
+    entryFile: "codex.json",
+    readme: `# Technica Codex Export
+
+Title: ${document.title}
+Id: ${document.id}
+
+Importer notes:
+- Preserve the entry type, body text, and every unlock requirement exactly.
+- Unlock requirements are additive: floor gates, completed-dialogue gates, and owned-content gates can all be required together.
+`
+  });
+}
+
+export function buildMailBundle(document: MailDocument): ExportBundle {
+  const contentId = runtimeId(document.id || document.subject, "mail");
+  return buildGenericBundle(document, {
+    contentType: "mail",
+    title: document.subject,
+    fallbackId: contentId,
+    targetSchemaVersion: "technica-mail.v1",
+    description: "Mailbox entry export with sender, subject, message pages, and unlock conditions.",
+    entryFile: "mail.json",
+    readme: `# Technica Mail Export
+
+Subject: ${document.subject}
+Id: ${document.id}
+
+Importer notes:
+- Preserve sender, subject, category, and message body text exactly.
+- Unlock requirements are additive: floor gates, completed-dialogue gates, and owned-content gates can all be required together.
+- Separate message pages with blank lines when adapting the content to paged UI surfaces.
+`
+  });
+}
+
+export function buildDecorationBundle(document: DecorationDocument): ExportBundle {
+  const contentId = runtimeId(document.id || document.name, "decoration");
+  const spriteAsset = document.spriteAsset
+    ? createImageAssetExport(contentId, "sprite", document.spriteAsset)
+    : null;
+  return buildGenericBundle(document, {
+    contentType: "decoration",
+    title: document.name,
+    fallbackId: contentId,
+    targetSchemaVersion: "technica-decoration.v1",
+    description: "Decoration export with sprite art and field-build footprint sizing.",
+    entryFile: "decoration.json",
+    readme: `# Technica Decoration Export
+
+Name: ${document.name}
+Id: ${document.id}
+
+Importer notes:
+- Preserve tile size exactly so HAVEN build mode can place the decoration at the intended footprint.
+- Sprite art exports to \`assets/\` when present.
+`,
+    extraFiles: spriteAsset ? [spriteAsset.file] : []
+  });
+}
+
 export function buildDialogueBundleForTarget(document: DialogueDocument, target: ExportTarget) {
   if (target === "chaos-core") {
     return buildChaosCoreDialogueBundle(
@@ -613,6 +726,14 @@ export function buildItemBundleForTarget(document: ItemDocument, target: ExportT
   }
 
   return buildItemBundle(document);
+}
+
+export function buildFieldEnemyBundleForTarget(document: FieldEnemyDocument, target: ExportTarget) {
+  if (target === "chaos-core") {
+    return buildChaosCoreFieldEnemyBundle(document);
+  }
+
+  return buildFieldEnemyBundle(document);
 }
 
 export function buildCardBundleForTarget(document: CardDocument, target: ExportTarget) {
@@ -677,6 +798,26 @@ export function buildSchemaBundleForTarget(document: SchemaDocument, target: Exp
   }
 
   return buildSchemaBundle(document);
+}
+
+export function buildCodexBundleForTarget(document: CodexDocument, target: ExportTarget) {
+  if (target === "chaos-core") {
+    return buildChaosCoreCodexBundle(document);
+  }
+
+  return buildCodexBundle(document);
+}
+
+export function buildMailBundleForTarget(document: MailDocument, target: ExportTarget) {
+  if (target === "chaos-core") {
+    return buildChaosCoreMailBundle(document);
+  }
+
+  return buildMailBundle(document);
+}
+
+export function buildDecorationBundleForTarget(document: DecorationDocument, _target: ExportTarget) {
+  return buildDecorationBundle(document);
 }
 
 export function buildNpcBundleForTarget(document: NpcDocument, target: ExportTarget) {

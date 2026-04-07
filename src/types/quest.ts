@@ -69,6 +69,7 @@ export interface QuestDocument {
   status: QuestRuntimeStatus;
   tags: string[];
   prerequisites: string[];
+  requiredQuestIds: string[];
   followUpQuestIds: string[];
   rewards: QuestReward[];
   states: QuestState[];

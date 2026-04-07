@@ -219,6 +219,7 @@ export function normalizeSchemaDocument(value: unknown, fallback: SchemaDocument
     unlockSource,
     unlockCost: normalizeWallet(record.unlockCost, fallback.unlockCost),
     unlockWadCost: readNumber(record.unlockWadCost) ?? readNumber(buildCostRecord?.wad) ?? fallback.unlockWadCost,
+    requiredQuestIds: readStringList(record.requiredQuestIds),
     preferredRoomTags: readStringList(record.preferredRoomTags) as SchemaRoomTag[],
     tagOutputModifiers: rawModifiers,
     placeholder: readBoolean(record.placeholder) ?? fallback.placeholder,

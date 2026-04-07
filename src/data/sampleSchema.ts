@@ -53,6 +53,7 @@ export function createBlankSchema(): SchemaDocument {
     unlockSource: "schema",
     unlockCost: createBlankWallet(),
     unlockWadCost: 0,
+    requiredQuestIds: [],
     preferredRoomTags: [],
     tagOutputModifiers: [],
     placeholder: false,
@@ -112,6 +113,7 @@ export function createSampleSchema(): SchemaDocument {
       steamComponents: 1
     },
     unlockWadCost: 24,
+    requiredQuestIds: [],
     preferredRoomTags: ["salvage_rich", "transit_junction"],
     tagOutputModifiers: [
       createTagOutputModifier({

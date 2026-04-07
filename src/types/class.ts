@@ -1,11 +1,17 @@
 import type { KeyValueRecord } from "./common";
 import type { SupportedWeaponType } from "./gear";
 
-export type ClassUnlockConditionType = "always_unlocked" | "class_rank" | "milestone" | "special";
+export type ClassUnlockConditionType =
+  | "always_unlocked"
+  | "class_rank"
+  | "quest_completed"
+  | "milestone"
+  | "special";
 
 export const classUnlockConditionTypes: ClassUnlockConditionType[] = [
   "always_unlocked",
   "class_rank",
+  "quest_completed",
   "milestone",
   "special"
 ];
@@ -13,6 +19,7 @@ export const classUnlockConditionTypes: ClassUnlockConditionType[] = [
 export interface ClassUnlockConditionDocument {
   type: ClassUnlockConditionType;
   requiredClassId?: string;
+  requiredQuestId?: string;
   requiredRank?: number;
   description?: string;
 }

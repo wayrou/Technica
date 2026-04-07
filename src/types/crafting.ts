@@ -38,6 +38,7 @@ export interface CraftingDocument {
   purchaseVendor: string;
   purchaseCostWad: number;
   unlockFloor: number;
+  requiredQuestIds: string[];
   notes: string;
   metadata: KeyValueRecord;
   createdAt: string;

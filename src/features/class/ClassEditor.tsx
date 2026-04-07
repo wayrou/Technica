@@ -10,7 +10,6 @@ import { isoNow } from "../../utils/date";
 import { notify } from "../../utils/dialogs";
 import { buildClassBundleForTarget } from "../../utils/exporters";
 import { validateClassDocument } from "../../utils/contentValidation";
-import { openTechnicaPopout } from "../../utils/popout";
 import { parseCommaList, parseKeyValueLines, serializeCommaList, serializeKeyValueLines } from "../../utils/records";
 import type { LoadedChaosCoreDatabaseEntry } from "../../utils/chaosCoreDatabase";
 
@@ -73,6 +72,7 @@ function normalizeClassDocument(value: unknown): ClassDocument {
           .map((entry) => ({
             type: (readString(entry.type, "milestone") as ClassUnlockConditionDocument["type"]),
             requiredClassId: typeof entry.requiredClassId === "string" && entry.requiredClassId.trim() ? entry.requiredClassId : undefined,
+            requiredQuestId: typeof entry.requiredQuestId === "string" && entry.requiredQuestId.trim() ? entry.requiredQuestId : undefined,
             requiredRank: typeof entry.requiredRank === "number" ? entry.requiredRank : undefined,
             description: typeof entry.description === "string" && entry.description.trim() ? entry.description : undefined,
           }))
@@ -216,6 +216,7 @@ export function ClassEditor() {
                       <div className="form-grid">
                         <label className="field"><span>Type</span><select value={condition.type} onChange={(event) => patchClass((current) => ({ ...current, unlockConditions: current.unlockConditions.map((entry, conditionIndex) => conditionIndex === index ? { ...entry, type: event.target.value as ClassUnlockConditionDocument["type"] } : entry) }))}>{classUnlockConditionTypes.map((entry) => <option key={entry} value={entry}>{entry}</option>)}</select></label>
                         <label className="field"><span>Required class id</span><input value={condition.requiredClassId ?? ""} onChange={(event) => patchClass((current) => ({ ...current, unlockConditions: current.unlockConditions.map((entry, conditionIndex) => conditionIndex === index ? { ...entry, requiredClassId: event.target.value || undefined } : entry) }))} /></label>
+                        <label className="field"><span>Required quest id</span><input value={condition.requiredQuestId ?? ""} disabled={condition.type !== "quest_completed"} placeholder={condition.type === "quest_completed" ? "quest_restore_signal_grid" : "Only used for quest_completed"} onChange={(event) => patchClass((current) => ({ ...current, unlockConditions: current.unlockConditions.map((entry, conditionIndex) => conditionIndex === index ? { ...entry, requiredQuestId: event.target.value || undefined } : entry) }))} /></label>
                         <label className="field"><span>Required rank</span><input type="number" value={condition.requiredRank ?? ""} onChange={(event) => patchClass((current) => ({ ...current, unlockConditions: current.unlockConditions.map((entry, conditionIndex) => conditionIndex === index ? { ...entry, requiredRank: event.target.value === "" ? undefined : Number(event.target.value) } : entry) }))} /></label>
                         <label className="field full"><span>Description</span><textarea rows={3} value={condition.description ?? ""} onChange={(event) => patchClass((current) => ({ ...current, unlockConditions: current.unlockConditions.map((entry, conditionIndex) => conditionIndex === index ? { ...entry, description: event.target.value || undefined } : entry) }))} /></label>
                       </div>
@@ -226,14 +227,8 @@ export function ClassEditor() {
             </div>
 
             <div className="tool-suite-column tool-suite-column-narrow">
-              <Panel title="Training Grid Preview" subtitle="Live board preview for the current class draft." actions={<button type="button" className="ghost-button" onClick={() => void openTechnicaPopout("class-preview", "Class Preview")}>Pop out</button>}>
+              <Panel title="Training Grid Board" subtitle="Visual layout of the current training grid so you can place and tune nodes without the extra preview shell.">
                 <ClassTrainingGridBoard nodes={classDocument.trainingGrid} title={classDocument.name || "Untitled Class"} />
-              </Panel>
-              <Panel title="Preview Notes" subtitle="What will flow into Chaos Core when this class is published.">
-                <div className="chip-row">
-                  {classDocument.weaponTypes.map((weaponType) => <span key={weaponType} className="pill">{weaponType}</span>)}
-                </div>
-                <pre className="json-preview">{JSON.stringify(classDocument.trainingGrid, null, 2)}</pre>
               </Panel>
             </div>
 

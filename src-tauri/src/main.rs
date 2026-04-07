@@ -79,7 +79,7 @@ struct PublishResult {
 
 fn normalize_content_type(content_type: &str) -> Result<&str, String> {
     match content_type {
-        "dialogue" | "quest" | "map" | "npc" | "item" | "gear" | "card" | "unit" | "operation" | "class" | "fieldmod" | "schema" => {
+        "dialogue" | "mail" | "quest" | "map" | "field_enemy" | "npc" | "item" | "gear" | "card" | "unit" | "operation" | "class" | "fieldmod" | "schema" | "codex" | "decoration" => {
             Ok(content_type)
         }
         _ => Err(format!("Unsupported Chaos Core content type '{}'.", content_type)),
@@ -147,6 +147,7 @@ fn built_in_source_file(content_type: &str) -> Option<&'static str> {
         "quest" => Some("src/quests/questData.ts"),
         "class" => Some("src/core/classes.ts"),
         "schema" => Some("src/core/schemaSystem.ts"),
+        "codex" => Some("src/core/codexSystem.ts"),
         "unit" | "operation" => Some("src/core/initialState.ts"),
         _ => None,
     }

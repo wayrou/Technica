@@ -14,6 +14,7 @@ import { buildFieldModBundleForTarget } from "../../utils/exporters";
 import { normalizeEffectFlowDocument, summarizeEffectFlow } from "../../utils/effectFlow";
 import { openTechnicaPopout } from "../../utils/popout";
 import { validateFieldModDocument } from "../../utils/contentValidation";
+import { parseCommaList, serializeCommaList } from "../../utils/records";
 
 function normalizeFieldMod(document: Partial<FieldModDocument> | null | undefined): FieldModDocument {
   const fallback = createBlankFieldMod();
@@ -41,6 +42,7 @@ function normalizeFieldMod(document: Partial<FieldModDocument> | null | undefine
     unlockAfterOperationFloor: Number.isFinite(candidate.unlockAfterOperationFloor)
       ? Number(candidate.unlockAfterOperationFloor)
       : fallback.unlockAfterOperationFloor,
+    requiredQuestIds: Array.from(new Set((candidate.requiredQuestIds ?? []).map(String).map((entry) => entry.trim()).filter(Boolean))),
     effectFlow: normalizeEffectFlowDocument(candidate.effectFlow),
   };
 }
@@ -120,6 +122,7 @@ export function FieldModEditor() {
                   <label className="field"><span>Max stacks</span><input type="number" min={1} value={normalizedDocument.maxStacks} onChange={(event) => patchDocument((current) => ({ ...normalizeFieldMod(current), maxStacks: Number(event.target.value || 1) }))} /></label>
                   <label className="field"><span>Cost</span><input type="number" min={0} value={normalizedDocument.cost} onChange={(event) => patchDocument((current) => ({ ...normalizeFieldMod(current), cost: Number(event.target.value || 0) }))} /></label>
                   <label className="field"><span>Unlock after operation floor</span><input type="number" min={0} value={normalizedDocument.unlockAfterOperationFloor} onChange={(event) => patchDocument((current) => ({ ...normalizeFieldMod(current), unlockAfterOperationFloor: Number(event.target.value || 0) }))} /></label>
+                  <label className="field full"><span>Require completed quests</span><input value={serializeCommaList(normalizedDocument.requiredQuestIds)} placeholder="quest_restore_signal_grid, quest_clear_foundry_gate" onChange={(event) => patchDocument((current) => ({ ...normalizeFieldMod(current), requiredQuestIds: parseCommaList(event.target.value) }))} /></label>
                 </div>
 
                 <div className="toolbar split">
@@ -129,6 +132,7 @@ export function FieldModEditor() {
                     <span className="pill">{normalizedDocument.rarity}</span>
                     <span className="pill">{Math.round(normalizedDocument.chance * 100)}% proc</span>
                     <span className="pill">Max {normalizedDocument.maxStacks} stack(s)</span>
+                    <span className="pill">{normalizedDocument.requiredQuestIds.length} quest gate(s)</span>
                     <span className="pill accent">Chaos Core export</span>
                   </div>
                   <div className="toolbar">

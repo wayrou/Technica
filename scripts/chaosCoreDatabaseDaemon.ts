@@ -73,7 +73,8 @@ const BUILT_IN_SOURCE_FILES: Record<ContentType, string[]> = {
   unit: ["src/core/initialState.ts"],
   operation: ["src/core/initialState.ts"],
   class: ["src/core/classes.ts"],
-  schema: ["src/core/schemaSystem.ts"]
+  schema: ["src/core/schemaSystem.ts"],
+  codex: ["src/core/codexSystem.ts"]
 };
 
 function getCacheKey(repoPath: string, contentType: ContentType) {

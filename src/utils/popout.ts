@@ -2,7 +2,7 @@ import type { EditorKind } from "../types/common";
 import { isTauriRuntime } from "./chaosCoreDatabase";
 
 export type TechnicaTabId = EditorKind | "database";
-export type TechnicaPopoutId = TechnicaTabId | "card-preview" | "class-preview" | "card-flow" | "fieldmod-flow";
+export type TechnicaPopoutId = TechnicaTabId | "card-flow" | "fieldmod-flow";
 
 export function getRequestedPopoutTab(): TechnicaPopoutId | null {
   if (typeof window === "undefined") {
@@ -17,22 +17,24 @@ export function getRequestedPopoutTab(): TechnicaPopoutId | null {
   const tab = params.get("tab");
   if (
     tab === "dialogue" ||
+    tab === "mail" ||
     tab === "quest" ||
     tab === "map" ||
+    tab === "field_enemy" ||
     tab === "npc" ||
     tab === "gear" ||
     tab === "item" ||
     tab === "crafting" ||
     tab === "dish" ||
+    tab === "codex" ||
     tab === "fieldmod" ||
+    tab === "decoration" ||
     tab === "schema" ||
     tab === "card" ||
     tab === "unit" ||
     tab === "operation" ||
     tab === "class" ||
     tab === "database" ||
-    tab === "card-preview" ||
-    tab === "class-preview" ||
     tab === "card-flow" ||
     tab === "fieldmod-flow"
   ) {

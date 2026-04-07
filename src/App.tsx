@@ -19,11 +19,17 @@ import { dispatchWorkspaceCommand } from "./utils/workspaceShortcuts";
 const DialogueStudio = lazy(() =>
   import("./features/dialogue/DialogueStudio").then((module) => ({ default: module.DialogueStudio }))
 );
+const MailEditor = lazy(() =>
+  import("./features/mail/MailEditor").then((module) => ({ default: module.MailEditor }))
+);
 const QuestCreator = lazy(() =>
   import("./features/quest/QuestCreator").then((module) => ({ default: module.QuestCreator }))
 );
 const MapEditor = lazy(() =>
   import("./features/map/MapEditor").then((module) => ({ default: module.MapEditor }))
+);
+const FieldEnemyEditor = lazy(() =>
+  import("./features/fieldEnemy/FieldEnemyEditor").then((module) => ({ default: module.FieldEnemyEditor }))
 );
 const NpcEditor = lazy(() =>
   import("./features/npc/NpcEditor").then((module) => ({ default: module.NpcEditor }))
@@ -40,8 +46,14 @@ const CraftingEditor = lazy(() =>
 const DishEditor = lazy(() =>
   import("./features/dish/DishEditor").then((module) => ({ default: module.DishEditor }))
 );
+const CodexEditor = lazy(() =>
+  import("./features/codex/CodexEditor").then((module) => ({ default: module.CodexEditor }))
+);
 const FieldModEditor = lazy(() =>
   import("./features/fieldmod/FieldModEditor").then((module) => ({ default: module.FieldModEditor }))
+);
+const DecorationEditor = lazy(() =>
+  import("./features/decoration/DecorationEditor").then((module) => ({ default: module.DecorationEditor }))
 );
 const SchemaEditor = lazy(() =>
   import("./features/schema/SchemaEditor").then((module) => ({ default: module.SchemaEditor }))
@@ -58,12 +70,6 @@ const OperationEditor = lazy(() =>
 const ClassEditor = lazy(() =>
   import("./features/class/ClassEditor").then((module) => ({ default: module.ClassEditor }))
 );
-const CardPreviewSurface = lazy(() =>
-  import("./features/card/CardPreviewSurface").then((module) => ({ default: module.CardPreviewSurface }))
-);
-const ClassPreviewSurface = lazy(() =>
-  import("./features/class/ClassPreviewSurface").then((module) => ({ default: module.ClassPreviewSurface }))
-);
 const EffectFlowPopoutSurface = lazy(() =>
   import("./features/effects/EffectFlowPopoutSurface").then((module) => ({ default: module.EffectFlowPopoutSurface }))
 );
@@ -73,11 +79,6 @@ const DatabaseExplorer = lazy(() =>
 const MobileSessionPanel = lazy(() =>
   import("./features/mobile/MobileSessionPanel").then((module) => ({ default: module.MobileSessionPanel }))
 );
-const DESKTOP_STARTUP_FALLBACK_TABS = new Set<TechnicaTabId>(["map"]);
-const PREVIEW_POPOUT_BY_TAB: Partial<Record<TechnicaTabId, TechnicaPopoutId>> = {
-  card: "card-preview",
-  class: "class-preview",
-};
 const FLOW_POPOUT_BY_TAB: Partial<Record<TechnicaTabId, TechnicaPopoutId>> = {
   card: "card-flow",
   fieldmod: "fieldmod-flow",
@@ -89,7 +90,6 @@ const workspaceShortcuts = [
   { keys: "Ctrl/Cmd + Enter", label: "Export current bundle" },
   { keys: "Ctrl/Cmd + Shift + P", label: "Pop out current editor" },
   { keys: "Ctrl/Cmd + Shift + D", label: "Open database window" },
-  { keys: "Ctrl/Cmd + .", label: "Open preview window for supported tabs" },
   { keys: "?", label: "Toggle shortcuts overlay" },
 ];
 
@@ -98,9 +98,17 @@ const MOBILE_INBOX_TARGETS: Partial<Record<EditorKind, { storageKey: string; tab
     storageKey: "technica.dialogue.document",
     tabId: "dialogue"
   },
+  mail: {
+    storageKey: "technica.mail.document",
+    tabId: "mail"
+  },
   quest: {
     storageKey: "technica.quest.document",
     tabId: "quest"
+  },
+  field_enemy: {
+    storageKey: "technica.fieldEnemy.document",
+    tabId: "field_enemy"
   },
   npc: {
     storageKey: "technica.npc.document",
@@ -118,9 +126,17 @@ const MOBILE_INBOX_TARGETS: Partial<Record<EditorKind, { storageKey: string; tab
     storageKey: "technica.dish.document",
     tabId: "dish"
   },
+  codex: {
+    storageKey: "technica.codex.document",
+    tabId: "codex"
+  },
   fieldmod: {
     storageKey: "technica.fieldmod.document",
     tabId: "fieldmod"
+  },
+  decoration: {
+    storageKey: "technica.decoration.document",
+    tabId: "decoration"
   },
   schema: {
     storageKey: "technica.schema.document",
@@ -158,12 +174,20 @@ const tabs: Array<{ id: TechnicaTabId; label: string }> = [
     label: "Dialogue Editor"
   },
   {
+    id: "mail",
+    label: "Mail Editor"
+  },
+  {
     id: "quest",
     label: "Quest Editor"
   },
   {
     id: "map",
     label: "Map Editor"
+  },
+  {
+    id: "field_enemy",
+    label: "Field Enemy Editor"
   },
   {
     id: "npc",
@@ -179,15 +203,23 @@ const tabs: Array<{ id: TechnicaTabId; label: string }> = [
   },
   {
     id: "crafting",
-    label: "Crafting Editor"
+    label: "Crafting Recipe Editor"
   },
   {
     id: "dish",
     label: "Dish Editor"
   },
   {
+    id: "codex",
+    label: "Codex Entry Editor"
+  },
+  {
     id: "fieldmod",
     label: "Field Mods"
+  },
+  {
+    id: "decoration",
+    label: "Decorations Editor"
   },
   {
     id: "schema",
@@ -224,26 +256,16 @@ export default function App() {
   const [isShortcutOverlayOpen, setIsShortcutOverlayOpen] = useState(false);
   const mobileSessionPopoverRef = useRef<HTMLDivElement | null>(null);
   const requestedEditorPopoutTab: TechnicaTabId | null =
-    requestedPopoutTab === "card-preview" ||
-    requestedPopoutTab === "class-preview" ||
     requestedPopoutTab === "card-flow" ||
     requestedPopoutTab === "fieldmod-flow"
       ? null
       : requestedPopoutTab;
-  const activeTab: TechnicaTabId = requestedEditorPopoutTab
-    ? requestedEditorPopoutTab
-    : runtime.isDesktop && DESKTOP_STARTUP_FALLBACK_TABS.has(storedActiveTab)
-      ? "dialogue"
-      : storedActiveTab;
+  const activeTab: TechnicaTabId = requestedEditorPopoutTab ?? storedActiveTab;
   const activeTabLabel =
-    requestedPopoutTab === "card-preview"
-      ? "Card Preview"
-      : requestedPopoutTab === "class-preview"
-        ? "Class Preview"
-        : requestedPopoutTab === "card-flow"
-          ? "Card Effect Flow"
-          : requestedPopoutTab === "fieldmod-flow"
-            ? "Field Mod Effect Flow"
+    requestedPopoutTab === "card-flow"
+      ? "Card Effect Flow"
+      : requestedPopoutTab === "fieldmod-flow"
+        ? "Field Mod Effect Flow"
         : tabs.find((tab) => tab.id === activeTab)?.label ?? "Technica";
   const activeSurfaceKey = requestedPopoutTab ?? activeTab;
   const mobileTabs = tabs;
@@ -308,15 +330,6 @@ export default function App() {
       if (event.shiftKey && key === "d") {
         event.preventDefault();
         void openTechnicaPopout("database", "Database");
-        return;
-      }
-
-      if (key === ".") {
-        const previewPopout = PREVIEW_POPOUT_BY_TAB[activeTab];
-        if (previewPopout) {
-          event.preventDefault();
-          void openTechnicaPopout(previewPopout, `${activeTabLabel} Preview`);
-        }
         return;
       }
 
@@ -404,12 +417,6 @@ export default function App() {
   }
 
   function renderActiveEditor() {
-    if (requestedPopoutTab === "card-preview") {
-      return <CardPreviewSurface />;
-    }
-    if (requestedPopoutTab === "class-preview") {
-      return <ClassPreviewSurface />;
-    }
     if (requestedPopoutTab === "card-flow") {
       return <EffectFlowPopoutSurface mode="card" />;
     }
@@ -419,11 +426,17 @@ export default function App() {
     if (activeTab === "dialogue") {
       return <DialogueStudio />;
     }
+    if (activeTab === "mail") {
+      return <MailEditor />;
+    }
     if (activeTab === "quest") {
       return <QuestCreator />;
     }
     if (activeTab === "map") {
       return <MapEditor />;
+    }
+    if (activeTab === "field_enemy") {
+      return <FieldEnemyEditor />;
     }
     if (activeTab === "npc") {
       return <NpcEditor />;
@@ -440,8 +453,14 @@ export default function App() {
     if (activeTab === "dish") {
       return <DishEditor />;
     }
+    if (activeTab === "codex") {
+      return <CodexEditor />;
+    }
     if (activeTab === "fieldmod") {
       return <FieldModEditor />;
+    }
+    if (activeTab === "decoration") {
+      return <DecorationEditor />;
     }
     if (activeTab === "schema") {
       return <SchemaEditor />;
@@ -592,15 +611,6 @@ export default function App() {
             <button type="button" className="ghost-button" onClick={() => void openTechnicaPopout("database", "Database")}>
               Open database window
             </button>
-            {PREVIEW_POPOUT_BY_TAB[activeTab] ? (
-              <button
-                type="button"
-                className="ghost-button"
-                onClick={() => void openTechnicaPopout(PREVIEW_POPOUT_BY_TAB[activeTab]!, `${activeTabLabel} Preview`)}
-              >
-                Open preview window
-              </button>
-            ) : null}
             {FLOW_POPOUT_BY_TAB[activeTab] ? (
               <button
                 type="button"

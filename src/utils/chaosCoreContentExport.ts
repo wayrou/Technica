@@ -9,11 +9,14 @@ import {
 } from "../types/common";
 import type { CardDocument } from "../types/card";
 import type { ClassDocument, ClassUnlockConditionDocument } from "../types/class";
+import type { CodexDocument } from "../types/codex";
 import type { CraftingDocument } from "../types/crafting";
 import type { DishDocument } from "../types/dish";
+import type { FieldEnemyDocument } from "../types/fieldEnemy";
 import type { FieldModDocument } from "../types/fieldmod";
 import type { GearDocument } from "../types/gear";
 import type { ItemDocument } from "../types/item";
+import type { MailDocument } from "../types/mail";
 import type { NpcDocument } from "../types/npc";
 import type { OperationDocument } from "../types/operation";
 import type { SchemaDocument } from "../types/schema";
@@ -108,6 +111,13 @@ function dedupeDependencies(dependencies: ExportDependency[]) {
     seen.add(key);
     return true;
   });
+}
+
+function splitMailBodyPages(content: string) {
+  return content
+    .split(/\r?\n\s*\r?\n+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 }
 
 function createManifest(
@@ -346,6 +356,7 @@ export function buildChaosCoreCraftingBundle(document: CraftingDocument): Export
       purchaseVendor: document.purchaseVendor || undefined,
       purchaseCostWad: document.acquisitionMethod === "purchased" ? document.purchaseCostWad : undefined,
       unlockFloor: document.acquisitionMethod === "unlock_floor" ? document.unlockFloor : undefined,
+      requiredQuestIds: document.requiredQuestIds.map((questId) => runtimeId(questId)),
       notes: document.notes || undefined
     },
     metadata: coerceRecord(document.metadata)
@@ -395,6 +406,7 @@ export function buildChaosCoreDishBundle(document: DishDocument): ExportBundle {
     name: document.name,
     cost: document.cost,
     unlockAfterOperationFloor: document.unlockAfterOperationFloor,
+    requiredQuestIds: document.requiredQuestIds.map((questId) => runtimeId(questId)),
     effect: document.effect,
     description: document.description
   });
@@ -452,7 +464,8 @@ export function buildChaosCoreFieldModBundle(document: FieldModDocument): Export
     scope: document.scope,
     cost: document.cost,
     rarity: document.rarity,
-    unlockAfterOperationFloor: document.unlockAfterOperationFloor
+    unlockAfterOperationFloor: document.unlockAfterOperationFloor,
+    requiredQuestIds: document.requiredQuestIds.map((questId) => runtimeId(questId))
   });
 
   const manifest = createManifest(
@@ -504,6 +517,7 @@ export function buildChaosCoreSchemaBundle(document: SchemaDocument): ExportBund
     unlockSource: document.unlockSource,
     unlockCost: document.unlockSource === "schema" ? toPartialResourceWallet(document.unlockCost) : undefined,
     unlockWadCost: document.unlockSource === "schema" ? document.unlockWadCost : undefined,
+    requiredQuestIds: document.requiredQuestIds.map((questId) => runtimeId(questId)),
     preferredRoomTags: document.preferredRoomTags,
     placeholder: document.placeholder || undefined,
     kind: document.kind,
@@ -567,6 +581,117 @@ Importer notes:
 - Core entries include category, operational requirements, outputs, upkeep, income, support radius, unlock data, tags, and tag output modifiers.
 - Fortifications include build cost, unlock data, preferred room tags, and placeholder state.
 - \`${sourceFile}\` preserves the original Technica schema document.
+`
+      }
+    ]
+  };
+}
+
+export function buildChaosCoreCodexBundle(document: CodexDocument): ExportBundle {
+  const contentId = runtimeId(document.id || document.title, "codex_entry");
+  const entryFile = `${contentId}.codex.json`;
+  const sourceFile = `${contentId}.source.json`;
+  const runtimeDocument = pruneEmpty({
+    id: contentId,
+    title: document.title,
+    entryType: document.entryType,
+    content: document.content,
+    unlockAfterFloor: document.unlockAfterFloor,
+    requiredDialogueIds: document.requiredDialogueIds.map((dialogueId) => runtimeId(dialogueId)),
+    requiredQuestIds: document.requiredQuestIds.map((questId) => runtimeId(questId)),
+    requiredGearIds: document.requiredGearIds.map((gearId) => runtimeId(gearId)),
+    requiredItemIds: document.requiredItemIds.map((itemId) => runtimeId(itemId)),
+    requiredSchemaIds: document.requiredSchemaIds.map((schemaId) => runtimeId(schemaId)),
+    requiredFieldModIds: document.requiredFieldModIds.map((fieldModId) => runtimeId(fieldModId)),
+    createdAt: document.createdAt,
+    updatedAt: document.updatedAt
+  });
+
+  const manifest = createManifest(
+    "codex",
+    "codex-entry.v1",
+    contentId,
+    document.title,
+    "Chaos Core runtime codex entry export.",
+    entryFile,
+    ["manifest.json", entryFile, sourceFile, "README.md"],
+    []
+  );
+
+  return {
+    bundleName: `${slugify(document.title, contentId)}-chaos-core-codex-export`,
+    manifest,
+    files: [
+      { name: "manifest.json", content: prettyJson(manifest) },
+      { name: entryFile, content: prettyJson(runtimeDocument) },
+      { name: sourceFile, content: prettyJson(document) },
+      {
+        name: "README.md",
+        content: `# Chaos Core Codex Export
+
+Runtime entry: \`${entryFile}\`
+Content id: \`${contentId}\`
+
+Importer notes:
+- Imported codex entries register beside the built-in Chaos Core archive database.
+- Unlock requirements are preserved exactly so floor, dialogue, gear, item, schema, and field-mod gates can all be evaluated in-game.
+- \`${sourceFile}\` preserves the original Technica codex authoring document.
+`
+      }
+    ]
+  };
+}
+
+export function buildChaosCoreMailBundle(document: MailDocument): ExportBundle {
+  const contentId = runtimeId(document.id || document.subject, "mail");
+  const entryFile = `${contentId}.mail.json`;
+  const sourceFile = `${contentId}.source.json`;
+  const runtimeDocument = pruneEmpty({
+    id: contentId,
+    category: document.category,
+    from: document.sender,
+    subject: document.subject,
+    bodyPages: splitMailBodyPages(document.content),
+    unlockAfterFloor: document.unlockAfterFloor,
+    requiredDialogueIds: document.requiredDialogueIds.map((dialogueId) => runtimeId(dialogueId)),
+    requiredGearIds: document.requiredGearIds.map((gearId) => runtimeId(gearId)),
+    requiredItemIds: document.requiredItemIds.map((itemId) => runtimeId(itemId)),
+    requiredSchemaIds: document.requiredSchemaIds.map((schemaId) => runtimeId(schemaId)),
+    requiredFieldModIds: document.requiredFieldModIds.map((fieldModId) => runtimeId(fieldModId)),
+    createdAt: document.createdAt,
+    updatedAt: document.updatedAt
+  });
+
+  const manifest = createManifest(
+    "mail",
+    "mail-entry.v1",
+    contentId,
+    document.subject,
+    "Chaos Core runtime mail export.",
+    entryFile,
+    ["manifest.json", entryFile, sourceFile, "README.md"],
+    []
+  );
+
+  return {
+    bundleName: `${slugify(document.subject, contentId)}-chaos-core-mail-export`,
+    manifest,
+    files: [
+      { name: "manifest.json", content: prettyJson(manifest) },
+      { name: entryFile, content: prettyJson(runtimeDocument) },
+      { name: sourceFile, content: prettyJson(document) },
+      {
+        name: "README.md",
+        content: `# Chaos Core Mail Export
+
+Runtime entry: \`${entryFile}\`
+Content id: \`${contentId}\`
+
+Importer notes:
+- Imported mail entries register into Chaos Core's mailbox delivery system.
+- Message pages are split on blank lines from the Technica editor content.
+- Unlock requirements are preserved so floor, dialogue, gear, item, schema, and field-mod gates can all drive delivery.
+- \`${sourceFile}\` preserves the original Technica mail authoring document.
 `
       }
     ]
@@ -671,6 +796,93 @@ Importer notes:
   };
 }
 
+function buildFieldEnemyDependencies(document: FieldEnemyDocument): ExportDependency[] {
+  return document.spawn.mapIds
+    .filter((mapId) => mapId.trim())
+    .map((mapId, index) => ({
+      contentType: "map" as const,
+      id: runtimeId(mapId),
+      relation: `spawn-map-${index + 1}`
+    }));
+}
+
+export function buildChaosCoreFieldEnemyBundle(document: FieldEnemyDocument): ExportBundle {
+  const contentId = runtimeId(document.id || document.name, "field_enemy");
+  const entryFile = `${contentId}.field_enemy.json`;
+  const sourceFile = `${contentId}.source.json`;
+  const spriteAsset = document.spriteAsset ? createImageAssetExport(contentId, "sprite", document.spriteAsset) : null;
+  const preservedSpritePath = !spriteAsset && document.metadata.spritePath?.trim() ? document.metadata.spritePath.trim() : undefined;
+  const { spritePath: _ignoredSpritePath, ...metadata } = document.metadata;
+
+  const runtimeDocument = pruneEmpty({
+    id: contentId,
+    name: document.name,
+    description: document.description,
+    kind: document.kind,
+    spriteKey: document.spriteKey || undefined,
+    spritePath: spriteAsset?.runtimePath ?? preservedSpritePath,
+    stats: {
+      maxHp: document.stats.maxHp,
+      speed: document.stats.speed,
+      aggroRange: document.stats.aggroRange,
+      width: document.stats.width,
+      height: document.stats.height
+    },
+    spawn: {
+      mapIds: document.spawn.mapIds.map((mapId) => runtimeId(mapId)),
+      floorOrdinals: document.spawn.floorOrdinals,
+      count: document.spawn.spawnCount
+    },
+    drops: {
+      wad: document.drops.wad,
+      resources: document.drops.resources,
+      items: document.drops.items.map((drop) =>
+        pruneEmpty({
+          id: runtimeId(drop.id),
+          quantity: drop.quantity,
+          chance: drop.chance
+        })
+      )
+    },
+    metadata: coerceRecord(metadata)
+  });
+
+  const manifest = createManifest(
+    "field_enemy",
+    "field-enemy.v1",
+    contentId,
+    document.name,
+    "Chaos Core runtime field enemy export.",
+    entryFile,
+    ["manifest.json", entryFile, sourceFile, ...(spriteAsset ? [spriteAsset.runtimePath] : []), "README.md"],
+    buildFieldEnemyDependencies(document)
+  );
+
+  const readme = `# Chaos Core Field Enemy Export
+
+Runtime entry: \`${entryFile}\`
+Content id: \`${contentId}\`
+
+Importer notes:
+- Imported field enemies can target explicit field maps or any imported field map visited on the listed floor numbers.
+- Spawn count is evaluated per map load.
+- Sprite assets resolve through \`spritePath\` when present.
+- \`${sourceFile}\` preserves the original Technica authoring document.
+`;
+
+  return {
+    bundleName: `${slugify(document.name, contentId)}-chaos-core-field-enemy-export`,
+    manifest,
+    files: [
+      { name: "manifest.json", content: prettyJson(manifest) },
+      { name: entryFile, content: prettyJson(runtimeDocument) },
+      { name: sourceFile, content: prettyJson(document) },
+      ...(spriteAsset ? [spriteAsset.file] : []),
+      { name: "README.md", content: readme }
+    ]
+  };
+}
+
 function buildCardDependencies(document: CardDocument): ExportDependency[] {
   const dependencies: ExportDependency[] = [];
 
@@ -710,6 +922,8 @@ export function buildChaosCoreCardBundle(
   const entryFile = `${contentId}.card.json`;
   const sourceFile = `${contentId}.source.json`;
   const artAsset = document.artAsset ? createImageAssetExport(contentId, "art", document.artAsset) : null;
+  const preservedArtPath = !artAsset && document.metadata.artPath?.trim() ? document.metadata.artPath.trim() : undefined;
+  const { artPath: _ignoredArtPath, ...cardMetadata } = document.metadata;
   const legacyEffects = createLegacyCardEffectsFromFlow(document.effectFlow);
   const runtimeDocument = pruneEmpty({
     id: contentId,
@@ -726,8 +940,8 @@ export function buildChaosCoreCardBundle(
     effects: legacyEffects,
     sourceClassId: document.sourceClassId ? runtimeId(document.sourceClassId) : undefined,
     sourceEquipmentId: document.sourceEquipmentId ? runtimeId(document.sourceEquipmentId) : undefined,
-    artPath: artAsset?.runtimePath,
-    metadata: coerceRecord(document.metadata)
+    artPath: artAsset?.runtimePath ?? preservedArtPath,
+    metadata: coerceRecord(cardMetadata)
   });
 
   const manifest = createManifest(
@@ -809,6 +1023,7 @@ export function buildChaosCoreUnitBundle(
     currentClassId: runtimeId(document.currentClassId),
     spawnRole: document.spawnRole,
     enemySpawnFloorOrdinals: document.spawnRole === "enemy" ? document.enemySpawnFloorOrdinals : [],
+    requiredQuestIds: document.requiredQuestIds.map((questId) => runtimeId(questId)),
     stats: document.stats,
     traits: document.traits,
     pwr: document.pwr,
@@ -954,17 +1169,28 @@ Importer notes:
 }
 
 function buildClassDependencies(document: ClassDocument): ExportDependency[] {
-  return document.unlockConditions.flatMap((condition: ClassUnlockConditionDocument) => {
-    if (condition.type !== "class_rank" || !condition.requiredClassId) {
-      return [];
+  return document.unlockConditions.flatMap<ExportDependency>((condition: ClassUnlockConditionDocument) => {
+    if (condition.type === "class_rank" && condition.requiredClassId) {
+      return [
+        {
+          contentType: "class" as const,
+          id: runtimeId(condition.requiredClassId),
+          relation: "unlock-condition"
+        }
+      ];
     }
-    return [
-      {
-        contentType: "class" as const,
-        id: runtimeId(condition.requiredClassId),
-        relation: "unlock-condition"
-      }
-    ];
+
+    if (condition.type === "quest_completed" && condition.requiredQuestId) {
+      return [
+        {
+          contentType: "quest" as const,
+          id: runtimeId(condition.requiredQuestId),
+          relation: "unlock-condition"
+        }
+      ];
+    }
+
+    return [];
   });
 }
 
@@ -973,7 +1199,9 @@ export function buildChaosCoreClassBundle(
   references = createWorkspaceReferenceIndex({ class: document })
 ): ExportBundle {
   buildClassDependencies(document).forEach((dependency) => {
-    assertKnownReference(dependency.id, references.classIds, "Class export", "class id");
+    if (dependency.contentType === "class") {
+      assertKnownReference(dependency.id, references.classIds, "Class export", "class id");
+    }
   });
 
   const contentId = runtimeId(document.id || document.name, "class");
@@ -990,6 +1218,7 @@ export function buildChaosCoreClassBundle(
       pruneEmpty({
         type: condition.type,
         requiredClassId: condition.requiredClassId ? runtimeId(condition.requiredClassId) : undefined,
+        requiredQuestId: condition.requiredQuestId ? runtimeId(condition.requiredQuestId) : undefined,
         requiredRank: condition.requiredRank,
         description: condition.description
       })

@@ -18,6 +18,7 @@ export function createSampleQuest(): QuestDocument {
     status: "available",
     tags: ["onboarding", "village", "courier"],
     prerequisites: ["dialogue:village_guide_intro"],
+    requiredQuestIds: [],
     followUpQuestIds: [],
     rewards: [
       {

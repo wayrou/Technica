@@ -77,6 +77,13 @@ export function validateQuestDocument(document: QuestDocument) {
     });
   });
 
+  findDuplicates(document.requiredQuestIds).forEach((duplicate) => {
+    issues.push({
+      severity: "warning",
+      message: `Required quest id '${duplicate}' is duplicated.`
+    });
+  });
+
   const stateIds = new Set(document.states.map((state) => state.id));
   const objectiveIds = new Set(document.objectives.map((objective) => objective.id));
   const stepIds = new Set(document.steps.map((step) => step.id));

@@ -10,11 +10,22 @@ import {
 import { isoNow } from "../../utils/date";
 import { buildCraftingBundleForTarget } from "../../utils/exporters";
 import { validateCraftingDocument } from "../../utils/contentValidation";
-import { parseKeyValueLines, serializeKeyValueLines } from "../../utils/records";
+import { parseCommaList, parseKeyValueLines, serializeCommaList, serializeKeyValueLines } from "../../utils/records";
+
+function normalizeCraftingRecipe(document: Partial<CraftingDocument> | null | undefined): CraftingDocument {
+  const fallback = createBlankCraftingRecipe();
+  const candidate = document ?? {};
+
+  return {
+    ...fallback,
+    ...candidate,
+    requiredQuestIds: Array.from(new Set((candidate.requiredQuestIds ?? []).map(String).map((entry) => entry.trim()).filter(Boolean)))
+  };
+}
 
 function touchCraftingRecipe(document: CraftingDocument): CraftingDocument {
   return {
-    ...document,
+    ...normalizeCraftingRecipe(document),
     updatedAt: isoNow()
   };
 }
@@ -32,9 +43,9 @@ export function CraftingEditor() {
       initialDocument={createSampleCraftingRecipe()}
       createBlank={createBlankCraftingRecipe}
       createSample={createSampleCraftingRecipe}
-      validate={validateCraftingDocument}
-      buildBundleForTarget={buildCraftingBundleForTarget}
-      getTitle={(document) => document.name}
+      validate={(document) => validateCraftingDocument(normalizeCraftingRecipe(document))}
+      buildBundleForTarget={(document, target) => buildCraftingBundleForTarget(normalizeCraftingRecipe(document), target)}
+      getTitle={(document) => normalizeCraftingRecipe(document).name}
       isImportPayload={isCraftingDocument}
       touchDocument={touchCraftingRecipe}
       replacePrompt="Replace the current crafting recipe draft with the imported file?"
@@ -51,9 +62,12 @@ export function CraftingEditor() {
         canSendToDesktop,
         isSendingToDesktop,
         sendToDesktop
-      }) => (
+      }) => {
+        const normalizedDocument = normalizeCraftingRecipe(document);
+
+        return (
         <Panel
-          title="Crafting Editor"
+          title="Crafting Recipe Editor"
           subtitle="Author armor, consumable, and upgrade recipes, define how players learn them, and control which items they grant on craft."
           actions={
             <div className="toolbar">
@@ -69,19 +83,19 @@ export function CraftingEditor() {
           <div className="form-grid">
             <label className="field">
               <span>Recipe id</span>
-              <input value={document.id} onChange={(event) => patchDocument((current) => ({ ...current, id: event.target.value }))} />
+              <input value={normalizedDocument.id} onChange={(event) => patchDocument((current) => ({ ...normalizeCraftingRecipe(current), id: event.target.value }))} />
             </label>
             <label className="field">
               <span>Name</span>
-              <input value={document.name} onChange={(event) => patchDocument((current) => ({ ...current, name: event.target.value }))} />
+              <input value={normalizedDocument.name} onChange={(event) => patchDocument((current) => ({ ...normalizeCraftingRecipe(current), name: event.target.value }))} />
             </label>
             <label className="field">
               <span>Category</span>
               <select
-                value={document.category}
+                value={normalizedDocument.category}
                 onChange={(event) =>
                   patchDocument((current) => ({
-                    ...current,
+                    ...normalizeCraftingRecipe(current),
                     category: event.target.value as CraftingDocument["category"]
                   }))
                 }
@@ -93,23 +107,23 @@ export function CraftingEditor() {
                 ))}
               </select>
             </label>
-            <label className="field">
-              <span>Requires base item</span>
-              <input
-                value={document.requiresItemId}
-                placeholder={document.category === "upgrade" ? "armor_steelplate_cuirass" : "Optional"}
-                onChange={(event) => patchDocument((current) => ({ ...current, requiresItemId: event.target.value }))}
-              />
-            </label>
-            <label className="field full">
-              <span>Description</span>
-              <textarea
-                rows={4}
-                value={document.description}
-                onChange={(event) => patchDocument((current) => ({ ...current, description: event.target.value }))}
-              />
-            </label>
-          </div>
+              <label className="field">
+                <span>Requires base item</span>
+                <input
+                value={normalizedDocument.requiresItemId}
+                placeholder={normalizedDocument.category === "upgrade" ? "armor_steelplate_cuirass" : "Optional"}
+                onChange={(event) => patchDocument((current) => ({ ...normalizeCraftingRecipe(current), requiresItemId: event.target.value }))}
+                />
+              </label>
+              <label className="field full">
+                <span>Description</span>
+                <textarea
+                  rows={4}
+                value={normalizedDocument.description}
+                onChange={(event) => patchDocument((current) => ({ ...normalizeCraftingRecipe(current), description: event.target.value }))}
+                />
+              </label>
+            </div>
 
           <div className="subsection">
             <h4>Resource Cost</h4>
@@ -119,10 +133,10 @@ export function CraftingEditor() {
                 <input
                   type="number"
                   min={0}
-                  value={document.cost.metalScrap}
+                  value={normalizedDocument.cost.metalScrap}
                   onChange={(event) =>
                     patchDocument((current) => ({
-                      ...current,
+                      ...normalizeCraftingRecipe(current),
                       cost: {
                         ...current.cost,
                         metalScrap: Number(event.target.value || 0)
@@ -136,10 +150,10 @@ export function CraftingEditor() {
                 <input
                   type="number"
                   min={0}
-                  value={document.cost.wood}
+                  value={normalizedDocument.cost.wood}
                   onChange={(event) =>
                     patchDocument((current) => ({
-                      ...current,
+                      ...normalizeCraftingRecipe(current),
                       cost: {
                         ...current.cost,
                         wood: Number(event.target.value || 0)
@@ -153,10 +167,10 @@ export function CraftingEditor() {
                 <input
                   type="number"
                   min={0}
-                  value={document.cost.chaosShards}
+                  value={normalizedDocument.cost.chaosShards}
                   onChange={(event) =>
                     patchDocument((current) => ({
-                      ...current,
+                      ...normalizeCraftingRecipe(current),
                       cost: {
                         ...current.cost,
                         chaosShards: Number(event.target.value || 0)
@@ -170,10 +184,10 @@ export function CraftingEditor() {
                 <input
                   type="number"
                   min={0}
-                  value={document.cost.steamComponents}
+                  value={normalizedDocument.cost.steamComponents}
                   onChange={(event) =>
                     patchDocument((current) => ({
-                      ...current,
+                      ...normalizeCraftingRecipe(current),
                       cost: {
                         ...current.cost,
                         steamComponents: Number(event.target.value || 0)
@@ -188,7 +202,7 @@ export function CraftingEditor() {
           <div className="subsection">
             <h4>Crafted Grants</h4>
             <div className="stack-list">
-              {document.grants.map((grant, index) => (
+              {normalizedDocument.grants.map((grant, index) => (
                 <div key={`${grant.itemId}-${index}`} className="nested-card">
                   <div className="form-grid">
                     <label className="field">
@@ -197,7 +211,7 @@ export function CraftingEditor() {
                         value={grant.itemId}
                         onChange={(event) =>
                           patchDocument((current) => ({
-                            ...current,
+                            ...normalizeCraftingRecipe(current),
                             grants: current.grants.map((entry, grantIndex) =>
                               grantIndex === index ? { ...entry, itemId: event.target.value } : entry
                             )
@@ -213,7 +227,7 @@ export function CraftingEditor() {
                         value={grant.quantity}
                         onChange={(event) =>
                           patchDocument((current) => ({
-                            ...current,
+                            ...normalizeCraftingRecipe(current),
                             grants: current.grants.map((entry, grantIndex) =>
                               grantIndex === index ? { ...entry, quantity: Number(event.target.value || 1) } : entry
                             )
@@ -228,13 +242,13 @@ export function CraftingEditor() {
                       className="ghost-button danger"
                       onClick={() =>
                         patchDocument((current) => ({
-                          ...current,
+                          ...normalizeCraftingRecipe(current),
                           grants: current.grants.length === 1
                             ? current.grants
                             : current.grants.filter((_, grantIndex) => grantIndex !== index)
                         }))
                       }
-                      disabled={document.grants.length === 1}
+                      disabled={normalizedDocument.grants.length === 1}
                     >
                       Remove grant
                     </button>
@@ -246,7 +260,7 @@ export function CraftingEditor() {
                 className="ghost-button"
                 onClick={() =>
                   patchDocument((current) => ({
-                    ...current,
+                    ...normalizeCraftingRecipe(current),
                     grants: [...current.grants, { itemId: "", quantity: 1 }]
                   }))
                 }
@@ -262,10 +276,10 @@ export function CraftingEditor() {
               <label className="field">
                 <span>Acquisition</span>
                 <select
-                  value={document.acquisitionMethod}
+                  value={normalizedDocument.acquisitionMethod}
                   onChange={(event) =>
                     patchDocument((current) => ({
-                      ...current,
+                      ...normalizeCraftingRecipe(current),
                       acquisitionMethod: event.target.value as RecipeAcquisitionMethod
                     }))
                   }
@@ -280,10 +294,10 @@ export function CraftingEditor() {
               <label className="field">
                 <span>Purchase vendor</span>
                 <input
-                  value={document.purchaseVendor}
-                  disabled={document.acquisitionMethod !== "purchased"}
+                  value={normalizedDocument.purchaseVendor}
+                  disabled={normalizedDocument.acquisitionMethod !== "purchased"}
                   placeholder="haven_shop"
-                  onChange={(event) => patchDocument((current) => ({ ...current, purchaseVendor: event.target.value }))}
+                  onChange={(event) => patchDocument((current) => ({ ...normalizeCraftingRecipe(current), purchaseVendor: event.target.value }))}
                 />
               </label>
               <label className="field">
@@ -291,10 +305,10 @@ export function CraftingEditor() {
                 <input
                   type="number"
                   min={0}
-                  disabled={document.acquisitionMethod !== "purchased"}
-                  value={document.purchaseCostWad}
+                  disabled={normalizedDocument.acquisitionMethod !== "purchased"}
+                  value={normalizedDocument.purchaseCostWad}
                   onChange={(event) =>
-                    patchDocument((current) => ({ ...current, purchaseCostWad: Number(event.target.value || 0) }))
+                    patchDocument((current) => ({ ...normalizeCraftingRecipe(current), purchaseCostWad: Number(event.target.value || 0) }))
                   }
                 />
               </label>
@@ -303,10 +317,20 @@ export function CraftingEditor() {
                 <input
                   type="number"
                   min={0}
-                  disabled={document.acquisitionMethod !== "unlock_floor"}
-                  value={document.unlockFloor}
+                  disabled={normalizedDocument.acquisitionMethod !== "unlock_floor"}
+                  value={normalizedDocument.unlockFloor}
                   onChange={(event) =>
-                    patchDocument((current) => ({ ...current, unlockFloor: Number(event.target.value || 0) }))
+                    patchDocument((current) => ({ ...normalizeCraftingRecipe(current), unlockFloor: Number(event.target.value || 0) }))
+                  }
+                />
+              </label>
+              <label className="field full">
+                <span>Require completed quests</span>
+                <input
+                  value={serializeCommaList(normalizedDocument.requiredQuestIds)}
+                  placeholder="quest_restore_signal_grid, quest_clear_foundry_gate"
+                  onChange={(event) =>
+                    patchDocument((current) => ({ ...normalizeCraftingRecipe(current), requiredQuestIds: parseCommaList(event.target.value) }))
                   }
                 />
               </label>
@@ -314,18 +338,18 @@ export function CraftingEditor() {
                 <span>Acquisition notes</span>
                 <textarea
                   rows={3}
-                  value={document.notes}
-                  onChange={(event) => patchDocument((current) => ({ ...current, notes: event.target.value }))}
+                  value={normalizedDocument.notes}
+                  onChange={(event) => patchDocument((current) => ({ ...normalizeCraftingRecipe(current), notes: event.target.value }))}
                 />
               </label>
               <label className="field full">
                 <span>Metadata</span>
                 <textarea
                   rows={4}
-                  value={serializeKeyValueLines(document.metadata)}
+                  value={serializeKeyValueLines(normalizedDocument.metadata)}
                   onChange={(event) =>
                     patchDocument((current) => ({
-                      ...current,
+                      ...normalizeCraftingRecipe(current),
                       metadata: parseKeyValueLines(event.target.value)
                     }))
                   }
@@ -336,9 +360,10 @@ export function CraftingEditor() {
 
           <div className="toolbar split">
             <div className="chip-row">
-              <span className="pill">{document.category}</span>
-              <span className="pill">{document.grants.length} grant(s)</span>
-              <span className="pill">{document.acquisitionMethod}</span>
+              <span className="pill">{normalizedDocument.category}</span>
+              <span className="pill">{normalizedDocument.grants.length} grant(s)</span>
+              <span className="pill">{normalizedDocument.acquisitionMethod}</span>
+              <span className="pill">{normalizedDocument.requiredQuestIds.length} quest gate(s)</span>
               <span className="pill accent">Chaos Core export</span>
             </div>
             <div className="toolbar">
@@ -367,7 +392,8 @@ export function CraftingEditor() {
             </div>
           </div>
         </Panel>
-      )}
+      );
+      }}
     />
   );
 }

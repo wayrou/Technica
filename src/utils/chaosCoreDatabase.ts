@@ -32,6 +32,8 @@ type PublishResult = {
   runtimeFile: string;
 };
 
+export type PublishableChaosCoreContentType = DatabaseContentType | "decoration";
+
 export interface ChaosCoreDatabaseUpdateEvent {
   contentType: DatabaseContentType;
   updatedAt: string;
@@ -162,6 +164,16 @@ export async function loadChaosCoreDatabaseEntryFromSession(
 export async function publishChaosCoreBundle(
   repoPath: string,
   contentType: DatabaseContentType,
+  bundle: ExportBundle,
+  targetEntryKey?: string,
+  targetSourceFile?: string
+): Promise<PublishResult> {
+  return publishChaosCoreBundleToContentType(repoPath, contentType, bundle, targetEntryKey, targetSourceFile);
+}
+
+export async function publishChaosCoreBundleToContentType(
+  repoPath: string,
+  contentType: PublishableChaosCoreContentType,
   bundle: ExportBundle,
   targetEntryKey?: string,
   targetSourceFile?: string

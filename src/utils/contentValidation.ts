@@ -1,15 +1,20 @@
 import type { CardDocument } from "../types/card";
 import type { ClassDocument } from "../types/class";
+import type { CodexDocument } from "../types/codex";
 import type { CraftingDocument } from "../types/crafting";
+import type { DecorationDocument } from "../types/decoration";
 import type { DishDocument } from "../types/dish";
 import type { ImageAsset, ValidationIssue } from "../types/common";
+import type { FieldEnemyDocument } from "../types/fieldEnemy";
 import type { FieldModDocument } from "../types/fieldmod";
 import type { GearDocument } from "../types/gear";
 import type { ItemDocument } from "../types/item";
+import type { MailDocument } from "../types/mail";
 import type { NpcDocument } from "../types/npc";
 import type { OperationDocument } from "../types/operation";
 import type { SchemaDocument } from "../types/schema";
 import type { UnitDocument } from "../types/unit";
+import { mailCategories } from "../types/mail";
 import { createLegacyCardEffectsFromFlow } from "./cardComposer";
 import { validateEffectFlowDocument } from "./effectFlow";
 
@@ -165,6 +170,86 @@ export function validateItemDocument(document: ItemDocument): ValidationIssue[] 
   return issues;
 }
 
+export function validateFieldEnemyDocument(document: FieldEnemyDocument): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  requireText(document.id, "id", "Field enemy id", issues);
+  requireText(document.name, "name", "Field enemy name", issues);
+  requireText(document.kind, "kind", "Enemy kind", issues);
+  requirePositive(document.stats.maxHp, "stats.maxHp", "Max HP", issues, false);
+  requirePositive(document.stats.speed, "stats.speed", "Move speed", issues, false);
+  requirePositive(document.stats.aggroRange, "stats.aggroRange", "Aggro range", issues, false);
+  requirePositive(document.stats.width, "stats.width", "Width", issues, false);
+  requirePositive(document.stats.height, "stats.height", "Height", issues, false);
+  requirePositive(document.spawn.spawnCount, "spawn.spawnCount", "Spawns per map", issues, false);
+  requirePositive(document.drops.wad, "drops.wad", "WAD drop", issues);
+  requirePositive(document.drops.resources.metalScrap, "drops.resources.metalScrap", "Metal Scrap drop", issues);
+  requirePositive(document.drops.resources.wood, "drops.resources.wood", "Wood drop", issues);
+  requirePositive(document.drops.resources.chaosShards, "drops.resources.chaosShards", "Chaos Shards drop", issues);
+  requirePositive(
+    document.drops.resources.steamComponents,
+    "drops.resources.steamComponents",
+    "Steam Components drop",
+    issues
+  );
+
+  if (document.spawn.mapIds.length === 0 && document.spawn.floorOrdinals.length === 0) {
+    issues.push({
+      severity: "error",
+      field: "spawn",
+      message: "Field enemies need at least one spawn target: specific maps, floor numbers, or both.",
+    });
+  }
+
+  warnOnDuplicates(document.spawn.mapIds, "spawn.mapIds", "Map ids", issues);
+
+  const seenFloorOrdinals = new Set<number>();
+  const duplicateFloorOrdinals = new Set<number>();
+  document.spawn.floorOrdinals.forEach((ordinal) => {
+    if (!Number.isFinite(ordinal) || ordinal <= 0) {
+      issues.push({
+        severity: "error",
+        field: "spawn.floorOrdinals",
+        message: "Floor numbers must be greater than 0.",
+      });
+      return;
+    }
+
+    if (seenFloorOrdinals.has(ordinal)) {
+      duplicateFloorOrdinals.add(ordinal);
+      return;
+    }
+
+    seenFloorOrdinals.add(ordinal);
+  });
+
+  duplicateFloorOrdinals.forEach((ordinal) => {
+    issues.push({
+      severity: "warning",
+      field: "spawn.floorOrdinals",
+      message: `Floor numbers contains a duplicate entry: '${ordinal}'.`,
+    });
+  });
+
+  document.drops.items.forEach((drop, index) => {
+    requireText(drop.id, `drops.items.${index}.id`, "Drop item id", issues);
+    requirePositive(drop.quantity, `drops.items.${index}.quantity`, "Drop quantity", issues, false);
+
+    if (!Number.isFinite(drop.chance) || drop.chance < 0 || drop.chance > 1) {
+      issues.push({
+        severity: "error",
+        field: `drops.items.${index}.chance`,
+        message: "Drop chance must be between 0 and 1.",
+      });
+    }
+  });
+
+  warnOnDuplicates(document.drops.items.map((drop) => drop.id), "drops.items", "Drop item ids", issues);
+  validateImageAsset(document.spriteAsset, "spriteAsset", "Enemy sprite", issues);
+
+  return issues;
+}
+
 export function validateCraftingDocument(document: CraftingDocument): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
@@ -201,6 +286,8 @@ export function validateCraftingDocument(document: CraftingDocument): Validation
     requirePositive(document.unlockFloor, "unlockFloor", "Recipe unlock floor", issues, false);
   }
 
+  warnOnDuplicates(document.requiredQuestIds, "requiredQuestIds", "Required quest ids", issues);
+
   return issues;
 }
 
@@ -218,6 +305,60 @@ export function validateDishDocument(document: DishDocument): ValidationIssue[] 
     "Dish unlock floor",
     issues
   );
+  warnOnDuplicates(document.requiredQuestIds, "requiredQuestIds", "Required quest ids", issues);
+
+  return issues;
+}
+
+export function validateCodexDocument(document: CodexDocument): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  requireText(document.id, "id", "Codex id", issues);
+  requireText(document.title, "title", "Codex title", issues);
+  requireText(document.content, "content", "Codex content", issues);
+  requirePositive(document.unlockAfterFloor, "unlockAfterFloor", "Unlock floor", issues);
+  warnOnDuplicates(document.requiredDialogueIds, "requiredDialogueIds", "Required dialogue ids", issues);
+  warnOnDuplicates(document.requiredQuestIds, "requiredQuestIds", "Required quest ids", issues);
+  warnOnDuplicates(document.requiredGearIds, "requiredGearIds", "Required gear ids", issues);
+  warnOnDuplicates(document.requiredItemIds, "requiredItemIds", "Required item ids", issues);
+  warnOnDuplicates(document.requiredSchemaIds, "requiredSchemaIds", "Required schema ids", issues);
+  warnOnDuplicates(document.requiredFieldModIds, "requiredFieldModIds", "Required field mod ids", issues);
+
+  return issues;
+}
+
+export function validateMailDocument(document: MailDocument): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  requireText(document.id, "id", "Mail id", issues);
+  requireText(document.sender, "sender", "Sender", issues);
+  requireText(document.subject, "subject", "Subject", issues);
+  requireText(document.content, "content", "Mail content", issues);
+  requirePositive(document.unlockAfterFloor, "unlockAfterFloor", "Unlock floor", issues);
+  if (!mailCategories.includes(document.category)) {
+    issues.push({
+      severity: "error",
+      field: "category",
+      message: "Mail category must be personal, official, or system."
+    });
+  }
+  warnOnDuplicates(document.requiredDialogueIds, "requiredDialogueIds", "Required dialogue ids", issues);
+  warnOnDuplicates(document.requiredGearIds, "requiredGearIds", "Required gear ids", issues);
+  warnOnDuplicates(document.requiredItemIds, "requiredItemIds", "Required item ids", issues);
+  warnOnDuplicates(document.requiredSchemaIds, "requiredSchemaIds", "Required schema ids", issues);
+  warnOnDuplicates(document.requiredFieldModIds, "requiredFieldModIds", "Required field mod ids", issues);
+
+  return issues;
+}
+
+export function validateDecorationDocument(document: DecorationDocument): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  requireText(document.id, "id", "Decoration id", issues);
+  requireText(document.name, "name", "Decoration name", issues);
+  requirePositive(document.tileSize, "tileSize", "Tile size", issues, false);
+  validateImageAsset(document.spriteAsset, "spriteAsset", "Decoration sprite", issues);
+  warnOnDuplicates(document.requiredQuestIds, "requiredQuestIds", "Required quest ids", issues);
 
   return issues;
 }
@@ -243,6 +384,7 @@ export function validateFieldModDocument(document: FieldModDocument): Validation
       message: "Proc chance cannot be greater than 1.",
     });
   }
+  warnOnDuplicates(document.requiredQuestIds, "requiredQuestIds", "Required quest ids", issues);
   issues.push(...validateEffectFlowDocument(document.effectFlow, "effectFlow"));
 
   return issues;
@@ -264,6 +406,7 @@ export function validateSchemaDocument(document: SchemaDocument): ValidationIssu
   requirePositive(document.unlockCost.chaosShards, "unlockCost.chaosShards", "Unlock chaos shard cost", issues);
   requirePositive(document.unlockCost.steamComponents, "unlockCost.steamComponents", "Unlock steam component cost", issues);
   requirePositive(document.unlockWadCost, "unlockWadCost", "Unlock WAD cost", issues);
+  warnOnDuplicates(document.requiredQuestIds, "requiredQuestIds", "Required quest ids", issues);
   warnOnDuplicates(document.preferredRoomTags, "preferredRoomTags", "Preferred room tags", issues);
 
   if (document.unlockSource === "schema") {
@@ -499,6 +642,8 @@ export function validateUnitDocument(document: UnitDocument): ValidationIssue[] 
     });
   }
 
+  warnOnDuplicates(document.requiredQuestIds, "requiredQuestIds", "Required quest ids", issues);
+
   return issues;
 }
 
@@ -604,6 +749,14 @@ export function validateClassDocument(document: ClassDocument): ValidationIssue[
           message: "Class-rank unlocks need a required rank greater than 0."
         });
       }
+    }
+
+    if (condition.type === "quest_completed" && !condition.requiredQuestId?.trim()) {
+      issues.push({
+        severity: "error",
+        field: `unlockConditions.${index}.requiredQuestId`,
+        message: "Quest-completed unlocks need a required quest id."
+      });
     }
   });
 

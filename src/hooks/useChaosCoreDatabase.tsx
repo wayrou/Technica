@@ -29,8 +29,10 @@ import {
 
 const DATABASE_CONTENT_TYPES: DatabaseContentType[] = [
   "dialogue",
+  "mail",
   "quest",
   "map",
+  "field_enemy",
   "npc",
   "gear",
   "item",
@@ -38,7 +40,9 @@ const DATABASE_CONTENT_TYPES: DatabaseContentType[] = [
   "unit",
   "operation",
   "class",
-  "schema"
+  "fieldmod",
+  "schema",
+  "codex"
 ];
 
 type SummaryStatus = "idle" | "loading" | "ready" | "error";

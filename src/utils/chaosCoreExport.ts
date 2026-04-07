@@ -18,6 +18,7 @@ import type { OperationDocument } from "../types/operation";
 import type { QuestDocument, QuestObjective, QuestReward } from "../types/quest";
 import type { UnitDocument } from "../types/unit";
 import { isoNow } from "./date";
+import { extractDialogueOccurrenceRules } from "./dialogueOccurrence";
 import { runtimeId, slugify } from "./id";
 
 export interface WorkspaceReferenceIndex {
@@ -815,6 +816,10 @@ function extractQuestDependencies(document: QuestDocument): ExportDependency[] {
     dependencies.push({ contentType: "quest", id: runtimeId(questId), relation: "follow-up" });
   });
 
+  document.requiredQuestIds.forEach((questId) => {
+    dependencies.push({ contentType: "quest", id: runtimeId(questId), relation: "unlock-requires-quest" });
+  });
+
   return dependencies;
 }
 
@@ -826,9 +831,6 @@ export function buildChaosCoreQuestBundle(document: QuestDocument, references = 
   extractQuestDependencies(document).forEach((dependency) => {
     if (dependency.contentType === "dialogue") {
       assertKnownReference(dependency.id, references.dialogueIds, "Quest export", "dialogue id");
-    }
-    if (dependency.contentType === "quest") {
-      assertKnownReference(dependency.id, references.questIds, "Quest export", "quest id");
     }
   });
 
@@ -860,6 +862,7 @@ export function buildChaosCoreQuestBundle(document: QuestDocument, references = 
       summary: document.summary || undefined,
       tags: document.tags,
       prerequisites: document.prerequisites,
+      requiredQuestIds: document.requiredQuestIds.map((entry) => runtimeId(entry)),
       followUpQuestIds: document.followUpQuestIds.map((entry) => runtimeId(entry)),
       chaosCoreExtensions: {
         onComplete: extensionEffects.length > 0 ? { setFlags: extensionEffects } : undefined,
@@ -947,6 +950,56 @@ function buildDialogueDependencies(document: DialogueDocument): ExportDependency
   if (document.sceneId) {
     dependencies.push({ contentType: "scene", id: runtimeId(document.sceneId), relation: "scene" });
   }
+
+  const occurrenceRules = extractDialogueOccurrenceRules(document.metadata);
+  if (occurrenceRules.npcId) {
+    dependencies.push({
+      contentType: "npc",
+      id: runtimeId(occurrenceRules.npcId),
+      relation: "assigned-npc"
+    });
+  }
+
+  occurrenceRules.requiredGearIds.forEach((gearId) => {
+    dependencies.push({
+      contentType: "gear",
+      id: runtimeId(gearId),
+      relation: "unlock-requires-gear"
+    });
+  });
+
+  occurrenceRules.requiredQuestIds.forEach((questId) => {
+    dependencies.push({
+      contentType: "quest",
+      id: runtimeId(questId),
+      relation: "unlock-requires-quest"
+    });
+  });
+
+  occurrenceRules.requiredItemIds.forEach((itemId) => {
+    dependencies.push({
+      contentType: "item",
+      id: runtimeId(itemId),
+      relation: "unlock-requires-item"
+    });
+  });
+
+  occurrenceRules.requiredFieldModIds.forEach((fieldModId) => {
+    dependencies.push({
+      contentType: "fieldmod",
+      id: runtimeId(fieldModId),
+      relation: "unlock-requires-fieldmod"
+    });
+  });
+
+  occurrenceRules.requiredSchemaIds.forEach((schemaId) => {
+    dependencies.push({
+      contentType: "schema",
+      id: runtimeId(schemaId),
+      relation: "unlock-requires-schema"
+    });
+  });
+
   return dependencies;
 }
 
@@ -961,6 +1014,11 @@ export function buildChaosCoreDialogueBundle(document: DialogueDocument, referen
         throw new Error(`Dialogue label '${label.label}' references missing target '${entry.target}'.`);
       }
     });
+    if (label.autoContinueTarget && !labelIds.has(label.autoContinueTarget)) {
+      throw new Error(
+        `Dialogue label '${label.label}' uses missing post-choice continuation target '${label.autoContinueTarget}'.`
+      );
+    }
   });
 
   const entryNodeByLabel = new Map<string, string>();
@@ -988,7 +1046,9 @@ export function buildChaosCoreDialogueBundle(document: DialogueDocument, referen
             ? nextEntry.kind === "choice"
               ? dialogueEntryNodeId(label.label, nextEntry, index + 1, choiceSetIndex)
               : dialogueEntryNodeId(label.label, nextEntry, index + 1, choiceSetIndex)
-            : undefined;
+            : label.autoContinueTarget
+              ? entryNodeByLabel.get(label.autoContinueTarget) ?? runtimeId(label.autoContinueTarget)
+              : undefined;
 
         nodes.push(
           pruneEmpty({
@@ -1041,7 +1101,11 @@ export function buildChaosCoreDialogueBundle(document: DialogueDocument, referen
             id: currentNodeId,
             type: "effect" as const,
             effects: extractEffectsFromSet(entry),
-            nextNodeId: nextEntry ? dialogueEntryNodeId(label.label, nextEntry, index + 1, choiceSetIndex) : undefined
+            nextNodeId: nextEntry
+              ? dialogueEntryNodeId(label.label, nextEntry, index + 1, choiceSetIndex)
+              : label.autoContinueTarget
+                ? entryNodeByLabel.get(label.autoContinueTarget) ?? runtimeId(label.autoContinueTarget)
+                : undefined
           })
         );
         index += 1;

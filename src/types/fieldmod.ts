@@ -48,6 +48,7 @@ export interface FieldModDocument {
   cost: number;
   rarity: FieldModRarity;
   unlockAfterOperationFloor: number;
+  requiredQuestIds: string[];
   createdAt: string;
   updatedAt: string;
 }

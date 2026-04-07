@@ -121,7 +121,7 @@ export function StructuredDocumentStudio<TDocument>({
 
   async function exportBundle() {
     try {
-      await downloadBundle(await buildBundleForTarget(document, "chaos-core"));
+      await downloadBundle(await buildBundleForTarget(document, exportTarget));
     } catch (error) {
       notify(error instanceof Error ? error.message : "Could not export the bundle.");
     }

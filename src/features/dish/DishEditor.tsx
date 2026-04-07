@@ -5,13 +5,15 @@ import type { DishDocument } from "../../types/dish";
 import { isoNow } from "../../utils/date";
 import { buildDishBundleForTarget } from "../../utils/exporters";
 import { validateDishDocument } from "../../utils/contentValidation";
+import { parseCommaList, serializeCommaList } from "../../utils/records";
 
 function normalizeDish(document: DishDocument): DishDocument {
   return {
     ...document,
     unlockAfterOperationFloor: Number.isFinite(document.unlockAfterOperationFloor)
       ? document.unlockAfterOperationFloor
-      : 0
+      : 0,
+    requiredQuestIds: Array.from(new Set((document.requiredQuestIds ?? []).map((entry) => entry.trim()).filter(Boolean)))
   };
 }
 
@@ -113,6 +115,19 @@ export function DishEditor() {
               />
             </label>
             <label className="field full">
+              <span>Require completed quests</span>
+              <input
+                value={serializeCommaList(normalizedDocument.requiredQuestIds)}
+                placeholder="quest_restore_signal_grid, quest_clear_foundry_gate"
+                onChange={(event) =>
+                  patchDocument((current) => ({
+                    ...normalizeDish(current),
+                    requiredQuestIds: parseCommaList(event.target.value)
+                  }))
+                }
+              />
+            </label>
+            <label className="field full">
               <span>Effect</span>
               <input
                 value={normalizedDocument.effect}
@@ -135,6 +150,7 @@ export function DishEditor() {
             <div className="chip-row">
               <span className="pill">{normalizedDocument.cost} WAD</span>
               <span className="pill">Unlocks after floor {normalizedDocument.unlockAfterOperationFloor}</span>
+              <span className="pill">{normalizedDocument.requiredQuestIds.length} quest gate(s)</span>
               <span className="pill accent">Chaos Core export</span>
             </div>
             <div className="toolbar">

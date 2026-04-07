@@ -21,6 +21,7 @@ export interface UnitDocument {
   currentClassId: string;
   spawnRole: UnitSpawnRole;
   enemySpawnFloorOrdinals: number[];
+  requiredQuestIds: string[];
   stats: {
     maxHp: number;
     atk: GearStats["atk"];

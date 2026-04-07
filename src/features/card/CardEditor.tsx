@@ -1,4 +1,3 @@
-import { CardFacePreview } from "../../components/CardFacePreview";
 import { ChaosCoreDatabasePanel } from "../../components/ChaosCoreDatabasePanel";
 import { EffectFlowComposer } from "../../components/EffectFlowComposer";
 import { ImageAssetField } from "../../components/ImageAssetField";
@@ -104,13 +103,6 @@ export function CardEditor() {
               </Panel>
 
             </div>
-
-            <div className="tool-suite-column tool-suite-column-narrow">
-              <Panel title="Preview" subtitle="Live card face with the current authored effect text." actions={<button type="button" className="ghost-button" onClick={() => void openTechnicaPopout("card-preview", "Card Preview")}>Pop out</button>}>
-                <CardFacePreview document={card} />
-              </Panel>
-            </div>
-
             <div className="tool-suite-column">
               <ChaosCoreDatabasePanel
                 contentType="card"

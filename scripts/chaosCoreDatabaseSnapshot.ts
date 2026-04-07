@@ -4,21 +4,26 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import ts from "typescript";
 import { parseDialogueSource } from "../src/utils/dialogueParser";
+import { summarizeDialogueOccurrenceRules } from "../src/utils/dialogueOccurrence";
 import { isoNow } from "../src/utils/date";
 import { runtimeId } from "../src/utils/id";
 
 export type ContentType =
   | "dialogue"
+  | "mail"
   | "quest"
   | "map"
+  | "field_enemy"
   | "npc"
   | "item"
   | "gear"
   | "card"
+  | "fieldmod"
   | "unit"
   | "operation"
   | "class"
-  | "schema";
+  | "schema"
+  | "codex";
 
 type EntryOrigin = "game" | "technica";
 
@@ -65,6 +70,7 @@ type RuntimeCardShape = {
   id: string;
   name: string;
   description: string;
+  type?: "core" | "class" | "equipment" | "gambit";
   cardType: "core" | "class" | "equipment" | "gambit";
   rarity: "common" | "uncommon" | "rare" | "epic" | "legendary";
   category: "attack" | "defense" | "utility" | "mobility" | "buff" | "debuff" | "steam" | "chaos";
@@ -75,6 +81,7 @@ type RuntimeCardShape = {
   effects: Array<Record<string, unknown>>;
   sourceClassId?: string;
   sourceEquipmentId?: string;
+  artPath?: string;
   metadata?: Record<string, unknown>;
 };
 
@@ -107,36 +114,97 @@ type RuntimeNpcShape = {
   metadata?: Record<string, unknown>;
 };
 
+type RuntimeFieldEnemyShape = {
+  id: string;
+  name: string;
+  description?: string;
+  kind?: string;
+  spriteKey?: string;
+  spritePath?: string;
+  stats?: {
+    maxHp?: number;
+    speed?: number;
+    aggroRange?: number;
+    width?: number;
+    height?: number;
+  };
+  spawn?: {
+    mapIds?: string[];
+    floorOrdinals?: number[];
+    count?: number;
+  };
+  drops?: {
+    wad?: number;
+    resources?: {
+      metalScrap?: number;
+      wood?: number;
+      chaosShards?: number;
+      steamComponents?: number;
+    };
+    items?: Array<{
+      id: string;
+      quantity?: number;
+      chance?: number;
+    }>;
+  };
+  metadata?: Record<string, unknown>;
+};
+
+type RuntimeMailShape = {
+  id: string;
+  category?: "personal" | "official" | "system";
+  from?: string;
+  subject?: string;
+  bodyPages?: string[];
+  unlockAfterFloor?: number;
+  requiredDialogueIds?: string[];
+  requiredQuestIds?: string[];
+  requiredGearIds?: string[];
+  requiredItemIds?: string[];
+  requiredSchemaIds?: string[];
+  requiredFieldModIds?: string[];
+  createdAt?: string;
+  updatedAt?: string;
+};
+
 type TsExpressionMarker = {
   __technicaTsExpression: string;
 };
 
 export const CONTENT_TYPES: ContentType[] = [
   "dialogue",
+  "mail",
   "quest",
   "map",
+  "field_enemy",
   "npc",
   "item",
   "gear",
   "card",
+  "fieldmod",
   "unit",
   "operation",
   "class",
-  "schema"
+  "schema",
+  "codex"
 ];
 
 const CONTENT_EXTENSIONS: Record<ContentType, string> = {
   dialogue: ".dialogue.json",
+  mail: ".mail.json",
   quest: ".quest.json",
   map: ".fieldmap.json",
+  field_enemy: ".field_enemy.json",
   npc: ".npc.json",
   item: ".item.json",
   gear: ".gear.json",
   card: ".card.json",
+  fieldmod: ".fieldmod.json",
   unit: ".unit.json",
   operation: ".operation.json",
   class: ".class.json",
-  schema: ".schema.json"
+  schema: ".schema.json",
+  codex: ".codex.json"
 };
 
 const BUILT_IN_MAP_IDS = ["base_camp", "free_zone_1", "quarters"];
@@ -333,6 +401,7 @@ function runtimeQuestToEditorDocument(runtimeQuest: any) {
   const metadata = runtimeQuest.metadata ?? {};
   const tags = Array.isArray(metadata.tags) ? metadata.tags.map(String) : [];
   const prerequisites = Array.isArray(metadata.prerequisites) ? metadata.prerequisites.map(String) : [];
+  const requiredQuestIds = Array.isArray(metadata.requiredQuestIds) ? metadata.requiredQuestIds.map(String) : [];
   const followUpQuestIds = Array.isArray(metadata.followUpQuestIds) ? metadata.followUpQuestIds.map(String) : [];
 
   const objectives = (runtimeQuest.objectives ?? []).map((objective: any) => ({
@@ -425,6 +494,7 @@ function runtimeQuestToEditorDocument(runtimeQuest: any) {
     status: runtimeQuest.status ?? "available",
     tags,
     prerequisites,
+    requiredQuestIds,
     followUpQuestIds,
     rewards,
     states: [
@@ -466,7 +536,9 @@ function runtimeQuestToEditorDocument(runtimeQuest: any) {
     failureStateId: "state_failure",
     metadata: toKeyValueRecord(
       Object.fromEntries(
-        Object.entries(metadata).filter(([key]) => !["summary", "tags", "prerequisites", "followUpQuestIds"].includes(key))
+        Object.entries(metadata).filter(
+          ([key]) => !["summary", "tags", "prerequisites", "requiredQuestIds", "followUpQuestIds"].includes(key)
+        )
       )
     )
   };
@@ -547,12 +619,17 @@ function runtimeGearToEditorDocument(runtimeGear: any) {
 }
 
 function runtimeCardToEditorDocument(runtimeCard: RuntimeCardShape) {
+  const metadata = {
+    ...(runtimeCard.metadata ?? {}),
+    ...(runtimeCard.artPath ? { artPath: runtimeCard.artPath } : {})
+  };
+
   return {
     ...createDocumentBase(),
     id: runtimeCard.id,
     name: runtimeCard.name,
     description: runtimeCard.description,
-    cardType: runtimeCard.cardType,
+    cardType: runtimeCard.type ?? runtimeCard.cardType,
     rarity: runtimeCard.rarity,
     category: runtimeCard.category,
     strainCost: runtimeCard.strainCost,
@@ -568,7 +645,50 @@ function runtimeCardToEditorDocument(runtimeCard: RuntimeCardShape) {
     })),
     sourceClassId: runtimeCard.sourceClassId,
     sourceEquipmentId: runtimeCard.sourceEquipmentId,
-    metadata: toKeyValueRecord(runtimeCard.metadata)
+    metadata: toKeyValueRecord(metadata)
+  };
+}
+
+function runtimeFieldEnemyToEditorDocument(runtimeFieldEnemy: RuntimeFieldEnemyShape) {
+  return {
+    ...createDocumentBase(),
+    id: runtimeFieldEnemy.id,
+    name: runtimeFieldEnemy.name,
+    description: runtimeFieldEnemy.description ?? "",
+    kind: runtimeFieldEnemy.kind ?? "light",
+    spriteKey: runtimeFieldEnemy.spriteKey ?? "",
+    stats: {
+      maxHp: Number(runtimeFieldEnemy.stats?.maxHp ?? 1),
+      speed: Number(runtimeFieldEnemy.stats?.speed ?? 90),
+      aggroRange: Number(runtimeFieldEnemy.stats?.aggroRange ?? 200),
+      width: Number(runtimeFieldEnemy.stats?.width ?? 40),
+      height: Number(runtimeFieldEnemy.stats?.height ?? 40)
+    },
+    spawn: {
+      mapIds: [...(runtimeFieldEnemy.spawn?.mapIds ?? [])],
+      floorOrdinals: (runtimeFieldEnemy.spawn?.floorOrdinals ?? [])
+        .map((ordinal) => Number(ordinal))
+        .filter((ordinal) => ordinal > 0),
+      spawnCount: Number(runtimeFieldEnemy.spawn?.count ?? 1)
+    },
+    drops: {
+      wad: Number(runtimeFieldEnemy.drops?.wad ?? 0),
+      resources: {
+        metalScrap: Number(runtimeFieldEnemy.drops?.resources?.metalScrap ?? 0),
+        wood: Number(runtimeFieldEnemy.drops?.resources?.wood ?? 0),
+        chaosShards: Number(runtimeFieldEnemy.drops?.resources?.chaosShards ?? 0),
+        steamComponents: Number(runtimeFieldEnemy.drops?.resources?.steamComponents ?? 0)
+      },
+      items: (runtimeFieldEnemy.drops?.items ?? []).map((drop) => ({
+        id: String(drop.id ?? ""),
+        quantity: Number(drop.quantity ?? 1),
+        chance: Number(drop.chance ?? 1)
+      }))
+    },
+    metadata: toKeyValueRecord({
+      ...(runtimeFieldEnemy.metadata ?? {}),
+      ...(runtimeFieldEnemy.spritePath ? { spritePath: runtimeFieldEnemy.spritePath } : {})
+    })
   };
 }
 
@@ -590,11 +710,36 @@ function runtimeClassToEditorDocument(runtimeClass: any) {
     unlockConditions: (runtimeClass.unlockConditions ?? []).map((condition: any) => ({
       type: condition.type,
       requiredClassId: condition.requiredClass ?? condition.requiredClassId,
+      requiredQuestId: condition.requiredQuestId,
       requiredRank: condition.requiredRank,
       description: condition.description
     })),
     innateAbility: runtimeClass.innateAbility ?? "",
     metadata: toKeyValueRecord(runtimeClass.metadata)
+  };
+}
+
+function runtimeFieldModToEditorDocument(runtimeFieldMod: any) {
+  return {
+    ...createDocumentBase(),
+    id: String(runtimeFieldMod.id ?? "field_mod"),
+    name: String(runtimeFieldMod.name ?? runtimeFieldMod.id ?? "Field Mod"),
+    effects: String(runtimeFieldMod.effects ?? runtimeFieldMod.description ?? ""),
+    trigger: runtimeFieldMod.trigger ?? "hit",
+    chance: Number(runtimeFieldMod.chance ?? 1),
+    stackMode: runtimeFieldMod.stackMode ?? "linear",
+    maxStacks: Number(runtimeFieldMod.maxStacks ?? 1),
+    effectFlow:
+      runtimeFieldMod.effectFlow && typeof runtimeFieldMod.effectFlow === "object"
+        ? sanitizeJson(runtimeFieldMod.effectFlow)
+        : { version: 1, entryNodeId: null, nodes: [], edges: [] },
+    scope: runtimeFieldMod.scope ?? "unit",
+    cost: Number(runtimeFieldMod.cost ?? 0),
+    rarity: runtimeFieldMod.rarity ?? "common",
+    unlockAfterOperationFloor: Number(runtimeFieldMod.unlockAfterOperationFloor ?? 0),
+    requiredQuestIds: Array.isArray(runtimeFieldMod.requiredQuestIds)
+      ? Array.from(new Set(runtimeFieldMod.requiredQuestIds.map(String).map((entry: string) => entry.trim()).filter(Boolean)))
+      : []
   };
 }
 
@@ -643,6 +788,9 @@ function runtimeSchemaToEditorDocument(runtimeSchema: any) {
     unlockSource: runtimeSchema.unlockSource === "starter" ? "starter" : "schema",
     unlockCost: createSchemaWalletFromPartialWallet(runtimeSchema.unlockCost),
     unlockWadCost: Number(runtimeSchema.unlockWadCost ?? 0),
+    requiredQuestIds: Array.isArray(runtimeSchema.requiredQuestIds)
+      ? Array.from(new Set(runtimeSchema.requiredQuestIds.map(String).map((entry: string) => entry.trim()).filter(Boolean)))
+      : [],
     preferredRoomTags: Array.isArray(runtimeSchema.preferredRoomTags)
       ? runtimeSchema.preferredRoomTags.map(String)
       : [],
@@ -673,6 +821,13 @@ function runtimeUnitToEditorDocument(runtimeUnit: any, state: any) {
     name: runtimeUnit.name,
     description: runtimeUnit.description ?? "",
     currentClassId: runtimeUnit.unitClass ?? runtimeUnit.currentClassId ?? "",
+    spawnRole: runtimeUnit.isEnemy ? "enemy" : runtimeUnit.spawnRole ?? "player",
+    enemySpawnFloorOrdinals: Array.isArray(runtimeUnit.enemySpawnFloorOrdinals)
+      ? runtimeUnit.enemySpawnFloorOrdinals.map((entry: unknown) => Number(entry)).filter((entry: number) => entry > 0)
+      : [],
+    requiredQuestIds: Array.isArray(runtimeUnit.requiredQuestIds)
+      ? Array.from(new Set(runtimeUnit.requiredQuestIds.map(String).map((entry: string) => entry.trim()).filter(Boolean)))
+      : [],
     stats: {
       maxHp: Number(runtimeUnit.maxHp ?? runtimeUnit.stats?.maxHp ?? 1),
       atk: Number(runtimeUnit.stats?.atk ?? 0),
@@ -730,6 +885,91 @@ function runtimeOperationToEditorDocument(runtimeOperation: any) {
   };
 }
 
+function normalizeCodexEntryType(category: unknown) {
+  const normalized = String(category ?? "").trim().toLowerCase();
+  switch (normalized) {
+    case "lore":
+    case "faction":
+    case "bestiary":
+    case "tech":
+      return normalized;
+    default:
+      return "lore";
+  }
+}
+
+function normalizeMailCategory(category: unknown) {
+  const normalized = String(category ?? "").trim().toLowerCase();
+  switch (normalized) {
+    case "personal":
+    case "official":
+    case "system":
+      return normalized;
+    default:
+      return "system";
+  }
+}
+
+function codexEntryTypeToRuntimeCategory(entryType: unknown) {
+  switch (String(entryType ?? "").trim().toLowerCase()) {
+    case "faction":
+      return "Faction";
+    case "bestiary":
+      return "Bestiary";
+    case "tech":
+      return "Tech";
+    case "lore":
+    default:
+      return "Lore";
+  }
+}
+
+function runtimeCodexToEditorDocument(runtimeCodex: any) {
+  const toStringList = (value: unknown) =>
+    Array.isArray(value)
+      ? Array.from(new Set(value.map(String).map((entry) => entry.trim()).filter(Boolean)))
+      : [];
+
+  return {
+    ...createDocumentBase(),
+    id: String(runtimeCodex.id ?? "codex_entry"),
+    title: String(runtimeCodex.title ?? runtimeCodex.name ?? humanizeId(String(runtimeCodex.id ?? "codex_entry"))),
+    entryType: normalizeCodexEntryType(runtimeCodex.entryType ?? runtimeCodex.category),
+    content: String(runtimeCodex.content ?? runtimeCodex.description ?? ""),
+    unlockAfterFloor: Number(runtimeCodex.unlockAfterFloor ?? 0),
+    requiredDialogueIds: toStringList(runtimeCodex.requiredDialogueIds),
+    requiredQuestIds: toStringList(runtimeCodex.requiredQuestIds),
+    requiredGearIds: toStringList(runtimeCodex.requiredGearIds),
+    requiredItemIds: toStringList(runtimeCodex.requiredItemIds),
+    requiredSchemaIds: toStringList(runtimeCodex.requiredSchemaIds),
+    requiredFieldModIds: toStringList(runtimeCodex.requiredFieldModIds)
+  };
+}
+
+function runtimeMailToEditorDocument(runtimeMail: RuntimeMailShape) {
+  const toStringList = (value: unknown) =>
+    Array.isArray(value)
+      ? Array.from(new Set(value.map(String).map((entry) => entry.trim()).filter(Boolean)))
+      : [];
+
+  return {
+    ...createDocumentBase(),
+    id: String(runtimeMail.id ?? "mail_entry"),
+    sender: String(runtimeMail.from ?? "S/COM_OS"),
+    subject: String(runtimeMail.subject ?? humanizeId(String(runtimeMail.id ?? "mail_entry"))),
+    category: normalizeMailCategory(runtimeMail.category),
+    content: Array.isArray(runtimeMail.bodyPages) ? runtimeMail.bodyPages.map(String).join("\n\n") : "",
+    unlockAfterFloor: Number(runtimeMail.unlockAfterFloor ?? 0),
+    requiredDialogueIds: toStringList(runtimeMail.requiredDialogueIds),
+    requiredGearIds: toStringList(runtimeMail.requiredGearIds),
+    requiredItemIds: toStringList(runtimeMail.requiredItemIds),
+    requiredSchemaIds: toStringList(runtimeMail.requiredSchemaIds),
+    requiredFieldModIds: toStringList(runtimeMail.requiredFieldModIds),
+    createdAt: String(runtimeMail.createdAt ?? isoNow()),
+    updatedAt: String(runtimeMail.updatedAt ?? isoNow())
+  };
+}
+
 function legacyDialogueToEditorDocument(dialogueId: string, title: string, lines: string[]) {
   const rawSource = [
     `@id ${dialogueId}`,
@@ -748,8 +988,12 @@ function buildEditorDocumentFromRuntime(contentType: ContentType, runtimeData: a
   switch (contentType) {
     case "map":
       return runtimeMapToEditorDocument(runtimeData);
+    case "mail":
+      return runtimeMailToEditorDocument(runtimeData);
     case "quest":
       return runtimeQuestToEditorDocument(runtimeData);
+    case "field_enemy":
+      return runtimeFieldEnemyToEditorDocument(runtimeData);
     case "dialogue":
       if (Array.isArray(runtimeData.lines)) {
         return legacyDialogueToEditorDocument(runtimeData.id, runtimeData.title, runtimeData.lines);
@@ -766,16 +1010,20 @@ function buildEditorDocumentFromRuntime(contentType: ContentType, runtimeData: a
       return runtimeNpcToEditorDocument(runtimeData);
     case "gear":
       return runtimeGearToEditorDocument(runtimeData);
-    case "card":
-      return runtimeCardToEditorDocument(runtimeData);
-    case "unit":
-      return runtimeUnitToEditorDocument(runtimeData, { profile: { rosterUnitIds: [] }, partyUnitIds: [] });
-    case "operation":
-      return runtimeOperationToEditorDocument(runtimeData);
+      case "card":
+        return runtimeCardToEditorDocument(runtimeData);
+      case "fieldmod":
+        return runtimeFieldModToEditorDocument(runtimeData);
+      case "unit":
+        return runtimeUnitToEditorDocument(runtimeData, { profile: { rosterUnitIds: [] }, partyUnitIds: [] });
+      case "operation":
+        return runtimeOperationToEditorDocument(runtimeData);
     case "class":
       return runtimeClassToEditorDocument(runtimeData);
     case "schema":
       return runtimeSchemaToEditorDocument(runtimeData);
+    case "codex":
+      return runtimeCodexToEditorDocument(runtimeData);
   }
 }
 
@@ -817,7 +1065,7 @@ function parseContentId(value: any, fallback: string) {
 }
 
 function parseTitle(value: any, fallback: string) {
-  return String(value?.title ?? value?.name ?? value?.codename ?? fallback);
+  return String(value?.title ?? value?.subject ?? value?.name ?? value?.codename ?? fallback);
 }
 
 function toSummaryNumber(value: unknown) {
@@ -915,8 +1163,17 @@ function buildEntrySummaryData(contentType: ContentType, runtimeData: any, edito
       return {
         mapId: String(editorData?.mapId ?? runtimeData?.mapId ?? ""),
         tileX: Number(editorData?.tileX ?? runtimeData?.tileX ?? runtimeData?.x ?? 0),
-        tileY: Number(editorData?.tileY ?? runtimeData?.tileY ?? runtimeData?.y ?? 0)
+        tileY: Number(editorData?.tileY ?? runtimeData?.tileY ?? runtimeData?.y ?? 0),
+        dialogueId:
+          typeof editorData?.dialogueId === "string" && editorData.dialogueId.trim()
+            ? editorData.dialogueId
+            : typeof runtimeData?.dialogueId === "string" && runtimeData.dialogueId.trim()
+              ? runtimeData.dialogueId
+              : undefined
       };
+    }
+    case "dialogue": {
+      return summarizeDialogueOccurrenceRules(editorData?.metadata ?? runtimeData?.metadata);
     }
     case "gear": {
       const slot = toSummaryString(runtimeData?.slot);
@@ -951,6 +1208,40 @@ function buildEntrySummaryData(contentType: ContentType, runtimeData: any, edito
     case "class": {
       return typeof runtimeData?.tier === "number" ? { tier: runtimeData.tier } : undefined;
     }
+      case "mail": {
+        return {
+          category: normalizeMailCategory(editorData?.category ?? runtimeData?.category),
+          sender:
+            typeof editorData?.sender === "string" && editorData.sender.trim()
+              ? editorData.sender
+              : typeof runtimeData?.from === "string" && runtimeData.from.trim()
+                ? runtimeData.from
+                : undefined,
+          pageCount: Array.isArray(runtimeData?.bodyPages)
+            ? runtimeData.bodyPages.length
+            : typeof editorData?.content === "string" && editorData.content.trim()
+              ? editorData.content
+                  .split(/\r?\n\s*\r?\n+/)
+                  .map((entry: string) => entry.trim())
+                  .filter(Boolean).length || 1
+              : 0,
+          unlockAfterFloor: Number(editorData?.unlockAfterFloor ?? runtimeData?.unlockAfterFloor ?? 0)
+        };
+      }
+      case "codex": {
+        return {
+          entryType: normalizeCodexEntryType(editorData?.entryType ?? runtimeData?.category),
+          unlockAfterFloor: Number(editorData?.unlockAfterFloor ?? 0)
+        };
+      }
+      case "fieldmod": {
+        return {
+          trigger: String(runtimeData?.trigger ?? "hit"),
+          scope: String(runtimeData?.scope ?? "unit"),
+          rarity: String(runtimeData?.rarity ?? "common"),
+          unlockAfterOperationFloor: Number(runtimeData?.unlockAfterOperationFloor ?? 0)
+        };
+      }
       case "schema": {
         return {
           kind: String(editorData?.kind ?? runtimeData?.kind ?? "core"),
@@ -1301,6 +1592,9 @@ async function listBuiltInEntries(
   disabledIds: Set<string>
 ): Promise<SnapshotEntry[]> {
   switch (contentType) {
+    case "mail": {
+      return [];
+    }
     case "map": {
       const generated = await readGeneratedRecords(repoPath, "map");
       const maps = await importRepoModule<{ getFieldMap: (mapId: string) => any }>(repoPath, "src/field/maps.ts");
@@ -1320,6 +1614,9 @@ async function listBuiltInEntries(
           );
         });
     }
+
+    case "field_enemy":
+      return [];
 
     case "quest": {
       const { QUEST_DATABASE } = await importRepoModule<{ QUEST_DATABASE: Record<string, any> }>(repoPath, "src/quests/questData.ts");
@@ -1559,9 +1856,9 @@ async function listBuiltInEntries(
       );
     }
 
-    case "card": {
-      const equipment = await importRepoModule<{
-        CORE_CARDS: any[];
+      case "card": {
+        const equipment = await importRepoModule<{
+          CORE_CARDS: any[];
         CLASS_CARDS: Record<string, any[]>;
         EQUIPMENT_CARDS: any[];
       }>(repoPath, "src/core/equipment.ts");
@@ -1618,11 +1915,34 @@ async function listBuiltInEntries(
         );
       });
 
-      return Array.from(cards.values()).filter((entry) => !disabledIds.has(entry.contentId));
-    }
+        return Array.from(cards.values()).filter((entry) => !disabledIds.has(entry.contentId));
+      }
 
-    case "class": {
-      const { CLASS_DEFINITIONS } = await importRepoModule<{ CLASS_DEFINITIONS: Record<string, any> }>(repoPath, "src/core/classes.ts");
+      case "fieldmod": {
+        const generated = await readGeneratedRecords(repoPath, "fieldmod");
+        const { getAllFieldModDefs } = await importRepoModule<{
+          getAllFieldModDefs: () => any[];
+        }>(repoPath, "src/core/fieldModDefinitions.ts");
+
+        return getAllFieldModDefs()
+          .map((runtimeData) => sanitizeJson(runtimeData))
+          .filter((runtimeData) => !generated.has(runtimeData.id) && !disabledIds.has(runtimeData.id))
+          .map((runtimeData) =>
+            buildSnapshotEntry(
+              "fieldmod",
+              "game",
+              runtimeData.id,
+              runtimeData.name,
+              "src/core/fieldModDefinitions.ts",
+              "src/core/fieldModDefinitions.ts",
+              runtimeData,
+              runtimeFieldModToEditorDocument(runtimeData)
+            )
+          );
+      }
+
+      case "class": {
+        const { CLASS_DEFINITIONS } = await importRepoModule<{ CLASS_DEFINITIONS: Record<string, any> }>(repoPath, "src/core/classes.ts");
       return Object.values(CLASS_DEFINITIONS)
         .filter((runtimeData) => !disabledIds.has(runtimeData.id))
         .map((runtimeData) =>
@@ -1684,6 +2004,33 @@ async function listBuiltInEntries(
       return [...coreEntries, ...fortificationEntries];
     }
 
+    case "codex": {
+      const generated = await readGeneratedRecords(repoPath, "codex");
+      const { CODEX_DATABASE } = await importRepoModule<{
+        CODEX_DATABASE: Array<{
+          id: string;
+          title: string;
+          category: string;
+          content: string;
+        }>;
+      }>(repoPath, "src/core/codexSystem.ts");
+
+      return CODEX_DATABASE
+        .filter((runtimeData) => !generated.has(runtimeData.id) && !disabledIds.has(runtimeData.id))
+        .map((runtimeData) =>
+          buildSnapshotEntry(
+            "codex",
+            "game",
+            runtimeData.id,
+            runtimeData.title,
+            "src/core/codexSystem.ts",
+            "src/core/codexSystem.ts",
+            sanitizeJson(runtimeData),
+            runtimeCodexToEditorDocument(runtimeData)
+          )
+        );
+    }
+
     case "unit": {
       const { createNewGameState } = await importRepoModule<{ createNewGameState: () => any }>(repoPath, "src/core/initialState.ts");
       const state = createNewGameState();
@@ -1729,13 +2076,16 @@ async function listBuiltInEntries(
         )
       ];
     }
+
+    default:
+      return [];
   }
 }
 
 export async function buildSnapshot(repoPath: string, contentType: ContentType) {
   const generated = await readGeneratedRecords(repoPath, contentType);
   const disabledIds = await readDisabledContentIds(repoPath, contentType);
-  const builtIn = await listBuiltInEntries(repoPath, contentType, disabledIds);
+  const builtIn = (await listBuiltInEntries(repoPath, contentType, disabledIds)) ?? [];
   const entries: SnapshotEntry[] = [...builtIn];
 
   generated.forEach((record) => {
@@ -1750,16 +2100,18 @@ export async function buildSnapshot(repoPath: string, contentType: ContentType) 
       editorData = buildEditorDocumentFromRuntime(contentType, runtimeData);
     }
 
-    entries.push({
-      entryKey: record.entryKey,
-      contentId: record.contentId,
-      title: record.title,
-      runtimeFile: record.runtimeFile,
-      sourceFile: record.sourceFile,
-      origin: "technica",
-      runtimeData,
-      editorData
-    });
+    entries.push(
+      buildSnapshotEntry(
+        contentType,
+        "technica",
+        record.contentId,
+        record.title,
+        record.runtimeFile,
+        record.sourceFile,
+        runtimeData,
+        editorData
+      )
+    );
   });
 
   entries.sort((left, right) => {
@@ -2449,7 +2801,8 @@ function normalizeClassForBuiltInSource(runtimeData: any) {
     weaponTypes: Array.isArray(runtimeData.weaponTypes) ? runtimeData.weaponTypes.map(String) : [],
     unlockConditions: (runtimeData.unlockConditions ?? []).map((condition: any) => ({
       type: condition.type ?? "milestone",
-      requiredClass: condition.requiredClass ?? condition.requiredClassId ?? undefined,
+      requiredClassId: condition.requiredClass ?? condition.requiredClassId ?? undefined,
+      requiredQuestId: condition.requiredQuestId ?? undefined,
       requiredRank: condition.requiredRank ?? undefined,
       description: condition.description ?? undefined
     })),
@@ -3114,6 +3467,47 @@ async function writeBuiltInSchemaEntry(
   };
 }
 
+function normalizeBuiltInCodexForSource(runtimeData: any, previousContentId: string) {
+  return {
+    id: String(runtimeData.id ?? previousContentId),
+    title: String(runtimeData.title ?? runtimeData.name ?? humanizeId(String(runtimeData.id ?? previousContentId))),
+    category: codexEntryTypeToRuntimeCategory(runtimeData.entryType ?? runtimeData.category),
+    content: String(runtimeData.content ?? runtimeData.description ?? "")
+  };
+}
+
+async function writeBuiltInCodexEntry(
+  repoPath: string,
+  previousContentId: string,
+  sourceRelativePath: string,
+  runtimeData: any
+) {
+  if (sourceRelativePath !== "src/core/codexSystem.ts") {
+    throw new Error(
+      `Built-in codex entry '${previousContentId}' must be written back through 'src/core/codexSystem.ts'.`
+    );
+  }
+
+  const nextContentId = String(runtimeData.id ?? previousContentId);
+  const sourcePath = path.join(repoPath, "src", "core", "codexSystem.ts");
+  const sourceText = await fs.readFile(sourcePath, "utf8");
+  const nextSourceText = upsertArrayObjectEntry(
+    sourceText,
+    "CODEX_DATABASE",
+    previousContentId,
+    nextContentId,
+    normalizeBuiltInCodexForSource(runtimeData, previousContentId)
+  );
+
+  await fs.writeFile(sourcePath, nextSourceText, "utf8");
+
+  return {
+    entryKey: `game:${nextContentId}`,
+    contentId: nextContentId,
+    runtimeFile: "src/core/codexSystem.ts"
+  };
+}
+
 async function writeBuiltInUnitEntry(
   repoPath: string,
   previousContentId: string,
@@ -3262,28 +3656,21 @@ async function writeBuiltInDialogueEntry(
     );
   }
 
-  const nextContentId = String(runtimeData.id ?? previousContentId);
-  if (nextContentId !== previousContentId) {
-    throw new Error(
-      `Renaming built-in dialogue '${previousContentId}' is not supported yet because existing NPC references are keyed to that dialogue ID.`
-    );
-  }
-
   const sourcePath = path.join(repoPath, "src", "field", "npcs.ts");
   const sourceText = await fs.readFile(sourcePath, "utf8");
   const nextSourceText = upsertTopLevelObjectEntry(
     sourceText,
     "NPC_DIALOGUE",
     previousContentId,
-    nextContentId,
+    previousContentId,
     flattenDialogueGraphForBuiltInSource(runtimeData)
   );
 
   await fs.writeFile(sourcePath, nextSourceText, "utf8");
 
   return {
-    entryKey: `game:${nextContentId}`,
-    contentId: nextContentId,
+    entryKey: `game:${previousContentId}`,
+    contentId: previousContentId,
     runtimeFile: "src/field/npcs.ts"
   };
 }
@@ -3364,6 +3751,13 @@ async function writeBuiltInEntry(
         repoPath,
         previousContentId,
         sourceRelativePath || "src/core/schemaSystem.ts",
+        runtimeData
+      );
+    case "codex":
+      return writeBuiltInCodexEntry(
+        repoPath,
+        previousContentId,
+        sourceRelativePath || "src/core/codexSystem.ts",
         runtimeData
       );
     case "gear":

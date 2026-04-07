@@ -13,6 +13,7 @@ export function createBlankUnit(): UnitDocument {
     currentClassId: "squire",
     spawnRole: "player",
     enemySpawnFloorOrdinals: [],
+    requiredQuestIds: [],
     stats: {
       maxHp: 12,
       atk: 8,
@@ -51,6 +52,7 @@ export function createSampleUnit(): UnitDocument {
     currentClassId: "squire",
     spawnRole: "player",
     enemySpawnFloorOrdinals: [],
+    requiredQuestIds: [],
     stats: {
       maxHp: 15,
       atk: 9,

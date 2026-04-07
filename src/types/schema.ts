@@ -115,6 +115,7 @@ export interface SchemaDocument {
   unlockSource: SchemaUnlockSource;
   unlockCost: SchemaResourceWallet;
   unlockWadCost: number;
+  requiredQuestIds: string[];
   preferredRoomTags: SchemaRoomTag[];
   tagOutputModifiers: SchemaTagOutputModifier[];
   placeholder: boolean;

@@ -54,6 +54,11 @@ export interface DialogueLabel {
   id: string;
   label: string;
   entries: DialogueEntry[];
+  autoContinueTarget?: string;
+  choiceClusterId?: string;
+  choiceSourceBranchId?: string;
+  choiceSourceEntryId?: string;
+  continuationForChoiceClusterId?: string;
 }
 
 export interface DialogueDocument {

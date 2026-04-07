@@ -5,6 +5,7 @@ export interface DishDocument {
   name: string;
   cost: number;
   unlockAfterOperationFloor: number;
+  requiredQuestIds: string[];
   effect: string;
   description: string;
   createdAt: string;

@@ -118,6 +118,7 @@ function buildRuntimePreview(document: SchemaDocument) {
     unlockSource: document.unlockSource,
     unlockCost: document.unlockSource === "schema" ? toPartialResourceWallet(document.unlockCost) : undefined,
     unlockWadCost: document.unlockSource === "schema" ? document.unlockWadCost : undefined,
+    requiredQuestIds: document.requiredQuestIds,
     preferredRoomTags: document.preferredRoomTags,
     placeholder: document.placeholder || undefined,
     kind: document.kind
@@ -401,6 +402,26 @@ export function SchemaEditor() {
                       Starter entries are immediately authorized in Chaos Core and do not use unlock costs.
                     </div>
                   )}
+
+                  <div className="subsection">
+                    <h4>Quest Gate</h4>
+                    <div className="form-grid">
+                      <label className="field full">
+                        <span>Require completed quests</span>
+                        <textarea
+                          rows={3}
+                          value={serializeStringList(schema.requiredQuestIds)}
+                          placeholder="One quest id per line, or comma separated"
+                          onChange={(event) =>
+                            patchSchema((current) => ({
+                              ...current,
+                              requiredQuestIds: parseStringList(event.target.value)
+                            }))
+                          }
+                        />
+                      </label>
+                    </div>
+                  </div>
                 </Panel>
 
                 {!isFortification ? (
@@ -719,6 +740,7 @@ export function SchemaEditor() {
                     <span className="pill">{schema.kind}</span>
                     {schema.shortCode.trim() ? <span className="pill">{schema.shortCode.trim()}</span> : null}
                     {schema.unlockSource ? <span className="pill">{schema.unlockSource}</span> : null}
+                    {schema.requiredQuestIds.length > 0 ? <span className="pill">{schema.requiredQuestIds.length} quest gate(s)</span> : null}
                     {schema.placeholder ? <span className="pill">placeholder</span> : null}
                   </div>
                   <pre className="json-preview">{JSON.stringify(runtimePreview, null, 2)}</pre>

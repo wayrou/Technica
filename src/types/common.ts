@@ -4,8 +4,10 @@ export const TECHNICA_SOURCE_APP_VERSION = "0.1.0";
 
 export type EditorKind =
   | "dialogue"
+  | "mail"
   | "quest"
   | "map"
+  | "field_enemy"
   | "npc"
   | "gear"
   | "item"
@@ -16,8 +18,10 @@ export type EditorKind =
   | "crafting"
   | "dish"
   | "fieldmod"
-  | "schema";
-export type DatabaseContentType = Exclude<EditorKind, "crafting" | "dish" | "fieldmod">;
+  | "schema"
+  | "codex"
+  | "decoration";
+export type DatabaseContentType = Exclude<EditorKind, "crafting" | "dish" | "decoration">;
 export type Severity = "error" | "warning";
 export type KeyValueRecord = Record<string, string>;
 export type ExportTarget = "generic" | "chaos-core";

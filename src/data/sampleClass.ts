@@ -63,6 +63,11 @@ export function createSampleClass(): ClassDocument {
         requiredRank: 3
       },
       {
+        type: "quest_completed",
+        requiredQuestId: "restore_signal_grid",
+        description: "Finish the relay-restoration operation dossier."
+      },
+      {
         type: "milestone",
         description: "Secure 3 comms arrays during operations"
       }

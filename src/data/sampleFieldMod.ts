@@ -20,6 +20,7 @@ export function createBlankFieldMod(): FieldModDocument {
     cost: 10,
     rarity: "common",
     unlockAfterOperationFloor: 0,
+    requiredQuestIds: [],
     createdAt: timestamp,
     updatedAt: timestamp
   };
@@ -54,6 +55,7 @@ export function createSampleFieldMod(): FieldModDocument {
     cost: 10,
     rarity: "common",
     unlockAfterOperationFloor: 4,
+    requiredQuestIds: [],
     createdAt: timestamp,
     updatedAt: timestamp
   };

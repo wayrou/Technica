@@ -94,29 +94,71 @@ interface DialoguePreviewProps {
 }
 
 export function DialoguePreview({ document }: DialoguePreviewProps) {
-  if (document.labels.length === 0) {
+  const visibleLabels = document.labels.filter((label) => !label.continuationForChoiceClusterId);
+  const continuationLabelsByClusterId = new Map(
+    document.labels
+      .filter((label) => label.continuationForChoiceClusterId)
+      .map((label) => [label.continuationForChoiceClusterId as string, label])
+  );
+  const lastVisibleBranchIdByClusterId = new Map<string, string>();
+  visibleLabels.forEach((label) => {
+    if (label.choiceClusterId) {
+      lastVisibleBranchIdByClusterId.set(label.choiceClusterId, label.id);
+    }
+  });
+
+  if (visibleLabels.length === 0) {
     return <div className="empty-state">Add a conversation branch to begin previewing the flow.</div>;
   }
 
   return (
     <div className="flow-grid">
-      {document.labels.map((label) => (
-        <details key={label.id} className="flow-card flow-branch" open>
-          <summary className="flow-branch-summary">
-            <div>
-              <h3>{label.label}</h3>
-              <p>{label.entries.length} entries</p>
-            </div>
-            {label.label === document.entryLabel ? <span className="pill accent">entry</span> : null}
-          </summary>
-          <div className="flow-card-body">
-            {label.entries.map((entry) => (
-              <div key={entry.id} className="flow-node-shell">
-                {renderEntry(entry)}
+      {visibleLabels.map((label) => (
+        <div key={label.id} className="flow-preview-stack">
+          <details className="flow-card flow-branch" open>
+            <summary className="flow-branch-summary">
+              <div>
+                <h3>{label.label}</h3>
+                <p>{label.entries.length} entries</p>
               </div>
-            ))}
-          </div>
-        </details>
+              <div className="chip-row">
+                {label.choiceClusterId ? <span className="pill">choice branch</span> : null}
+                {label.label === document.entryLabel ? <span className="pill accent">entry</span> : null}
+              </div>
+            </summary>
+            <div className="flow-card-body">
+              {label.entries.map((entry) => (
+                <div key={entry.id} className="flow-node-shell">
+                  {renderEntry(entry)}
+                </div>
+              ))}
+              {label.autoContinueTarget ? (
+                <div className="flow-node-shell">{renderTargetConnector(label.autoContinueTarget)}</div>
+              ) : null}
+            </div>
+          </details>
+
+          {label.choiceClusterId &&
+          continuationLabelsByClusterId.has(label.choiceClusterId) &&
+          lastVisibleBranchIdByClusterId.get(label.choiceClusterId) === label.id ? (
+            <details className="flow-card flow-branch" open>
+              <summary className="flow-branch-summary">
+                <div>
+                  <h3>After choices</h3>
+                  <p>{continuationLabelsByClusterId.get(label.choiceClusterId)?.entries.length ?? 0} entries</p>
+                </div>
+                <span className="pill accent">shared</span>
+              </summary>
+              <div className="flow-card-body">
+                {continuationLabelsByClusterId.get(label.choiceClusterId)?.entries.map((entry) => (
+                  <div key={entry.id} className="flow-node-shell">
+                    {renderEntry(entry)}
+                  </div>
+                ))}
+              </div>
+            </details>
+          ) : null}
+        </div>
       ))}
     </div>
   );

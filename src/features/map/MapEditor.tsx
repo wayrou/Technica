@@ -44,7 +44,7 @@ import {
   terrainPalette
 } from "./mapUtils";
 
-type MapTool = "paint" | "erase" | "select" | "move" | "object" | "zone" | "npc" | "pan";
+type MapTool = "paint" | "erase" | "select" | "move" | "object" | "zone" | "npc" | "enemy" | "pan";
 
 type MapNpcMarker = {
   entryKey: string;
@@ -55,6 +55,35 @@ type MapNpcMarker = {
   tileY: number;
   origin: "game" | "technica";
   sourceFile?: string;
+};
+
+const MAP_TOOL_OPTIONS: Array<{
+  id: MapTool;
+  label: string;
+  shortcut: string;
+  hint: string;
+}> = [
+  { id: "paint", label: "Paint", shortcut: "B", hint: "Paint terrain and collision flags." },
+  { id: "erase", label: "Erase", shortcut: "E", hint: "Reset tiles back to the default grass tile." },
+  { id: "select", label: "Select", shortcut: "V", hint: "Inspect a tile, object, zone, or NPC marker." },
+  { id: "move", label: "Move", shortcut: "G", hint: "Reposition the selected object or zone." },
+  { id: "object", label: "Object", shortcut: "O", hint: "Drop a new object onto the clicked tile." },
+  { id: "zone", label: "Zone", shortcut: "Z", hint: "Drag out a trigger or interaction rectangle." },
+  { id: "npc", label: "NPC", shortcut: "N", hint: "Place the chosen NPC onto a clicked tile." },
+  { id: "enemy", label: "Enemy", shortcut: "L", hint: "Place a light field enemy that flips Chaos Core into combat mode." },
+  { id: "pan", label: "Pan", shortcut: "Space", hint: "Drag the map viewport around." }
+];
+
+const MAP_TOOL_SHORTCUTS: Partial<Record<string, MapTool>> = {
+  b: "paint",
+  e: "erase",
+  v: "select",
+  g: "move",
+  o: "object",
+  z: "zone",
+  n: "npc",
+  l: "enemy",
+  h: "pan"
 };
 
 const MAP_STORAGE_KEY = "technica.map.document";
@@ -77,6 +106,30 @@ function createDefaultObject(x: number, y: number, existingIds: string[]): MapOb
     width: 1,
     height: 1,
     metadata: {}
+  };
+}
+
+function isEnemyObject(object: MapObject) {
+  return object.type.trim().toLowerCase() === "enemy";
+}
+
+function createDefaultEnemyObject(x: number, y: number, existingIds: string[]): MapObject {
+  return {
+    id: createSequentialId("enemy", existingIds),
+    type: "enemy",
+    sprite: "light_enemy",
+    label: "Light Enemy",
+    action: "",
+    x,
+    y,
+    width: 1,
+    height: 1,
+    metadata: {
+      enemyKind: "light",
+      hp: "3",
+      speed: "90",
+      aggroRange: "200"
+    }
   };
 }
 
@@ -141,12 +194,15 @@ export function MapEditor() {
     walls: true,
     objects: true,
     zones: true,
-    npcs: true
+    npcs: true,
+    enemies: true
   });
-  const [selectedNpcEntryKey, setSelectedNpcEntryKey] = useState("");
+  const [selectedNpcPlacementEntryKey, setSelectedNpcPlacementEntryKey] = useState("");
+  const [selectedNpcMarkerEntryKey, setSelectedNpcMarkerEntryKey] = useState<string | null>(null);
   const [isPlacingNpc, setIsPlacingNpc] = useState(false);
   const [isSendingToDesktop, setIsSendingToDesktop] = useState(false);
   const [isPainting, setIsPainting] = useState(false);
+  const [hoverCell, setHoverCell] = useState<{ x: number; y: number } | null>(null);
   const [zoneDrag, setZoneDrag] = useState<{ start: { x: number; y: number }; end: { x: number; y: number } } | null>(null);
   const [panState, setPanState] = useState<{
     startX: number;
@@ -160,7 +216,16 @@ export function MapEditor() {
   const issues = useMemo(() => validateMapDocument(deferredMap), [deferredMap]);
   const canSendToDesktop = runtime.isMobile && Boolean(runtime.sessionOrigin && runtime.pairingToken);
   const selectedObject = map.objects.find((item) => item.id === selectedObjectId) ?? null;
+  const selectedEnemyObject = selectedObject && isEnemyObject(selectedObject) ? selectedObject : null;
   const selectedZone = map.zones.find((item) => item.id === selectedZoneId) ?? null;
+  const mapEnemyObjects = useMemo(
+    () => map.objects.filter((item) => isEnemyObject(item)),
+    [map.objects]
+  );
+  const mapNonEnemyObjects = useMemo(
+    () => map.objects.filter((item) => !isEnemyObject(item)),
+    [map.objects]
+  );
   const npcEntries = summaryStates.npc.entries;
   const mapNpcMarkers = useMemo(
     () =>
@@ -188,12 +253,16 @@ export function MapEditor() {
         .filter((entry): entry is MapNpcMarker => entry !== null && entry.mapId === map.id),
     [map.id, npcEntries]
   );
-  const selectedNpcEntry = npcEntries.find((entry) => entry.entryKey === selectedNpcEntryKey) ?? null;
+  const selectedNpcPlacementEntry =
+    npcEntries.find((entry) => entry.entryKey === selectedNpcPlacementEntryKey) ?? null;
   const cellSize = Math.max(28, Math.round(map.tileSize * 0.72 * zoom));
   const gridGap = 1;
   const cellStride = cellSize + gridGap;
   const mapCanvasWidth = map.width * cellSize + Math.max(0, map.width - 1) * gridGap;
   const mapCanvasHeight = map.height * cellSize + Math.max(0, map.height - 1) * gridGap;
+  const activeTool = MAP_TOOL_OPTIONS.find((option) => option.id === tool) ?? MAP_TOOL_OPTIONS[0];
+  const selectedNpcMarker =
+    mapNpcMarkers.find((marker) => marker.entryKey === selectedNpcMarkerEntryKey) ?? null;
 
   useEffect(() => {
     setDimensionDraft({ width: map.width, height: map.height });
@@ -229,7 +298,8 @@ export function MapEditor() {
 
   useEffect(() => {
     if (!desktopEnabled || !repoPath.trim()) {
-      setSelectedNpcEntryKey("");
+      setSelectedNpcPlacementEntryKey("");
+      setSelectedNpcMarkerEntryKey(null);
       return;
     }
 
@@ -237,13 +307,22 @@ export function MapEditor() {
   }, [desktopEnabled, ensureSummaries, repoPath]);
 
   useEffect(() => {
-    setSelectedNpcEntryKey((current) => {
+    setSelectedNpcPlacementEntryKey((current) => {
       if (current && npcEntries.some((entry) => entry.entryKey === current)) {
         return current;
       }
       return npcEntries[0]?.entryKey ?? "";
     });
   }, [npcEntries]);
+
+  useEffect(() => {
+    setSelectedNpcMarkerEntryKey((current) => {
+      if (current && mapNpcMarkers.some((marker) => marker.entryKey === current)) {
+        return current;
+      }
+      return null;
+    });
+  }, [mapNpcMarkers]);
 
   useEffect(() => {
     function handleMobileInboxOpen(event: Event) {
@@ -272,6 +351,57 @@ export function MapEditor() {
     };
   }, [setMap]);
 
+  useEffect(() => {
+    function handleMapShortcuts(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const isTypingTarget =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        Boolean(target?.isContentEditable);
+
+      if (isTypingTarget || event.ctrlKey || event.metaKey || event.altKey) {
+        return;
+      }
+
+      if (event.code === "Space") {
+        event.preventDefault();
+        setTool("pan");
+        return;
+      }
+
+      const shortcutTool = MAP_TOOL_SHORTCUTS[event.key.toLowerCase()];
+      if (shortcutTool) {
+        event.preventDefault();
+        setTool(shortcutTool);
+        return;
+      }
+
+      if (event.key === "+" || event.key === "=") {
+        event.preventDefault();
+        setZoom((current) => Math.min(1.8, Math.round((current + 0.1) * 10) / 10));
+        return;
+      }
+
+      if (event.key === "-") {
+        event.preventDefault();
+        setZoom((current) => Math.max(0.6, Math.round((current - 0.1) * 10) / 10));
+        return;
+      }
+
+      if (event.key === "Escape") {
+        setSelectedCell(null);
+        setSelectedObjectId(null);
+        setSelectedZoneId(null);
+        setSelectedNpcMarkerEntryKey(null);
+        setZoneDrag(null);
+      }
+    }
+
+    window.addEventListener("keydown", handleMapShortcuts);
+    return () => window.removeEventListener("keydown", handleMapShortcuts);
+  }, []);
+
   async function placeNpcOnMap(x: number, y: number) {
     if (!desktopEnabled) {
       notify("NPC placement writes directly into the Chaos Core repo and requires Technica desktop mode.");
@@ -283,14 +413,14 @@ export function MapEditor() {
       return;
     }
 
-    if (!selectedNpcEntry) {
+    if (!selectedNpcPlacementEntry) {
       notify("Select an NPC from the placement dropdown before clicking a map tile.");
       return;
     }
 
     setIsPlacingNpc(true);
     try {
-      const loaded = await loadEntry("npc", selectedNpcEntry.entryKey);
+      const loaded = await loadEntry("npc", selectedNpcPlacementEntry.entryKey);
       const parsed = JSON.parse(loaded.editorContent ?? loaded.sourceContent ?? loaded.runtimeContent);
       if (!isNpcDocument(parsed)) {
         notify("The selected NPC entry is not in a Technica-compatible NPC format.");
@@ -315,6 +445,7 @@ export function MapEditor() {
 
       await ensureSummaries("npc", { force: true });
       emitChaosCoreDatabaseUpdate("npc");
+      setSelectedNpcMarkerEntryKey(loaded.entryKey);
       notify(`Placed '${nextNpcDocument.name}' at ${x}, ${y} on '${map.name}'.`);
     } catch (error) {
       notify(error instanceof Error ? error.message : "Could not place the selected NPC on this map.");
@@ -327,34 +458,160 @@ export function MapEditor() {
     setMap((current) => touchMap(updater(current)));
   }
 
-  function applyBrush(x: number, y: number) {
+  function updateTileAt(x: number, y: number, updater: (tile: MapDocument["tiles"][number][number]) => MapDocument["tiles"][number][number]) {
     patchMap((current) => ({
       ...current,
       tiles: current.tiles.map((row, rowIndex) =>
-        row.map((tile, columnIndex) =>
-          rowIndex === y && columnIndex === x
-            ? {
-                ...tile,
-                terrain: brush.terrain,
-                walkable: brush.walkable,
-                wall: brush.wall,
-                floor: brush.floor
-              }
-            : tile
-        )
+        row.map((tile, columnIndex) => (rowIndex === y && columnIndex === x ? updater(tile) : tile))
       )
+    }));
+  }
+
+  function updateObjectById(objectId: string, updater: (item: MapObject) => MapObject) {
+    patchMap((current) => ({
+      ...current,
+      objects: current.objects.map((item) => (item.id === objectId ? updater(item) : item))
+    }));
+  }
+
+  function updateZoneById(zoneId: string, updater: (item: MapZone) => MapZone) {
+    patchMap((current) => ({
+      ...current,
+      zones: current.zones.map((item) => (item.id === zoneId ? updater(item) : item))
+    }));
+  }
+
+  function applyBrushToWholeMap() {
+    patchMap((current) => ({
+      ...current,
+      tiles: current.tiles.map((row) =>
+        row.map((tile) => ({
+          ...tile,
+          terrain: brush.terrain,
+          walkable: brush.walkable,
+          wall: brush.wall,
+          floor: brush.floor
+        }))
+      )
+    }));
+  }
+
+  function frameMapBoundsWithWalls() {
+    patchMap((current) => ({
+      ...current,
+      tiles: current.tiles.map((row, rowIndex) =>
+        row.map((tile, columnIndex) => {
+          const isBoundary =
+            rowIndex === 0 ||
+            columnIndex === 0 ||
+            rowIndex === current.height - 1 ||
+            columnIndex === current.width - 1;
+
+          if (!isBoundary) {
+            return tile;
+          }
+
+          return {
+            ...tile,
+            terrain: brush.terrain,
+            walkable: false,
+            wall: true,
+            floor: brush.floor
+          };
+        })
+      )
+    }));
+  }
+
+  function syncBrushFromSelectedTile() {
+    if (!selectedCell) {
+      notify("Select a tile first to copy its terrain and collision flags into the brush.");
+      return;
+    }
+
+    const tile = map.tiles[selectedCell.y]?.[selectedCell.x];
+    if (!tile) {
+      return;
+    }
+
+    setBrush({
+      terrain: tile.terrain,
+      walkable: tile.walkable,
+      wall: tile.wall,
+      floor: tile.floor
+    });
+    setTool("paint");
+  }
+
+  function duplicateSelectedObject() {
+    if (!selectedObject) {
+      return;
+    }
+
+    const nextObject: MapObject = {
+      ...selectedObject,
+      id: createSequentialId(isEnemyObject(selectedObject) ? "enemy" : "object", map.objects.map((item) => item.id)),
+      label: selectedObject.label ? `${selectedObject.label} Copy` : selectedObject.label,
+      x: Math.min(map.width - selectedObject.width, selectedObject.x + 1),
+      y: Math.min(map.height - selectedObject.height, selectedObject.y + 1)
+    };
+
+    patchMap((current) => ({
+      ...current,
+      objects: [...current.objects, nextObject]
+    }));
+    setSelectedObjectId(nextObject.id);
+    setSelectedZoneId(null);
+    setSelectedCell(null);
+  }
+
+  function duplicateSelectedZone() {
+    if (!selectedZone) {
+      return;
+    }
+
+    const nextZone: MapZone = {
+      ...selectedZone,
+      id: createSequentialId("zone", map.zones.map((item) => item.id)),
+      label: selectedZone.label ? `${selectedZone.label} Copy` : selectedZone.label,
+      x: Math.min(map.width - selectedZone.width, selectedZone.x + 1),
+      y: Math.min(map.height - selectedZone.height, selectedZone.y + 1)
+    };
+
+    patchMap((current) => ({
+      ...current,
+      zones: [...current.zones, nextZone]
+    }));
+    setSelectedZoneId(nextZone.id);
+    setSelectedObjectId(null);
+    setSelectedCell(null);
+  }
+
+  function applyBrush(x: number, y: number) {
+    updateTileAt(x, y, (tile) => ({
+      ...tile,
+      terrain: brush.terrain,
+      walkable: brush.walkable,
+      wall: brush.wall,
+      floor: brush.floor
     }));
     setSelectedCell({ x, y });
     setSelectedObjectId(null);
     setSelectedZoneId(null);
+    setSelectedNpcMarkerEntryKey(null);
   }
 
   function eraseTile(x: number, y: number) {
-    patchMap((current) => ({
-      ...current,
-      tiles: current.tiles.map((row, rowIndex) =>
-        row.map((tile, columnIndex) => (rowIndex === y && columnIndex === x ? createDefaultTile() : tile))
-      )
+    updateTileAt(x, y, () => createDefaultTile());
+  }
+
+  function updateObjectMetadataValue(objectId: string, key: string, value: string) {
+    updateObjectById(objectId, (item) => ({
+      ...item,
+      metadata: {
+        ...item.metadata,
+        [key]: value
+      }
     }));
   }
 
@@ -375,6 +632,7 @@ export function MapEditor() {
       setSelectedCell({ x, y });
       setSelectedObjectId(null);
       setSelectedZoneId(null);
+      setSelectedNpcMarkerEntryKey(null);
       return;
     }
 
@@ -407,6 +665,21 @@ export function MapEditor() {
       }));
       setSelectedObjectId(object.id);
       setSelectedZoneId(null);
+      setSelectedCell(null);
+      setSelectedNpcMarkerEntryKey(null);
+      return;
+    }
+
+    if (tool === "enemy") {
+      const object = createDefaultEnemyObject(x, y, map.objects.map((item) => item.id));
+      patchMap((current) => ({
+        ...current,
+        objects: [...current.objects, object]
+      }));
+      setSelectedObjectId(object.id);
+      setSelectedZoneId(null);
+      setSelectedCell(null);
+      setSelectedNpcMarkerEntryKey(null);
       return;
     }
 
@@ -416,6 +689,8 @@ export function MapEditor() {
         end: { x, y }
       });
       setSelectedObjectId(null);
+      setSelectedCell(null);
+      setSelectedNpcMarkerEntryKey(null);
       return;
     }
 
@@ -436,6 +711,8 @@ export function MapEditor() {
   }
 
   function handleCellPointerEnter(x: number, y: number) {
+    setHoverCell({ x, y });
+
     if (tool === "paint" && isPainting) {
       applyBrush(x, y);
     }
@@ -456,6 +733,10 @@ export function MapEditor() {
 
     viewportRef.current.scrollLeft = panState.scrollLeft - (event.clientX - panState.startX);
     viewportRef.current.scrollTop = panState.scrollTop - (event.clientY - panState.startY);
+  }
+
+  function handleViewportPointerLeave() {
+    setHoverCell(null);
   }
 
   function getOverlayRectStyle(x: number, y: number, width: number, height: number) {
@@ -549,7 +830,7 @@ export function MapEditor() {
           contentType: "map",
           contentId: currentMap.id,
           title: currentMap.name,
-          summary: `${currentMap.width}x${currentMap.height} · ${currentMap.objects.length} objects · ${currentMap.zones.length} zones`,
+          summary: `${currentMap.width}x${currentMap.height} · ${currentMap.objects.filter((item) => !isEnemyObject(item)).length} objects · ${currentMap.objects.filter((item) => isEnemyObject(item)).length} enemies · ${currentMap.zones.length} zones`,
           payload: currentMap
         }
       });
@@ -560,6 +841,474 @@ export function MapEditor() {
       setIsSendingToDesktop(false);
     }
   }
+
+  const mapDatabasePanel = (
+    <ChaosCoreDatabasePanel
+      contentType="map"
+      currentDocument={map}
+      buildBundle={(current) => buildMapBundleForTarget(current, "chaos-core")}
+      onLoadEntry={handleLoadDatabaseEntry}
+      subtitle="Publish maps directly into the Chaos Core repo and reopen the live field maps here for iteration and balance work."
+    />
+  );
+
+  const selectionInspectorPanel = (
+    <Panel title="Selection Inspector" subtitle="Edit the selected tile, object, zone, or NPC marker directly.">
+      {selectedCell ? (
+        <div className="stack-list">
+          <article className="item-card">
+            <div className="item-card-header">
+              <h3>
+                Tile {selectedCell.x}, {selectedCell.y}
+              </h3>
+              <div className="toolbar">
+                <button type="button" className="ghost-button" onClick={syncBrushFromSelectedTile}>
+                  Copy to brush
+                </button>
+              </div>
+            </div>
+            <div className="form-grid">
+              <label className="field">
+                <span>Terrain</span>
+                <select
+                  value={map.tiles[selectedCell.y][selectedCell.x].terrain}
+                  onChange={(event) =>
+                    updateTileAt(selectedCell.x, selectedCell.y, (tile) => ({
+                      ...tile,
+                      terrain: event.target.value as MapBrushState["terrain"]
+                    }))
+                  }
+                >
+                  {terrainPalette.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field field-inline">
+                <span>Walkable</span>
+                <input
+                  type="checkbox"
+                  checked={map.tiles[selectedCell.y][selectedCell.x].walkable}
+                  onChange={(event) =>
+                    updateTileAt(selectedCell.x, selectedCell.y, (tile) => ({
+                      ...tile,
+                      walkable: event.target.checked
+                    }))
+                  }
+                />
+              </label>
+              <label className="field field-inline">
+                <span>Wall</span>
+                <input
+                  type="checkbox"
+                  checked={map.tiles[selectedCell.y][selectedCell.x].wall}
+                  onChange={(event) =>
+                    updateTileAt(selectedCell.x, selectedCell.y, (tile) => ({
+                      ...tile,
+                      wall: event.target.checked
+                    }))
+                  }
+                />
+              </label>
+              <label className="field field-inline">
+                <span>Floor</span>
+                <input
+                  type="checkbox"
+                  checked={map.tiles[selectedCell.y][selectedCell.x].floor}
+                  onChange={(event) =>
+                    updateTileAt(selectedCell.x, selectedCell.y, (tile) => ({
+                      ...tile,
+                      floor: event.target.checked
+                    }))
+                  }
+                />
+              </label>
+              <label className="field full">
+                <span>Tile metadata</span>
+                <textarea
+                  rows={4}
+                  value={serializeKeyValueLines(map.tiles[selectedCell.y][selectedCell.x].metadata)}
+                  onChange={(event) =>
+                    updateTileAt(selectedCell.x, selectedCell.y, (tile) => ({
+                      ...tile,
+                      metadata: parseKeyValueLines(event.target.value)
+                    }))
+                  }
+                />
+              </label>
+            </div>
+          </article>
+        </div>
+      ) : null}
+
+      {selectedObject ? (
+        <article className="item-card">
+          <div className="item-card-header">
+            <h3>{selectedObject.label || selectedObject.id}</h3>
+            <div className="toolbar">
+              <button type="button" className="ghost-button" onClick={duplicateSelectedObject}>
+                Duplicate
+              </button>
+              <button
+                type="button"
+                className="ghost-button danger"
+                onClick={() => {
+                  if (confirmAction(`Remove object '${selectedObject.id}'?`)) {
+                    patchMap((current) => ({
+                      ...current,
+                      objects: current.objects.filter((item) => item.id !== selectedObject.id)
+                    }));
+                    setSelectedObjectId(null);
+                  }
+                }}
+              >
+                Remove object
+              </button>
+            </div>
+          </div>
+          <div className="form-grid">
+            <label className="field">
+              <span>Object id</span>
+              <input
+                value={selectedObject.id}
+                onChange={(event) =>
+                  updateObjectById(selectedObject.id, (item) => ({ ...item, id: event.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Type</span>
+              <select
+                value={selectedObject.type}
+                onChange={(event) =>
+                  updateObjectById(selectedObject.id, (item) => ({ ...item, type: event.target.value }))
+                }
+              >
+                <option value="interactive">Interactive</option>
+                <option value="station">Station</option>
+                <option value="resource">Resource</option>
+                <option value="enemy">Enemy</option>
+                <option value="door">Door</option>
+                <option value="decoration">Decoration</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Sprite</span>
+              <input
+                value={selectedObject.sprite}
+                onChange={(event) =>
+                  updateObjectById(selectedObject.id, (item) => ({ ...item, sprite: event.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Label</span>
+              <input
+                value={selectedObject.label}
+                onChange={(event) =>
+                  updateObjectById(selectedObject.id, (item) => ({ ...item, label: event.target.value }))
+                }
+              />
+            </label>
+            {!selectedEnemyObject ? (
+              <label className="field">
+                <span>Action</span>
+                <input
+                  value={selectedObject.action}
+                  onChange={(event) =>
+                    updateObjectById(selectedObject.id, (item) => ({ ...item, action: event.target.value }))
+                  }
+                />
+              </label>
+            ) : (
+              <>
+                <label className="field">
+                  <span>Enemy preset</span>
+                  <select
+                    value={selectedEnemyObject.metadata.enemyKind || "light"}
+                    onChange={(event) => updateObjectMetadataValue(selectedEnemyObject.id, "enemyKind", event.target.value)}
+                  >
+                    <option value="light">Light Enemy</option>
+                  </select>
+                </label>
+                <label className="field">
+                  <span>HP</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={selectedEnemyObject.metadata.hp || "3"}
+                    onChange={(event) => updateObjectMetadataValue(selectedEnemyObject.id, "hp", event.target.value)}
+                  />
+                </label>
+                <label className="field">
+                  <span>Speed</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={selectedEnemyObject.metadata.speed || "90"}
+                    onChange={(event) => updateObjectMetadataValue(selectedEnemyObject.id, "speed", event.target.value)}
+                  />
+                </label>
+                <label className="field">
+                  <span>Aggro range</span>
+                  <input
+                    type="number"
+                    min={32}
+                    value={selectedEnemyObject.metadata.aggroRange || "200"}
+                    onChange={(event) =>
+                      updateObjectMetadataValue(selectedEnemyObject.id, "aggroRange", event.target.value)
+                    }
+                  />
+                </label>
+              </>
+            )}
+            <label className="field">
+              <span>X</span>
+              <input
+                type="number"
+                min={0}
+                max={Math.max(0, map.width - selectedObject.width)}
+                value={selectedObject.x}
+                onChange={(event) =>
+                  updateObjectById(selectedObject.id, (item) => ({
+                    ...item,
+                    x: Math.max(0, Math.min(map.width - item.width, Number(event.target.value || 0)))
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Y</span>
+              <input
+                type="number"
+                min={0}
+                max={Math.max(0, map.height - selectedObject.height)}
+                value={selectedObject.y}
+                onChange={(event) =>
+                  updateObjectById(selectedObject.id, (item) => ({
+                    ...item,
+                    y: Math.max(0, Math.min(map.height - item.height, Number(event.target.value || 0)))
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Width</span>
+              <input
+                type="number"
+                min={1}
+                value={selectedObject.width}
+                onChange={(event) =>
+                  updateObjectById(selectedObject.id, (item) => ({
+                    ...item,
+                    width: Math.max(1, Math.min(map.width - item.x, Number(event.target.value || 1)))
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Height</span>
+              <input
+                type="number"
+                min={1}
+                value={selectedObject.height}
+                onChange={(event) =>
+                  updateObjectById(selectedObject.id, (item) => ({
+                    ...item,
+                    height: Math.max(1, Math.min(map.height - item.y, Number(event.target.value || 1)))
+                  }))
+                }
+              />
+            </label>
+            <label className="field full">
+              <span>Metadata</span>
+              <textarea
+                rows={4}
+                value={serializeKeyValueLines(selectedObject.metadata)}
+                onChange={(event) =>
+                  updateObjectById(selectedObject.id, (item) => ({
+                    ...item,
+                    metadata: parseKeyValueLines(event.target.value)
+                  }))
+                }
+              />
+            </label>
+          </div>
+        </article>
+      ) : null}
+
+      {selectedZone ? (
+        <article className="item-card">
+          <div className="item-card-header">
+            <h3>{selectedZone.label || selectedZone.id}</h3>
+            <div className="toolbar">
+              <button type="button" className="ghost-button" onClick={duplicateSelectedZone}>
+                Duplicate
+              </button>
+              <button
+                type="button"
+                className="ghost-button danger"
+                onClick={() => {
+                  if (confirmAction(`Remove zone '${selectedZone.id}'?`)) {
+                    patchMap((current) => ({
+                      ...current,
+                      zones: current.zones.filter((item) => item.id !== selectedZone.id)
+                    }));
+                    setSelectedZoneId(null);
+                  }
+                }}
+              >
+                Remove zone
+              </button>
+            </div>
+          </div>
+          <div className="form-grid">
+            <label className="field">
+              <span>Zone id</span>
+              <input
+                value={selectedZone.id}
+                onChange={(event) =>
+                  updateZoneById(selectedZone.id, (item) => ({ ...item, id: event.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Label</span>
+              <input
+                value={selectedZone.label}
+                onChange={(event) =>
+                  updateZoneById(selectedZone.id, (item) => ({ ...item, label: event.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Action</span>
+              <input
+                value={selectedZone.action}
+                onChange={(event) =>
+                  updateZoneById(selectedZone.id, (item) => ({ ...item, action: event.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>X</span>
+              <input
+                type="number"
+                min={0}
+                max={Math.max(0, map.width - selectedZone.width)}
+                value={selectedZone.x}
+                onChange={(event) =>
+                  updateZoneById(selectedZone.id, (item) => ({
+                    ...item,
+                    x: Math.max(0, Math.min(map.width - item.width, Number(event.target.value || 0)))
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Y</span>
+              <input
+                type="number"
+                min={0}
+                max={Math.max(0, map.height - selectedZone.height)}
+                value={selectedZone.y}
+                onChange={(event) =>
+                  updateZoneById(selectedZone.id, (item) => ({
+                    ...item,
+                    y: Math.max(0, Math.min(map.height - item.height, Number(event.target.value || 0)))
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Width</span>
+              <input
+                type="number"
+                min={1}
+                value={selectedZone.width}
+                onChange={(event) =>
+                  updateZoneById(selectedZone.id, (item) => ({
+                    ...item,
+                    width: Math.max(1, Math.min(map.width - item.x, Number(event.target.value || 1)))
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Height</span>
+              <input
+                type="number"
+                min={1}
+                value={selectedZone.height}
+                onChange={(event) =>
+                  updateZoneById(selectedZone.id, (item) => ({
+                    ...item,
+                    height: Math.max(1, Math.min(map.height - item.y, Number(event.target.value || 1)))
+                  }))
+                }
+              />
+            </label>
+            <label className="field full">
+              <span>Metadata</span>
+              <textarea
+                rows={4}
+                value={serializeKeyValueLines(selectedZone.metadata)}
+                onChange={(event) =>
+                  updateZoneById(selectedZone.id, (item) => ({
+                    ...item,
+                    metadata: parseKeyValueLines(event.target.value)
+                  }))
+                }
+              />
+            </label>
+          </div>
+        </article>
+      ) : null}
+
+      {selectedNpcMarker && !selectedCell && !selectedObject && !selectedZone ? (
+        <article className="item-card">
+          <div className="item-card-header">
+            <h3>{selectedNpcMarker.name}</h3>
+            <div className="chip-row">
+              <span className="pill">
+                {selectedNpcMarker.tileX}, {selectedNpcMarker.tileY}
+              </span>
+              <span className="pill">{selectedNpcMarker.origin === "game" ? "Game" : "Technica"}</span>
+            </div>
+          </div>
+          <div className="stack-list compact">
+            <p className="muted">
+              This marker is on <strong>{map.name}</strong>. Switch to the NPC tool and click a new tile to move it.
+            </p>
+            <div className="toolbar">
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => {
+                  setSelectedNpcPlacementEntryKey(selectedNpcMarker.entryKey);
+                  setTool("npc");
+                }}
+              >
+                Move this NPC
+              </button>
+              <button type="button" className="ghost-button" onClick={() => setSelectedNpcMarkerEntryKey(null)}>
+                Clear
+              </button>
+            </div>
+          </div>
+        </article>
+      ) : null}
+
+      {!selectedCell && !selectedObject && !selectedZone && !selectedNpcMarker ? (
+        <div className="empty-state compact">
+          Select a tile, object, zone, or NPC marker to edit it here. In move mode, click the grid to reposition the
+          selected object or zone.
+        </div>
+      ) : null}
+    </Panel>
+  );
 
   return (
     <div className={issues.length > 0 ? "workspace-grid" : "workspace-grid validation-collapsed"}>
@@ -578,16 +1327,64 @@ export function MapEditor() {
             </div>
           }
         >
-          <div className="tool-strip">
-            {(["paint", "erase", "select", "move", "object", "zone", "npc", "pan"] as MapTool[]).map((option) => (
+          <div className="chip-row">
+            <span className="pill accent">
+              {map.width} x {map.height}
+            </span>
+            <span className="pill">{map.width * map.height} tiles</span>
+              <span className="pill">{mapNonEnemyObjects.length} objects</span>
+              <span className="pill">{mapEnemyObjects.length} enemies</span>
+              <span className="pill">{map.zones.length} zones</span>
+            <span className="pill">{mapNpcMarkers.length} NPCs</span>
+            <span className="pill">Zoom {Math.round(zoom * 100)}%</span>
+          </div>
+
+          <div className="map-tool-grid">
+            {MAP_TOOL_OPTIONS.map((option) => (
               <button
-                key={option}
-                className={tool === option ? "tool-button active" : "tool-button"}
-                onClick={() => setTool(option)}
+                key={option.id}
+                type="button"
+                className={tool === option.id ? "map-tool-button active" : "map-tool-button"}
+                onClick={() => setTool(option.id)}
               >
-                {option}
+                <strong>{option.label}</strong>
+                <small>{option.shortcut}</small>
               </button>
             ))}
+          </div>
+
+          <div className="map-tool-hint">
+            <strong>{activeTool.label}</strong>
+            <span>{activeTool.hint}</span>
+          </div>
+
+          <div className="subsection">
+            <h4>Brush Presets</h4>
+            <div className="map-terrain-swatch-grid">
+              {terrainPalette.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={brush.terrain === option.value ? "terrain-swatch active" : "terrain-swatch"}
+                  style={{ ["--terrain-color" as string]: option.color }}
+                  onClick={() => setBrush((current) => ({ ...current, terrain: option.value }))}
+                >
+                  <span className="terrain-swatch-color" />
+                  <span>{option.label}</span>
+                </button>
+              ))}
+            </div>
+            <div className="toolbar">
+              <button type="button" className="ghost-button" onClick={applyBrushToWholeMap}>
+                Fill map with brush
+              </button>
+              <button type="button" className="ghost-button" onClick={frameMapBoundsWithWalls}>
+                Frame outer walls
+              </button>
+              <button type="button" className="ghost-button" onClick={syncBrushFromSelectedTile} disabled={!selectedCell}>
+                Copy selected tile to brush
+              </button>
+            </div>
           </div>
 
           <div className="form-grid">
@@ -679,7 +1476,8 @@ export function MapEditor() {
             </label>
           </div>
 
-          <div className="toolbar split">
+          <div className="subsection">
+            <h4>Visible Layers</h4>
             <div className="toolbar">
               <label className="inline-toggle">
                 <input
@@ -708,6 +1506,14 @@ export function MapEditor() {
               <label className="inline-toggle">
                 <input
                   type="checkbox"
+                  checked={layerVisibility.enemies}
+                  onChange={(event) => setLayerVisibility((current) => ({ ...current, enemies: event.target.checked }))}
+                />
+                Enemies
+              </label>
+              <label className="inline-toggle">
+                <input
+                  type="checkbox"
                   checked={layerVisibility.zones}
                   onChange={(event) => setLayerVisibility((current) => ({ ...current, zones: event.target.checked }))}
                 />
@@ -721,6 +1527,19 @@ export function MapEditor() {
                 />
                 NPCs
               </label>
+            </div>
+          </div>
+
+          <div className="toolbar split">
+            <div className="toolbar">
+              <button type="button" className="ghost-button" onClick={() => {
+                setSelectedCell(null);
+                setSelectedObjectId(null);
+                setSelectedZoneId(null);
+                setSelectedNpcMarkerEntryKey(null);
+              }}>
+                Clear selection
+              </button>
             </div>
             <div className="toolbar">
               <button type="button" className="ghost-button" onClick={handleResizeMap}>
@@ -766,6 +1585,13 @@ export function MapEditor() {
         <Panel
           title="NPC Placement"
           subtitle="Select an NPC from the Chaos Core database, switch to the NPC tool, and click a tile to place them on this map."
+          actions={
+            desktopEnabled ? (
+              <button type="button" className="ghost-button" onClick={() => void ensureSummaries("npc", { force: true })}>
+                Refresh NPCs
+              </button>
+            ) : undefined
+          }
         >
           {!desktopEnabled ? (
             <div className="empty-state compact">
@@ -775,10 +1601,10 @@ export function MapEditor() {
 
           <div className="form-grid">
             <label className="field full">
-              <span>NPC</span>
+              <span>Placement NPC</span>
               <select
-                value={selectedNpcEntryKey}
-                onChange={(event) => setSelectedNpcEntryKey(event.target.value)}
+                value={selectedNpcPlacementEntryKey}
+                onChange={(event) => setSelectedNpcPlacementEntryKey(event.target.value)}
                 disabled={!desktopEnabled || npcEntries.length === 0}
               >
                 {npcEntries.length === 0 ? <option value="">No NPCs found</option> : null}
@@ -793,9 +1619,38 @@ export function MapEditor() {
 
           <div className="chip-row">
             <span className="pill">{mapNpcMarkers.length} NPCs on this map</span>
-            {selectedNpcEntry ? <span className="pill accent">Placing {selectedNpcEntry.title}</span> : null}
+            {selectedNpcPlacementEntry ? <span className="pill accent">Placing {selectedNpcPlacementEntry.title}</span> : null}
+            {selectedNpcMarker ? (
+              <span className="pill">
+                Selected marker {selectedNpcMarker.tileX}, {selectedNpcMarker.tileY}
+              </span>
+            ) : null}
             {isPlacingNpc ? <span className="pill">Saving placement...</span> : null}
           </div>
+
+          {selectedNpcMarker ? (
+            <div className="map-selection-summary">
+              <strong>{selectedNpcMarker.name}</strong>
+              <span>
+                {selectedNpcMarker.contentId} at {selectedNpcMarker.tileX}, {selectedNpcMarker.tileY}
+              </span>
+              <div className="toolbar">
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => {
+                    setSelectedNpcPlacementEntryKey(selectedNpcMarker.entryKey);
+                    setTool("npc");
+                  }}
+                >
+                  Use for placement
+                </button>
+                <button type="button" className="ghost-button" onClick={() => setSelectedNpcMarkerEntryKey(null)}>
+                  Clear marker selection
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           <div className="database-list">
             {mapNpcMarkers.length === 0 ? (
@@ -806,9 +1661,9 @@ export function MapEditor() {
                   key={marker.entryKey}
                   type="button"
                   className={
-                    marker.entryKey === selectedNpcEntryKey ? "database-entry active" : "database-entry"
+                    marker.entryKey === selectedNpcMarkerEntryKey ? "database-entry active" : "database-entry"
                   }
-                  onClick={() => setSelectedNpcEntryKey(marker.entryKey)}
+                  onClick={() => setSelectedNpcMarkerEntryKey(marker.entryKey)}
                 >
                   <strong>{marker.name}</strong>
                   <span>
@@ -821,395 +1676,75 @@ export function MapEditor() {
           </div>
         </Panel>
 
-        <Panel title="Selection Inspector" subtitle="Edit the selected tile, object, or zone directly.">
-          {selectedCell ? (
-            <div className="stack-list">
-              <article className="item-card">
-                <div className="item-card-header">
-                  <h3>
-                    Tile {selectedCell.x}, {selectedCell.y}
-                  </h3>
-                </div>
-                <div className="form-grid">
-                  <label className="field">
-                    <span>Terrain</span>
-                    <select
-                      value={map.tiles[selectedCell.y][selectedCell.x].terrain}
-                      onChange={(event) =>
-                        patchMap((current) => ({
-                          ...current,
-                          tiles: current.tiles.map((row, rowIndex) =>
-                            row.map((tile, columnIndex) =>
-                              rowIndex === selectedCell.y && columnIndex === selectedCell.x
-                                ? { ...tile, terrain: event.target.value as MapBrushState["terrain"] }
-                                : tile
-                            )
-                          )
-                        }))
-                      }
-                    >
-                      {terrainPalette.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field field-inline">
-                    <span>Walkable</span>
-                    <input
-                      type="checkbox"
-                      checked={map.tiles[selectedCell.y][selectedCell.x].walkable}
-                      onChange={(event) =>
-                        patchMap((current) => ({
-                          ...current,
-                          tiles: current.tiles.map((row, rowIndex) =>
-                            row.map((tile, columnIndex) =>
-                              rowIndex === selectedCell.y && columnIndex === selectedCell.x
-                                ? { ...tile, walkable: event.target.checked }
-                                : tile
-                            )
-                          )
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className="field field-inline">
-                    <span>Wall</span>
-                    <input
-                      type="checkbox"
-                      checked={map.tiles[selectedCell.y][selectedCell.x].wall}
-                      onChange={(event) =>
-                        patchMap((current) => ({
-                          ...current,
-                          tiles: current.tiles.map((row, rowIndex) =>
-                            row.map((tile, columnIndex) =>
-                              rowIndex === selectedCell.y && columnIndex === selectedCell.x
-                                ? { ...tile, wall: event.target.checked }
-                                : tile
-                            )
-                          )
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className="field field-inline">
-                    <span>Floor</span>
-                    <input
-                      type="checkbox"
-                      checked={map.tiles[selectedCell.y][selectedCell.x].floor}
-                      onChange={(event) =>
-                        patchMap((current) => ({
-                          ...current,
-                          tiles: current.tiles.map((row, rowIndex) =>
-                            row.map((tile, columnIndex) =>
-                              rowIndex === selectedCell.y && columnIndex === selectedCell.x
-                                ? { ...tile, floor: event.target.checked }
-                                : tile
-                            )
-                          )
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className="field full">
-                    <span>Tile metadata</span>
-                    <textarea
-                      rows={4}
-                      value={serializeKeyValueLines(map.tiles[selectedCell.y][selectedCell.x].metadata)}
-                      onChange={(event) =>
-                        patchMap((current) => ({
-                          ...current,
-                          tiles: current.tiles.map((row, rowIndex) =>
-                            row.map((tile, columnIndex) =>
-                              rowIndex === selectedCell.y && columnIndex === selectedCell.x
-                                ? { ...tile, metadata: parseKeyValueLines(event.target.value) }
-                                : tile
-                            )
-                          )
-                        }))
-                      }
-                    />
-                  </label>
-                </div>
-              </article>
-            </div>
-          ) : null}
-
-          {selectedObject ? (
-            <article className="item-card">
-              <div className="item-card-header">
-                <h3>{selectedObject.label || selectedObject.id}</h3>
-                  <button
-                    type="button"
-                    className="ghost-button danger"
-                    onClick={() => {
-                    if (confirmAction(`Remove object '${selectedObject.id}'?`)) {
-                      patchMap((current) => ({
-                        ...current,
-                        objects: current.objects.filter((item) => item.id !== selectedObject.id)
-                      }));
-                      setSelectedObjectId(null);
-                    }
-                  }}
-                >
-                  Remove object
-                </button>
-              </div>
-              <div className="form-grid">
-                <label className="field">
-                  <span>Object id</span>
-                  <input
-                    value={selectedObject.id}
-                    onChange={(event) =>
-                      patchMap((current) => ({
-                        ...current,
-                        objects: current.objects.map((item) =>
-                          item.id === selectedObject.id ? { ...item, id: event.target.value } : item
-                        )
-                      }))
-                    }
-                  />
-                </label>
-                <label className="field">
-                  <span>Type</span>
-                  <input
-                    value={selectedObject.type}
-                    onChange={(event) =>
-                      patchMap((current) => ({
-                        ...current,
-                        objects: current.objects.map((item) =>
-                          item.id === selectedObject.id ? { ...item, type: event.target.value } : item
-                        )
-                      }))
-                    }
-                  />
-                </label>
-                <label className="field">
-                  <span>Sprite</span>
-                  <input
-                    value={selectedObject.sprite}
-                    onChange={(event) =>
-                      patchMap((current) => ({
-                        ...current,
-                        objects: current.objects.map((item) =>
-                          item.id === selectedObject.id ? { ...item, sprite: event.target.value } : item
-                        )
-                      }))
-                    }
-                  />
-                </label>
-                <label className="field">
-                  <span>Label</span>
-                  <input
-                    value={selectedObject.label}
-                    onChange={(event) =>
-                      patchMap((current) => ({
-                        ...current,
-                        objects: current.objects.map((item) =>
-                          item.id === selectedObject.id ? { ...item, label: event.target.value } : item
-                        )
-                      }))
-                    }
-                  />
-                </label>
-                <label className="field">
-                  <span>Action</span>
-                  <input
-                    value={selectedObject.action}
-                    onChange={(event) =>
-                      patchMap((current) => ({
-                        ...current,
-                        objects: current.objects.map((item) =>
-                          item.id === selectedObject.id ? { ...item, action: event.target.value } : item
-                        )
-                      }))
-                    }
-                  />
-                </label>
-                <label className="field">
-                  <span>Width</span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={selectedObject.width}
-                    onChange={(event) =>
-                      patchMap((current) => ({
-                        ...current,
-                        objects: current.objects.map((item) =>
-                          item.id === selectedObject.id ? { ...item, width: Number(event.target.value || 1) } : item
-                        )
-                      }))
-                    }
-                  />
-                </label>
-                <label className="field">
-                  <span>Height</span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={selectedObject.height}
-                    onChange={(event) =>
-                      patchMap((current) => ({
-                        ...current,
-                        objects: current.objects.map((item) =>
-                          item.id === selectedObject.id ? { ...item, height: Number(event.target.value || 1) } : item
-                        )
-                      }))
-                    }
-                  />
-                </label>
-                <label className="field full">
-                  <span>Metadata</span>
-                  <textarea
-                    rows={4}
-                    value={serializeKeyValueLines(selectedObject.metadata)}
-                    onChange={(event) =>
-                      patchMap((current) => ({
-                        ...current,
-                        objects: current.objects.map((item) =>
-                          item.id === selectedObject.id ? { ...item, metadata: parseKeyValueLines(event.target.value) } : item
-                        )
-                      }))
-                    }
-                  />
-                </label>
-              </div>
-            </article>
-          ) : null}
-
-          {selectedZone ? (
-            <article className="item-card">
-              <div className="item-card-header">
-                <h3>{selectedZone.label || selectedZone.id}</h3>
-                  <button
-                    type="button"
-                    className="ghost-button danger"
-                    onClick={() => {
-                    if (confirmAction(`Remove zone '${selectedZone.id}'?`)) {
-                      patchMap((current) => ({
-                        ...current,
-                        zones: current.zones.filter((item) => item.id !== selectedZone.id)
-                      }));
-                      setSelectedZoneId(null);
-                    }
-                  }}
-                >
-                  Remove zone
-                </button>
-              </div>
-              <div className="form-grid">
-                <label className="field">
-                  <span>Zone id</span>
-                  <input
-                    value={selectedZone.id}
-                    onChange={(event) =>
-                      patchMap((current) => ({
-                        ...current,
-                        zones: current.zones.map((item) =>
-                          item.id === selectedZone.id ? { ...item, id: event.target.value } : item
-                        )
-                      }))
-                    }
-                  />
-                </label>
-                <label className="field">
-                  <span>Label</span>
-                  <input
-                    value={selectedZone.label}
-                    onChange={(event) =>
-                      patchMap((current) => ({
-                        ...current,
-                        zones: current.zones.map((item) =>
-                          item.id === selectedZone.id ? { ...item, label: event.target.value } : item
-                        )
-                      }))
-                    }
-                  />
-                </label>
-                <label className="field">
-                  <span>Action</span>
-                  <input
-                    value={selectedZone.action}
-                    onChange={(event) =>
-                      patchMap((current) => ({
-                        ...current,
-                        zones: current.zones.map((item) =>
-                          item.id === selectedZone.id ? { ...item, action: event.target.value } : item
-                        )
-                      }))
-                    }
-                  />
-                </label>
-                <label className="field">
-                  <span>Width</span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={selectedZone.width}
-                    onChange={(event) =>
-                      patchMap((current) => ({
-                        ...current,
-                        zones: current.zones.map((item) =>
-                          item.id === selectedZone.id ? { ...item, width: Number(event.target.value || 1) } : item
-                        )
-                      }))
-                    }
-                  />
-                </label>
-                <label className="field">
-                  <span>Height</span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={selectedZone.height}
-                    onChange={(event) =>
-                      patchMap((current) => ({
-                        ...current,
-                        zones: current.zones.map((item) =>
-                          item.id === selectedZone.id ? { ...item, height: Number(event.target.value || 1) } : item
-                        )
-                      }))
-                    }
-                  />
-                </label>
-                <label className="field full">
-                  <span>Metadata</span>
-                  <textarea
-                    rows={4}
-                    value={serializeKeyValueLines(selectedZone.metadata)}
-                    onChange={(event) =>
-                      patchMap((current) => ({
-                        ...current,
-                        zones: current.zones.map((item) =>
-                          item.id === selectedZone.id ? { ...item, metadata: parseKeyValueLines(event.target.value) } : item
-                        )
-                      }))
-                    }
-                  />
-                </label>
-              </div>
-            </article>
-          ) : null}
-
-          {!selectedCell && !selectedObject && !selectedZone ? (
-            <div className="empty-state compact">
-              Select a tile, object, or zone to edit it here. In move mode, click the grid to reposition the selected
-              object or zone.
-            </div>
-          ) : null}
+        <Panel
+          title="Light Enemies"
+          subtitle="Place light field enemies that make Chaos Core switch this map into melee/ranged field combat until the room is clear."
+        >
+          <div className="map-selection-summary">
+            <strong>Light Enemy Tool</strong>
+            <span>Switch to the enemy tool, click a tile to drop a hostile, then tune its basic combat stats in the inspector.</span>
+          </div>
+          <div className="chip-row">
+            <span className="pill">{mapEnemyObjects.length} enemies on this map</span>
+            {tool === "enemy" ? <span className="pill accent">Enemy tool active</span> : null}
+          </div>
+          <div className="toolbar">
+            <button type="button" className="ghost-button" onClick={() => setTool("enemy")}>
+              Use light enemy tool
+            </button>
+            {selectedEnemyObject ? (
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => {
+                  setSelectedObjectId(selectedEnemyObject.id);
+                  setTool("select");
+                }}
+              >
+                Inspect selected enemy
+              </button>
+            ) : null}
+          </div>
         </Panel>
+
+        {mapDatabasePanel}
+
       </div>
 
       <div className="workspace-column wide">
         <Panel
           title="Field Map"
-          subtitle="Paint directly on the grid. Drag with the zone tool to create an interaction area."
+          subtitle="Paint directly on the grid, inspect live coordinates, and work with objects, zones, NPC markers, and light enemies in-place."
         >
+          <div className="map-canvas-hud">
+            <div className="chip-row">
+              <span className="pill accent">{activeTool.label}</span>
+              <span className="pill">{activeTool.shortcut}</span>
+              {hoverCell ? <span className="pill">Hover {hoverCell.x}, {hoverCell.y}</span> : null}
+              {selectedCell ? <span className="pill">Tile {selectedCell.x}, {selectedCell.y}</span> : null}
+              {selectedObject ? <span className="pill">Object {selectedObject.id}</span> : null}
+              {selectedZone ? <span className="pill">Zone {selectedZone.id}</span> : null}
+              {selectedNpcMarker ? <span className="pill">NPC {selectedNpcMarker.name}</span> : null}
+              {selectedEnemyObject ? <span className="pill">Enemy {selectedEnemyObject.id}</span> : null}
+            </div>
+            <div className="map-selection-summary">
+              <strong>{map.name}</strong>
+              <span>{activeTool.hint}</span>
+            </div>
+            <div className="map-legend">
+              <span className="map-legend-chip wall">Wall</span>
+              <span className="map-legend-chip blocked">Blocked</span>
+              <span className="map-legend-chip object">Object</span>
+              <span className="map-legend-chip enemy">Enemy</span>
+              <span className="map-legend-chip zone">Zone</span>
+              <span className="map-legend-chip npc">NPC</span>
+            </div>
+          </div>
           <div
             ref={viewportRef}
             className={tool === "pan" ? "map-viewport pannable" : "map-viewport"}
             onPointerMove={handleViewportPointerMove}
+            onPointerLeave={handleViewportPointerLeave}
           >
             <div
               className="map-canvas"
@@ -1238,6 +1773,7 @@ export function MapEditor() {
                         }}
                         onPointerDown={(event) => handleCellPointerDown(columnIndex, rowIndex, event)}
                         onPointerEnter={() => handleCellPointerEnter(columnIndex, rowIndex)}
+                        onPointerLeave={() => setHoverCell(null)}
                         title={`${columnIndex},${rowIndex} ${tile.terrain}`}
                       >
                         {layerVisibility.walls && tile.wall ? <span className="cell-wall" /> : null}
@@ -1251,7 +1787,7 @@ export function MapEditor() {
 
               <div className="map-overlay-layer">
                 {layerVisibility.objects
-                  ? map.objects.map((item) => (
+                  ? mapNonEnemyObjects.map((item) => (
                       <button
                         key={item.id}
                         type="button"
@@ -1262,6 +1798,29 @@ export function MapEditor() {
                           setSelectedObjectId(item.id);
                           setSelectedZoneId(null);
                           setSelectedCell(null);
+                          setSelectedNpcMarkerEntryKey(null);
+                          setTool("select");
+                        }}
+                      >
+                        {item.label || item.id}
+                      </button>
+                    ))
+                  : null}
+
+                {layerVisibility.enemies
+                  ? mapEnemyObjects.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={item.id === selectedObjectId ? "map-overlay enemy selected" : "map-overlay enemy"}
+                        style={getOverlayRectStyle(item.x, item.y, item.width, item.height)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setSelectedObjectId(item.id);
+                          setSelectedZoneId(null);
+                          setSelectedCell(null);
+                          setSelectedNpcMarkerEntryKey(null);
+                          setTool("select");
                         }}
                       >
                         {item.label || item.id}
@@ -1281,6 +1840,8 @@ export function MapEditor() {
                           setSelectedZoneId(item.id);
                           setSelectedObjectId(null);
                           setSelectedCell(null);
+                          setSelectedNpcMarkerEntryKey(null);
+                          setTool("select");
                         }}
                       >
                         {item.label || item.id}
@@ -1294,12 +1855,16 @@ export function MapEditor() {
                         key={npc.entryKey}
                         type="button"
                         className={
-                          npc.entryKey === selectedNpcEntryKey ? "map-overlay npc selected" : "map-overlay npc"
+                          npc.entryKey === selectedNpcMarkerEntryKey ? "map-overlay npc selected" : "map-overlay npc"
                         }
                         style={getOverlayRectStyle(npc.tileX, npc.tileY, 1, 1)}
                         onClick={(event) => {
                           event.stopPropagation();
-                          setSelectedNpcEntryKey(npc.entryKey);
+                          setSelectedNpcMarkerEntryKey(npc.entryKey);
+                          setSelectedObjectId(null);
+                          setSelectedZoneId(null);
+                          setSelectedCell(null);
+                          setTool("select");
                         }}
                       >
                         {npc.name}
@@ -1323,13 +1888,7 @@ export function MapEditor() {
           </div>
         </Panel>
 
-        <ChaosCoreDatabasePanel
-          contentType="map"
-          currentDocument={map}
-          buildBundle={(current) => buildMapBundleForTarget(current, "chaos-core")}
-          onLoadEntry={handleLoadDatabaseEntry}
-          subtitle="Publish maps directly into the Chaos Core repo and reopen the live field maps here for iteration and balance work."
-        />
+        {selectionInspectorPanel}
       </div>
 
       {issues.length > 0 ? (

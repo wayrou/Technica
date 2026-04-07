@@ -126,6 +126,9 @@ function normalizeUnitDocument(value: unknown): UnitDocument {
     currentClassId: readString(record.currentClassId, fallback.currentClassId),
     spawnRole: readSpawnRole(record.spawnRole, fallback.spawnRole),
     enemySpawnFloorOrdinals: normalizeFloorOrdinals(record.enemySpawnFloorOrdinals),
+    requiredQuestIds: Array.isArray(record.requiredQuestIds)
+      ? Array.from(new Set(record.requiredQuestIds.map(String).map((entry) => entry.trim()).filter(Boolean)))
+      : fallback.requiredQuestIds,
     stats: {
       maxHp: readNumber(stats?.maxHp, fallback.stats.maxHp),
       atk: readNumber(stats?.atk, fallback.stats.atk),
@@ -611,6 +614,19 @@ export function UnitEditor() {
                   </>
                 )}
                 <label className="field full">
+                  <span>Require completed quests</span>
+                  <input
+                    value={serializeCommaList(unit.requiredQuestIds)}
+                    placeholder="quest_restore_signal_grid, quest_clear_foundry_gate"
+                    onChange={(event) =>
+                      patchUnit((current) => ({
+                        ...current,
+                        requiredQuestIds: parseCommaList(event.target.value)
+                      }))
+                    }
+                  />
+                </label>
+                <label className="field full">
                   <span>Metadata</span>
                   <textarea
                     rows={4}
@@ -631,6 +647,7 @@ export function UnitEditor() {
                 <span className="pill">{unit.currentClassId}</span>
                 <span className="pill">{unit.traits.length} trait(s)</span>
                 <span className="pill">{isEnemyUnit ? "Enemy unit" : "Player unit"}</span>
+                <span className="pill">{unit.requiredQuestIds.length} quest gate(s)</span>
                 <span className="pill accent">Chaos Core export</span>
               </div>
               <div className="toolbar">
