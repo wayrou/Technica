@@ -10,6 +10,7 @@ import {
   type SchemaNetworkOutputMode,
   type SchemaTagOutputModifier
 } from "../../types/schema";
+import { resourceKeys, resourceLabels } from "../../types/resources";
 import {
   createSchemaOperationalRequirements,
   createSchemaResourceWallet,
@@ -166,42 +167,17 @@ function WalletFields({
 }) {
   return (
     <div className="form-grid">
-      <label className="field">
-        <span>{labelPrefix} Metal scrap</span>
-        <input
-          type="number"
-          min={0}
-          value={wallet.metalScrap}
-          onChange={(event) => onChange({ ...wallet, metalScrap: Number(event.target.value || 0) })}
-        />
-      </label>
-      <label className="field">
-        <span>{labelPrefix} Wood</span>
-        <input
-          type="number"
-          min={0}
-          value={wallet.wood}
-          onChange={(event) => onChange({ ...wallet, wood: Number(event.target.value || 0) })}
-        />
-      </label>
-      <label className="field">
-        <span>{labelPrefix} Chaos shards</span>
-        <input
-          type="number"
-          min={0}
-          value={wallet.chaosShards}
-          onChange={(event) => onChange({ ...wallet, chaosShards: Number(event.target.value || 0) })}
-        />
-      </label>
-      <label className="field">
-        <span>{labelPrefix} Steam components</span>
-        <input
-          type="number"
-          min={0}
-          value={wallet.steamComponents}
-          onChange={(event) => onChange({ ...wallet, steamComponents: Number(event.target.value || 0) })}
-        />
-      </label>
+      {resourceKeys.map((resourceKey) => (
+        <label key={resourceKey} className="field">
+          <span>{labelPrefix} {resourceLabels[resourceKey]}</span>
+          <input
+            type="number"
+            min={0}
+            value={wallet[resourceKey]}
+            onChange={(event) => onChange({ ...wallet, [resourceKey]: Number(event.target.value || 0) })}
+          />
+        </label>
+      ))}
     </div>
   );
 }

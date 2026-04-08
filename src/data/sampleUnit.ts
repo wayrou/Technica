@@ -10,6 +10,7 @@ export function createBlankUnit(): UnitDocument {
     id: "new_unit",
     name: "Untitled Unit",
     description: "",
+    faction: "",
     currentClassId: "squire",
     spawnRole: "player",
     enemySpawnFloorOrdinals: [],
@@ -49,6 +50,7 @@ export function createSampleUnit(): UnitDocument {
     id: "unit_brass_harrow",
     name: "Brass Harrow",
     description: "A steady breach specialist prepared for early operation deployment.",
+    faction: "anchor",
     currentClassId: "squire",
     spawnRole: "player",
     enemySpawnFloorOrdinals: [],
@@ -73,9 +75,7 @@ export function createSampleUnit(): UnitDocument {
     recruitCost: 120,
     startingInRoster: true,
     deployInParty: false,
-    metadata: {
-      faction: "free_company"
-    },
+    metadata: {},
     createdAt: timestamp,
     updatedAt: timestamp
   };

@@ -19,7 +19,9 @@ export function createSampleQuest(): QuestDocument {
     tags: ["onboarding", "village", "courier"],
     prerequisites: ["dialogue:village_guide_intro"],
     requiredQuestIds: [],
+    requiredKeyItemIds: [],
     followUpQuestIds: [],
+    completionTurnIn: undefined,
     rewards: [
       {
         id: "reward-xp",

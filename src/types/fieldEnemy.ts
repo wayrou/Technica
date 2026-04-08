@@ -1,4 +1,5 @@
 import type { ImageAsset, KeyValueRecord } from "./common";
+import type { ResourceWalletDocument } from "./resources";
 
 export interface FieldEnemyStatsDocument {
   maxHp: number;
@@ -14,12 +15,7 @@ export interface FieldEnemySpawnDocument {
   spawnCount: number;
 }
 
-export interface FieldEnemyDropResourcesDocument {
-  metalScrap: number;
-  wood: number;
-  chaosShards: number;
-  steamComponents: number;
-}
+export type FieldEnemyDropResourcesDocument = ResourceWalletDocument;
 
 export interface FieldEnemyItemDropDocument {
   id: string;
@@ -39,6 +35,7 @@ export interface FieldEnemyDocument {
   id: string;
   name: string;
   description: string;
+  faction: string;
   kind: string;
   spriteKey: string;
   spriteAsset?: ImageAsset;

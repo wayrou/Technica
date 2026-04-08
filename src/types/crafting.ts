@@ -1,4 +1,5 @@
 import type { KeyValueRecord } from "./common";
+import type { ResourceWalletDocument } from "./resources";
 
 export type CraftingCategory = "armor" | "consumable" | "upgrade";
 export type RecipeAcquisitionMethod = "starter" | "purchased" | "unlock_floor" | "found" | "reward";
@@ -12,12 +13,7 @@ export const recipeAcquisitionMethods: RecipeAcquisitionMethod[] = [
   "reward"
 ];
 
-export interface CraftingResourceCost {
-  metalScrap: number;
-  wood: number;
-  chaosShards: number;
-  steamComponents: number;
-}
+export type CraftingResourceCost = ResourceWalletDocument;
 
 export interface CraftingGrantDocument {
   itemId: string;

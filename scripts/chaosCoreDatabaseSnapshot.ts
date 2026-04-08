@@ -3,6 +3,14 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import ts from "typescript";
+import {
+  advancedResourceKeys,
+  basicResourceKeys,
+  createResourceWalletDocument,
+  resourceKeys,
+  resourceLabels,
+  type ResourceKey,
+} from "../src/types/resources";
 import { parseDialogueSource } from "../src/utils/dialogueParser";
 import { summarizeDialogueOccurrenceRules } from "../src/utils/dialogueOccurrence";
 import { isoNow } from "../src/utils/date";
@@ -12,6 +20,8 @@ export type ContentType =
   | "dialogue"
   | "mail"
   | "quest"
+  | "key_item"
+  | "faction"
   | "map"
   | "field_enemy"
   | "npc"
@@ -98,9 +108,31 @@ type RuntimeItemShape = {
   metadata?: Record<string, unknown>;
 };
 
+type RuntimeKeyItemShape = {
+  id: string;
+  name: string;
+  description?: string;
+  kind?: "key_item";
+  stackable?: boolean;
+  quantity?: number;
+  massKg?: number;
+  bulkBu?: number;
+  powerW?: number;
+  iconPath?: string;
+  questOnly?: boolean;
+  metadata?: Record<string, unknown>;
+};
+
+type RuntimeFactionShape = {
+  id: string;
+  name: string;
+  description?: string;
+};
+
 type RuntimeNpcShape = {
   id: string;
   name: string;
+  faction?: string;
   mapId: string;
   x: number;
   y: number;
@@ -118,6 +150,7 @@ type RuntimeFieldEnemyShape = {
   id: string;
   name: string;
   description?: string;
+  faction?: string;
   kind?: string;
   spriteKey?: string;
   spritePath?: string;
@@ -135,12 +168,7 @@ type RuntimeFieldEnemyShape = {
   };
   drops?: {
     wad?: number;
-    resources?: {
-      metalScrap?: number;
-      wood?: number;
-      chaosShards?: number;
-      steamComponents?: number;
-    };
+    resources?: Partial<Record<ResourceKey, number>>;
     items?: Array<{
       id: string;
       quantity?: number;
@@ -175,6 +203,8 @@ export const CONTENT_TYPES: ContentType[] = [
   "dialogue",
   "mail",
   "quest",
+  "key_item",
+  "faction",
   "map",
   "field_enemy",
   "npc",
@@ -193,6 +223,8 @@ const CONTENT_EXTENSIONS: Record<ContentType, string> = {
   dialogue: ".dialogue.json",
   mail: ".mail.json",
   quest: ".quest.json",
+  key_item: ".key_item.json",
+  faction: ".faction.json",
   map: ".fieldmap.json",
   field_enemy: ".field_enemy.json",
   npc: ".npc.json",
@@ -402,7 +434,18 @@ function runtimeQuestToEditorDocument(runtimeQuest: any) {
   const tags = Array.isArray(metadata.tags) ? metadata.tags.map(String) : [];
   const prerequisites = Array.isArray(metadata.prerequisites) ? metadata.prerequisites.map(String) : [];
   const requiredQuestIds = Array.isArray(metadata.requiredQuestIds) ? metadata.requiredQuestIds.map(String) : [];
+  const requiredKeyItemIds = Array.isArray(metadata.requiredKeyItemIds)
+    ? metadata.requiredKeyItemIds.map(String)
+    : [];
   const followUpQuestIds = Array.isArray(metadata.followUpQuestIds) ? metadata.followUpQuestIds.map(String) : [];
+  const completionTurnIn =
+    metadata.completionTurnIn && typeof metadata.completionTurnIn === "object" && !Array.isArray(metadata.completionTurnIn)
+      ? {
+          npcId: String(metadata.completionTurnIn.npcId ?? "").trim(),
+          keyItemId: String(metadata.completionTurnIn.keyItemId ?? "").trim(),
+          quantity: Math.max(1, Number(metadata.completionTurnIn.quantity ?? 1) || 1)
+        }
+      : undefined;
 
   const objectives = (runtimeQuest.objectives ?? []).map((objective: any) => ({
     id: objective.id,
@@ -495,7 +538,12 @@ function runtimeQuestToEditorDocument(runtimeQuest: any) {
     tags,
     prerequisites,
     requiredQuestIds,
+    requiredKeyItemIds,
     followUpQuestIds,
+    completionTurnIn:
+      completionTurnIn && (completionTurnIn.npcId || completionTurnIn.keyItemId)
+        ? completionTurnIn
+        : undefined,
     rewards,
     states: [
       {
@@ -537,7 +585,16 @@ function runtimeQuestToEditorDocument(runtimeQuest: any) {
     metadata: toKeyValueRecord(
       Object.fromEntries(
         Object.entries(metadata).filter(
-          ([key]) => !["summary", "tags", "prerequisites", "requiredQuestIds", "followUpQuestIds"].includes(key)
+          ([key]) =>
+            ![
+              "summary",
+              "tags",
+              "prerequisites",
+              "requiredQuestIds",
+              "requiredKeyItemIds",
+              "followUpQuestIds",
+              "completionTurnIn"
+            ].includes(key)
         )
       )
     )
@@ -560,11 +617,33 @@ function runtimeItemToEditorDocument(runtimeItem: RuntimeItemShape) {
   };
 }
 
+function runtimeKeyItemToEditorDocument(runtimeKeyItem: RuntimeKeyItemShape) {
+  return {
+    ...createDocumentBase(),
+    id: runtimeKeyItem.id,
+    name: runtimeKeyItem.name,
+    description: runtimeKeyItem.description ?? "",
+    iconPath: runtimeKeyItem.iconPath,
+  };
+}
+
+function runtimeFactionToEditorDocument(runtimeFaction: RuntimeFactionShape) {
+  return {
+    ...createDocumentBase(),
+    id: runtimeFaction.id,
+    name: runtimeFaction.name,
+    description: runtimeFaction.description ?? ""
+  };
+}
+
 function runtimeNpcToEditorDocument(runtimeNpc: RuntimeNpcShape) {
+  const { faction: _legacyFaction, ...metadata } = runtimeNpc.metadata ?? {};
+
   return {
     ...createDocumentBase(),
     id: runtimeNpc.id,
     name: runtimeNpc.name,
+    faction: String(runtimeNpc.faction ?? runtimeNpc.metadata?.faction ?? ""),
     mapId: runtimeNpc.mapId,
     tileX: Number(runtimeNpc.x ?? 0),
     tileY: Number(runtimeNpc.y ?? 0),
@@ -578,7 +657,7 @@ function runtimeNpcToEditorDocument(runtimeNpc: RuntimeNpcShape) {
     portraitKey: runtimeNpc.portraitKey ?? "",
     spriteKey: runtimeNpc.spriteKey ?? "",
     metadata: toKeyValueRecord({
-      ...(runtimeNpc.metadata ?? {}),
+      ...metadata,
       ...(runtimeNpc.portraitPath ? { portraitPath: runtimeNpc.portraitPath } : {}),
       ...(runtimeNpc.spritePath ? { spritePath: runtimeNpc.spritePath } : {})
     })
@@ -650,11 +729,14 @@ function runtimeCardToEditorDocument(runtimeCard: RuntimeCardShape) {
 }
 
 function runtimeFieldEnemyToEditorDocument(runtimeFieldEnemy: RuntimeFieldEnemyShape) {
+  const { faction: _legacyFaction, ...metadata } = runtimeFieldEnemy.metadata ?? {};
+
   return {
     ...createDocumentBase(),
     id: runtimeFieldEnemy.id,
     name: runtimeFieldEnemy.name,
     description: runtimeFieldEnemy.description ?? "",
+    faction: String(runtimeFieldEnemy.faction ?? runtimeFieldEnemy.metadata?.faction ?? ""),
     kind: runtimeFieldEnemy.kind ?? "light",
     spriteKey: runtimeFieldEnemy.spriteKey ?? "",
     stats: {
@@ -673,12 +755,7 @@ function runtimeFieldEnemyToEditorDocument(runtimeFieldEnemy: RuntimeFieldEnemyS
     },
     drops: {
       wad: Number(runtimeFieldEnemy.drops?.wad ?? 0),
-      resources: {
-        metalScrap: Number(runtimeFieldEnemy.drops?.resources?.metalScrap ?? 0),
-        wood: Number(runtimeFieldEnemy.drops?.resources?.wood ?? 0),
-        chaosShards: Number(runtimeFieldEnemy.drops?.resources?.chaosShards ?? 0),
-        steamComponents: Number(runtimeFieldEnemy.drops?.resources?.steamComponents ?? 0)
-      },
+      resources: createResourceWalletDocument(runtimeFieldEnemy.drops?.resources),
       items: (runtimeFieldEnemy.drops?.items ?? []).map((drop) => ({
         id: String(drop.id ?? ""),
         quantity: Number(drop.quantity ?? 1),
@@ -686,7 +763,7 @@ function runtimeFieldEnemyToEditorDocument(runtimeFieldEnemy: RuntimeFieldEnemyS
       }))
     },
     metadata: toKeyValueRecord({
-      ...(runtimeFieldEnemy.metadata ?? {}),
+      ...metadata,
       ...(runtimeFieldEnemy.spritePath ? { spritePath: runtimeFieldEnemy.spritePath } : {})
     })
   };
@@ -744,12 +821,7 @@ function runtimeFieldModToEditorDocument(runtimeFieldMod: any) {
 }
 
 function createSchemaWalletFromPartialWallet(wallet: Record<string, unknown> | undefined) {
-  return {
-    metalScrap: Number(wallet?.metalScrap ?? 0),
-    wood: Number(wallet?.wood ?? 0),
-    chaosShards: Number(wallet?.chaosShards ?? 0),
-    steamComponents: Number(wallet?.steamComponents ?? 0)
-  };
+  return createResourceWalletDocument(wallet as Partial<Record<ResourceKey, number>> | undefined);
 }
 
 function createSchemaOperationalRequirementsFromRuntime(value: Record<string, unknown> | undefined) {
@@ -815,11 +887,13 @@ function runtimeSchemaToEditorDocument(runtimeSchema: any) {
 function runtimeUnitToEditorDocument(runtimeUnit: any, state: any) {
   const rosterIds = new Set(state.profile?.rosterUnitIds ?? []);
   const partyIds = new Set(state.partyUnitIds ?? []);
+  const { faction: _legacyFaction, ...metadata } = runtimeUnit.metadata ?? {};
   return {
     ...createDocumentBase(),
     id: runtimeUnit.id,
     name: runtimeUnit.name,
     description: runtimeUnit.description ?? "",
+    faction: String(runtimeUnit.faction ?? runtimeUnit.metadata?.faction ?? ""),
     currentClassId: runtimeUnit.unitClass ?? runtimeUnit.currentClassId ?? "",
     spawnRole: runtimeUnit.isEnemy ? "enemy" : runtimeUnit.spawnRole ?? "player",
     enemySpawnFloorOrdinals: Array.isArray(runtimeUnit.enemySpawnFloorOrdinals)
@@ -848,7 +922,7 @@ function runtimeUnitToEditorDocument(runtimeUnit: any, state: any) {
     recruitCost: Number(runtimeUnit.recruitCost ?? 0),
     startingInRoster: rosterIds.has(runtimeUnit.id),
     deployInParty: partyIds.has(runtimeUnit.id),
-    metadata: toKeyValueRecord(runtimeUnit.metadata)
+    metadata: toKeyValueRecord(metadata)
   };
 }
 
@@ -992,6 +1066,10 @@ function buildEditorDocumentFromRuntime(contentType: ContentType, runtimeData: a
       return runtimeMailToEditorDocument(runtimeData);
     case "quest":
       return runtimeQuestToEditorDocument(runtimeData);
+    case "key_item":
+      return runtimeKeyItemToEditorDocument(runtimeData);
+    case "faction":
+      return runtimeFactionToEditorDocument(runtimeData);
     case "field_enemy":
       return runtimeFieldEnemyToEditorDocument(runtimeData);
     case "dialogue":
@@ -1205,6 +1283,12 @@ function buildEntrySummaryData(contentType: ContentType, runtimeData: any, edito
               : 0
       };
     }
+    case "key_item": {
+      return {
+        hasIcon: Boolean(editorData?.iconAsset || runtimeData?.iconPath),
+        questOnly: Boolean(runtimeData?.questOnly ?? true)
+      };
+    }
     case "class": {
       return typeof runtimeData?.tier === "number" ? { tier: runtimeData.tier } : undefined;
     }
@@ -1368,12 +1452,9 @@ function hasTopLevelObjectEntry(sourceText: string, declarationName: string, key
 
 function pruneSchemaSourceWallet(value: Record<string, unknown> | undefined) {
   return Object.fromEntries(
-    Object.entries({
-      metalScrap: Number(value?.metalScrap ?? 0),
-      wood: Number(value?.wood ?? 0),
-      chaosShards: Number(value?.chaosShards ?? 0),
-      steamComponents: Number(value?.steamComponents ?? 0)
-    }).filter(([, amount]) => Number.isFinite(amount) && amount > 0)
+    resourceKeys
+      .map((resourceKey) => [resourceKey, Number(value?.[resourceKey] ?? 0)] as const)
+      .filter(([, amount]) => Number.isFinite(amount) && amount > 0),
   );
 }
 
@@ -1595,6 +1676,27 @@ async function listBuiltInEntries(
     case "mail": {
       return [];
     }
+    case "faction": {
+      const generated = await readGeneratedRecords(repoPath, "faction");
+      const { DEFAULT_FACTIONS } = await importRepoModule<{
+        DEFAULT_FACTIONS: RuntimeFactionShape[];
+      }>(repoPath, "src/content/technica/defaultFactions.ts");
+
+      return DEFAULT_FACTIONS
+        .filter((runtimeData) => !generated.has(runtimeData.id) && !disabledIds.has(runtimeData.id))
+        .map((runtimeData) =>
+          buildSnapshotEntry(
+            "faction",
+            "game",
+            runtimeData.id,
+            runtimeData.name,
+            "src/content/technica/defaultFactions.ts",
+            "src/content/technica/defaultFactions.ts",
+            sanitizeJson(runtimeData),
+            runtimeFactionToEditorDocument(runtimeData)
+          )
+        );
+    }
     case "map": {
       const generated = await readGeneratedRecords(repoPath, "map");
       const maps = await importRepoModule<{ getFieldMap: (mapId: string) => any }>(repoPath, "src/field/maps.ts");
@@ -1765,26 +1867,32 @@ async function listBuiltInEntries(
         );
 
       const resources: SnapshotEntry[] = [
-        {
-          id: "metalScrap",
-          name: "Metal Scrap",
-          description: "Reusable metal salvage for crafting and repairs."
-        },
-        {
-          id: "wood",
-          name: "Wood",
-          description: "Basic organic material used in construction and crafting."
-        },
-        {
-          id: "chaosShards",
-          name: "Chaos Shards",
-          description: "Volatile crystal resource used in arcane and advanced crafting."
-        },
-        {
-          id: "steamComponents",
-          name: "Steam Components",
-          description: "Mechanical resource used for powered and industrial builds."
-        }
+        ...basicResourceKeys.map((resourceKey) => ({
+          id: resourceKey,
+          name: resourceLabels[resourceKey],
+          description:
+            resourceKey === "metalScrap"
+              ? "Reusable metal salvage for crafting and repairs."
+              : resourceKey === "wood"
+                ? "Basic organic material used in construction and crafting."
+                : resourceKey === "chaosShards"
+                  ? "Volatile crystal resource used in arcane and advanced crafting."
+                  : "Mechanical resource used for powered and industrial builds."
+        })),
+        ...advancedResourceKeys.map((resourceKey) => ({
+          id: resourceKey,
+          name: resourceLabels[resourceKey],
+          description:
+            resourceKey === "alloy"
+              ? "Refined composite stock used in higher-end fabrication."
+              : resourceKey === "drawcord"
+                ? "Tension-ready line material used in traps, assemblies, and specialist gear."
+                : resourceKey === "fittings"
+                  ? "Precision connectors and mounting hardware for advanced builds."
+                  : resourceKey === "resin"
+                    ? "Bonding and sealing compound used in treated components and field repairs."
+                    : "Portable energy cells used in powered systems and advanced equipment."
+        }))
       ].map((resource) =>
         buildSnapshotEntry(
           "item",

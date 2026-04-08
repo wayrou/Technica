@@ -34,6 +34,30 @@ function sanitizeIdList(value: unknown) {
   return Array.from(new Set(value.map(String).map((entry) => entry.trim()).filter(Boolean)));
 }
 
+function normalizeCompletionTurnIn(value: unknown): QuestDocument["completionTurnIn"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const candidate = value as Partial<NonNullable<QuestDocument["completionTurnIn"]>>;
+  const npcId = typeof candidate.npcId === "string" ? candidate.npcId.trim() : "";
+  const keyItemId = typeof candidate.keyItemId === "string" ? candidate.keyItemId.trim() : "";
+  const quantity =
+    typeof candidate.quantity === "number" && Number.isFinite(candidate.quantity)
+      ? Math.max(1, Math.floor(candidate.quantity))
+      : 1;
+
+  if (!npcId && !keyItemId) {
+    return undefined;
+  }
+
+  return {
+    npcId,
+    keyItemId,
+    quantity
+  };
+}
+
 function createBlankQuest(): QuestDocument {
   const timestamp = isoNow();
 
@@ -50,7 +74,9 @@ function createBlankQuest(): QuestDocument {
     tags: [],
     prerequisites: [],
     requiredQuestIds: [],
+    requiredKeyItemIds: [],
     followUpQuestIds: [],
+    completionTurnIn: undefined,
     rewards: [],
     states: [
       {
@@ -103,7 +129,9 @@ function normalizeQuestDocument(document: Partial<QuestDocument> | null | undefi
     tags: sanitizeIdList(candidate.tags),
     prerequisites: sanitizeIdList(candidate.prerequisites),
     requiredQuestIds: sanitizeIdList(candidate.requiredQuestIds),
-    followUpQuestIds: sanitizeIdList(candidate.followUpQuestIds)
+    requiredKeyItemIds: sanitizeIdList(candidate.requiredKeyItemIds),
+    followUpQuestIds: sanitizeIdList(candidate.followUpQuestIds),
+    completionTurnIn: normalizeCompletionTurnIn(candidate.completionTurnIn)
   };
 }
 
@@ -384,6 +412,14 @@ export function QuestCreator() {
               />
             </label>
             <label className="field">
+              <span>Require owned key items</span>
+              <textarea
+                rows={4}
+                value={serializeMultilineList(quest.requiredKeyItemIds)}
+                onChange={(event) => updateTopLevel("requiredKeyItemIds", parseMultilineList(event.target.value))}
+              />
+            </label>
+            <label className="field">
               <span>Initial step id</span>
               <input
                 value={quest.initialStepId}
@@ -414,12 +450,68 @@ export function QuestCreator() {
             </label>
           </div>
 
+          <div className="subsection">
+            <h4>Quest Completion Turn-In</h4>
+            <div className="form-grid">
+              <label className="field">
+                <span>NPC id</span>
+                <input
+                  value={quest.completionTurnIn?.npcId ?? ""}
+                  onChange={(event) =>
+                    updateTopLevel("completionTurnIn", normalizeCompletionTurnIn({
+                      ...(quest.completionTurnIn ?? { quantity: 1 }),
+                      npcId: event.target.value
+                    }))
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Key item id</span>
+                <input
+                  value={quest.completionTurnIn?.keyItemId ?? ""}
+                  onChange={(event) =>
+                    updateTopLevel("completionTurnIn", normalizeCompletionTurnIn({
+                      ...(quest.completionTurnIn ?? { quantity: 1 }),
+                      keyItemId: event.target.value
+                    }))
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Quantity</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={quest.completionTurnIn?.quantity ?? 1}
+                  onChange={(event) =>
+                    updateTopLevel("completionTurnIn", normalizeCompletionTurnIn({
+                      ...(quest.completionTurnIn ?? {}),
+                      quantity: Number(event.target.value || 1)
+                    }))
+                  }
+                />
+              </label>
+              <div className="field full">
+                <div className="toolbar">
+                  <button type="button" className="ghost-button" onClick={() => updateTopLevel("completionTurnIn", undefined)}>
+                    Clear turn-in
+                  </button>
+                </div>
+                <small className="muted">
+                  When set, talking to this NPC while carrying the required key item will consume it and complete the quest.
+                </small>
+              </div>
+            </div>
+          </div>
+
           <div className="toolbar split">
             <div className="chip-row">
               <span className="pill">{quest.objectives.length} objectives</span>
               <span className="pill">{quest.steps.length} steps</span>
               <span className="pill">{quest.states.length} states</span>
               <span className="pill">{quest.requiredQuestIds.length} quest gate(s)</span>
+              <span className="pill">{quest.requiredKeyItemIds.length} key item gate(s)</span>
+              {quest.completionTurnIn ? <span className="pill">turn-in enabled</span> : null}
               <span className="pill accent">Chaos Core export</span>
             </div>
             <div className="toolbar">

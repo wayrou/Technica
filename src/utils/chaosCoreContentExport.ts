@@ -12,13 +12,16 @@ import type { ClassDocument, ClassUnlockConditionDocument } from "../types/class
 import type { CodexDocument } from "../types/codex";
 import type { CraftingDocument } from "../types/crafting";
 import type { DishDocument } from "../types/dish";
+import type { FactionDocument } from "../types/faction";
 import type { FieldEnemyDocument } from "../types/fieldEnemy";
 import type { FieldModDocument } from "../types/fieldmod";
 import type { GearDocument } from "../types/gear";
 import type { ItemDocument } from "../types/item";
+import type { KeyItemDocument } from "../types/keyItem";
 import type { MailDocument } from "../types/mail";
 import type { NpcDocument } from "../types/npc";
 import type { OperationDocument } from "../types/operation";
+import { toPartialResourceWalletDocument } from "../types/resources";
 import type { SchemaDocument } from "../types/schema";
 import type { UnitDocument } from "../types/unit";
 import { createImageAssetExport } from "./assets";
@@ -61,20 +64,8 @@ function pruneEmpty<TValue>(value: TValue): TValue {
   return value;
 }
 
-function toPartialResourceWallet(wallet: {
-  metalScrap: number;
-  wood: number;
-  chaosShards: number;
-  steamComponents: number;
-}) {
-  return Object.fromEntries(
-    Object.entries({
-      metalScrap: wallet.metalScrap,
-      wood: wallet.wood,
-      chaosShards: wallet.chaosShards,
-      steamComponents: wallet.steamComponents
-    }).filter(([, amount]) => Number.isFinite(amount) && amount > 0)
-  );
+function toPartialResourceWallet(wallet: Record<string, number>) {
+  return toPartialResourceWalletDocument(wallet);
 }
 
 function coercePrimitive(value: string) {
@@ -118,6 +109,21 @@ function splitMailBodyPages(content: string) {
     .split(/\r?\n\s*\r?\n+/)
     .map((entry) => entry.trim())
     .filter(Boolean);
+}
+
+function toRuntimeIdList(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [] as string[];
+  }
+
+  return Array.from(
+    new Set(
+      value
+        .map((entry) => (typeof entry === "string" ? entry.trim() : String(entry ?? "").trim()))
+        .filter(Boolean)
+        .map((entry) => runtimeId(entry))
+    )
+  );
 }
 
 function createManifest(
@@ -329,6 +335,105 @@ Importer notes:
       { name: entryFile, content: prettyJson(runtimeDocument) },
       { name: sourceFile, content: prettyJson(document) },
       ...(iconAsset ? [iconAsset.file] : []),
+      { name: "README.md", content: readme }
+    ]
+  };
+}
+
+export function buildChaosCoreKeyItemBundle(document: KeyItemDocument): ExportBundle {
+  const contentId = runtimeId(document.id || document.name, "key_item");
+  const entryFile = `${contentId}.key_item.json`;
+  const sourceFile = `${contentId}.source.json`;
+  const iconAsset = document.iconAsset ? createImageAssetExport(contentId, "icon", document.iconAsset) : null;
+  const preservedIconPath = !iconAsset && document.iconPath?.trim() ? document.iconPath.trim() : undefined;
+  const runtimeDocument = pruneEmpty({
+    id: contentId,
+    name: document.name,
+    description: document.description,
+    kind: "key_item",
+    stackable: false,
+    quantity: 1,
+    massKg: 0,
+    bulkBu: 0,
+    powerW: 0,
+    iconPath: iconAsset?.runtimePath ?? preservedIconPath,
+    questOnly: true
+  });
+
+  const manifest = createManifest(
+    "key_item",
+    "key-item.v1",
+    contentId,
+    document.name,
+    "Chaos Core runtime key item export.",
+    entryFile,
+    ["manifest.json", entryFile, sourceFile, ...(iconAsset ? [iconAsset.runtimePath] : []), "README.md"],
+    []
+  );
+
+  const readme = `# Chaos Core Key Item Export
+
+Runtime entry: \`${entryFile}\`
+Content id: \`${contentId}\`
+
+Importer notes:
+- Imported key items register as quest-only inventory content.
+- Key items appear in Chaos Core inventory views once they are granted by quests or scripts.
+- Attached key item icons resolve through \`iconPath\` when present.
+- \`${sourceFile}\` preserves the authoring document.
+`;
+
+  return {
+    bundleName: `${slugify(document.name, contentId)}-chaos-core-key-item-export`,
+    manifest,
+    files: [
+      { name: "manifest.json", content: prettyJson(manifest) },
+      { name: entryFile, content: prettyJson(runtimeDocument) },
+      { name: sourceFile, content: prettyJson(document) },
+      ...(iconAsset ? [iconAsset.file] : []),
+      { name: "README.md", content: readme }
+    ]
+  };
+}
+
+export function buildChaosCoreFactionBundle(document: FactionDocument): ExportBundle {
+  const contentId = runtimeId(document.id || document.name, "faction");
+  const entryFile = `${contentId}.faction.json`;
+  const sourceFile = `${contentId}.source.json`;
+  const runtimeDocument = pruneEmpty({
+    id: contentId,
+    name: document.name,
+    description: document.description
+  });
+
+  const manifest = createManifest(
+    "faction",
+    "faction.v1",
+    contentId,
+    document.name,
+    "Chaos Core runtime faction export.",
+    entryFile,
+    ["manifest.json", entryFile, sourceFile, "README.md"],
+    []
+  );
+
+  const readme = `# Chaos Core Faction Export
+
+Runtime entry: \`${entryFile}\`
+Content id: \`${contentId}\`
+
+Importer notes:
+- Imported factions register into Chaos Core's Technica content library for reuse by units, NPCs, and field enemies.
+- \`${sourceFile}\` preserves the original Technica authoring document.
+`;
+
+  return {
+    bundleName: `${slugify(document.name, contentId)}-chaos-core-faction-export`,
+    manifest,
+    files: [
+      { name: "manifest.json", content: prettyJson(manifest) },
+      { name: entryFile, content: prettyJson(runtimeDocument) },
+      { name: sourceFile, content: prettyJson(document) },
       { name: "README.md", content: readme }
     ]
   };
@@ -651,13 +756,13 @@ export function buildChaosCoreMailBundle(document: MailDocument): ExportBundle {
     category: document.category,
     from: document.sender,
     subject: document.subject,
-    bodyPages: splitMailBodyPages(document.content),
+    bodyPages: splitMailBodyPages(typeof document.content === "string" ? document.content : ""),
     unlockAfterFloor: document.unlockAfterFloor,
-    requiredDialogueIds: document.requiredDialogueIds.map((dialogueId) => runtimeId(dialogueId)),
-    requiredGearIds: document.requiredGearIds.map((gearId) => runtimeId(gearId)),
-    requiredItemIds: document.requiredItemIds.map((itemId) => runtimeId(itemId)),
-    requiredSchemaIds: document.requiredSchemaIds.map((schemaId) => runtimeId(schemaId)),
-    requiredFieldModIds: document.requiredFieldModIds.map((fieldModId) => runtimeId(fieldModId)),
+    requiredDialogueIds: toRuntimeIdList(document.requiredDialogueIds),
+    requiredGearIds: toRuntimeIdList(document.requiredGearIds),
+    requiredItemIds: toRuntimeIdList(document.requiredItemIds),
+    requiredSchemaIds: toRuntimeIdList(document.requiredSchemaIds),
+    requiredFieldModIds: toRuntimeIdList(document.requiredFieldModIds),
     createdAt: document.createdAt,
     updatedAt: document.updatedAt
   });
@@ -715,9 +820,11 @@ export function buildChaosCoreNpcBundle(
   const sourceFile = `${contentId}.source.json`;
   const portraitAsset = document.portraitAsset ? createImageAssetExport(contentId, "portrait", document.portraitAsset) : null;
   const spriteAsset = document.spriteAsset ? createImageAssetExport(contentId, "sprite", document.spriteAsset) : null;
+  const { faction: _ignoredFaction, ...metadata } = document.metadata;
   const runtimeDocument = pruneEmpty({
     id: contentId,
     name: document.name,
+    faction: document.faction ? runtimeId(document.faction) : undefined,
     mapId: runtimeId(document.mapId, "base_camp"),
     x: document.tileX,
     y: document.tileY,
@@ -732,7 +839,7 @@ export function buildChaosCoreNpcBundle(
     spriteKey: document.spriteKey || undefined,
     portraitPath: portraitAsset?.runtimePath,
     spritePath: spriteAsset?.runtimePath,
-    metadata: coerceRecord(document.metadata)
+    metadata: coerceRecord(metadata)
   });
 
   const dependencies: ExportDependency[] = [
@@ -812,12 +919,13 @@ export function buildChaosCoreFieldEnemyBundle(document: FieldEnemyDocument): Ex
   const sourceFile = `${contentId}.source.json`;
   const spriteAsset = document.spriteAsset ? createImageAssetExport(contentId, "sprite", document.spriteAsset) : null;
   const preservedSpritePath = !spriteAsset && document.metadata.spritePath?.trim() ? document.metadata.spritePath.trim() : undefined;
-  const { spritePath: _ignoredSpritePath, ...metadata } = document.metadata;
+  const { faction: _ignoredFaction, spritePath: _ignoredSpritePath, ...metadata } = document.metadata;
 
   const runtimeDocument = pruneEmpty({
     id: contentId,
     name: document.name,
     description: document.description,
+    faction: document.faction ? runtimeId(document.faction) : undefined,
     kind: document.kind,
     spriteKey: document.spriteKey || undefined,
     spritePath: spriteAsset?.runtimePath ?? preservedSpritePath,
@@ -1015,11 +1123,13 @@ export function buildChaosCoreUnitBundle(
   const contentId = runtimeId(document.id || document.name, "unit");
   const entryFile = `${contentId}.unit.json`;
   const sourceFile = `${contentId}.source.json`;
+  const { faction: _ignoredFaction, ...metadata } = document.metadata;
   const runtimeDocument = {
     ...pruneEmpty({
     id: contentId,
     name: document.name,
     description: document.description,
+    faction: document.faction ? runtimeId(document.faction) : undefined,
     currentClassId: runtimeId(document.currentClassId),
     spawnRole: document.spawnRole,
     enemySpawnFloorOrdinals: document.spawnRole === "enemy" ? document.enemySpawnFloorOrdinals : [],
@@ -1030,7 +1140,7 @@ export function buildChaosCoreUnitBundle(
     recruitCost: document.recruitCost,
     startingInRoster: document.spawnRole === "enemy" ? false : document.startingInRoster,
     deployInParty: document.spawnRole === "enemy" ? false : document.deployInParty,
-    metadata: coerceRecord(document.metadata)
+    metadata: coerceRecord(metadata)
     }),
     // Keep the loadout object present even when every slot is empty so the
     // Chaos Core importer can still recognize the unit template shape.

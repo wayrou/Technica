@@ -1,3 +1,5 @@
+import type { ResourceWalletDocument } from "./resources";
+
 export type SchemaDocumentKind = "core" | "fortification";
 export type SchemaUnlockSource = "starter" | "schema";
 export type SchemaNetworkOutputMode = "fixed" | "add_input";
@@ -71,12 +73,7 @@ export const schemaKnownRoomTags: KnownSchemaRoomTag[] = [
   "tavern_suitable"
 ];
 
-export interface SchemaResourceWallet {
-  metalScrap: number;
-  wood: number;
-  chaosShards: number;
-  steamComponents: number;
-}
+export type SchemaResourceWallet = ResourceWalletDocument;
 
 export interface SchemaOperationalRequirements {
   powerWatts: number;

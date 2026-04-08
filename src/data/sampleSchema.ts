@@ -1,13 +1,9 @@
 import type { SchemaDocument, SchemaResourceWallet, SchemaTagOutputModifier } from "../types/schema";
+import { createResourceWalletDocument } from "../types/resources";
 import { isoNow } from "../utils/date";
 
 function createBlankWallet(): SchemaResourceWallet {
-  return {
-    metalScrap: 0,
-    wood: 0,
-    chaosShards: 0,
-    steamComponents: 0
-  };
+  return createResourceWalletDocument();
 }
 
 function createTagOutputModifier(partial?: Partial<SchemaTagOutputModifier>): SchemaTagOutputModifier {
@@ -85,45 +81,37 @@ export function createSampleSchema(): SchemaDocument {
     commsOutputMode: "fixed",
     supplyOutputCrates: 0,
     supplyOutputMode: "fixed",
-    buildCost: {
+    buildCost: createResourceWalletDocument({
       metalScrap: 5,
       wood: 2,
       chaosShards: 1,
       steamComponents: 1
-    },
-    upkeep: {
-      metalScrap: 0,
-      wood: 0,
-      chaosShards: 0,
+    }),
+    upkeep: createResourceWalletDocument({
       steamComponents: 1
-    },
+    }),
     wadUpkeepPerTick: 4,
-    incomePerTick: {
-      metalScrap: 2,
-      wood: 0,
-      chaosShards: 0,
-      steamComponents: 0
-    },
+    incomePerTick: createResourceWalletDocument({
+      metalScrap: 2
+    }),
     supportRadius: 1,
     unlockSource: "schema",
-    unlockCost: {
+    unlockCost: createResourceWalletDocument({
       metalScrap: 6,
       wood: 2,
       chaosShards: 1,
       steamComponents: 1
-    },
+    }),
     unlockWadCost: 24,
     requiredQuestIds: [],
     preferredRoomTags: ["salvage_rich", "transit_junction"],
     tagOutputModifiers: [
       createTagOutputModifier({
         tag: "salvage_rich",
-        output: {
+        output: createResourceWalletDocument({
           metalScrap: 2,
-          wood: 1,
-          chaosShards: 0,
-          steamComponents: 0
-        },
+          wood: 1
+        }),
         note: "Salvage-rich sectors push the Bureau harder."
       })
     ],

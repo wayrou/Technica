@@ -60,6 +60,8 @@ const cache = new Map<string, SnapshotCacheEntry>();
 const BUILT_IN_SOURCE_FILES: Record<ContentType, string[]> = {
   dialogue: ["src/field/npcs.ts"],
   quest: ["src/quests/questData.ts"],
+  key_item: [],
+  faction: ["src/content/technica/defaultFactions.ts"],
   map: ["src/field/maps.ts"],
   npc: ["src/field/npcs.ts"],
   item: ["src/core/crafting.ts"],
@@ -159,14 +161,16 @@ async function handleLoadRequest(
 }
 
 async function handleListAllRequest(repoPath: string, force = false) {
-  const entriesByType = Object.fromEntries(
-    await Promise.all(
-      CONTENT_TYPES.map(async (contentType) => {
-        const snapshot = await getSnapshot(repoPath, contentType, force);
-        return [contentType, await listEntries(repoPath, contentType, snapshot)];
-      })
-    )
-  ) as Record<ContentType, DatabaseEntrySummary[]>;
+  const entriesByType = {} as Record<ContentType, DatabaseEntrySummary[]>;
+  for (const contentType of CONTENT_TYPES) {
+    try {
+      const snapshot = await getSnapshot(repoPath, contentType, force);
+      entriesByType[contentType] = await listEntries(repoPath, contentType, snapshot);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Could not list '${contentType}' entries: ${message}`);
+    }
+  }
 
   return { entriesByType };
 }

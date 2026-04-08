@@ -18,6 +18,7 @@ export interface UnitDocument {
   id: string;
   name: string;
   description: string;
+  faction: string;
   currentClassId: string;
   spawnRole: UnitSpawnRole;
   enemySpawnFloorOrdinals: number[];

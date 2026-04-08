@@ -4,6 +4,7 @@ import { Panel } from "../../components/Panel";
 import { createBlankUnit, createSampleUnit } from "../../data/sampleUnit";
 import { useChaosCoreDatabase } from "../../hooks/useChaosCoreDatabase";
 import { StructuredDocumentStudio } from "../content/StructuredDocumentStudio";
+import { mergeFactionOptions } from "../../types/faction";
 import type { UnitDocument, UnitSpawnRole } from "../../types/unit";
 import { isoNow } from "../../utils/date";
 import { notify } from "../../utils/dialogs";
@@ -18,7 +19,7 @@ type UnitGearSlot = "weapon" | "helmet" | "chestpiece" | "accessory";
 type UnitReferenceOption = {
   id: string;
   name: string;
-  origin: "game" | "technica";
+  origin: "game" | "technica" | "preset";
 };
 
 type UnitGearOption = UnitReferenceOption & {
@@ -115,6 +116,7 @@ function normalizeUnitDocument(value: unknown): UnitDocument {
   const stats = toRecord(record.stats);
   const loadout = toRecord(record.loadout);
   const metadata = toRecord(record.metadata);
+  const { faction: _legacyFaction, ...metadataWithoutFaction } = metadata ?? {};
 
   return {
     ...fallback,
@@ -123,6 +125,7 @@ function normalizeUnitDocument(value: unknown): UnitDocument {
     id: readString(record.id, fallback.id),
     name: readString(record.name, fallback.name),
     description: readString(record.description, fallback.description),
+    faction: readString(record.faction, readString(metadata?.faction, fallback.faction)),
     currentClassId: readString(record.currentClassId, fallback.currentClassId),
     spawnRole: readSpawnRole(record.spawnRole, fallback.spawnRole),
     enemySpawnFloorOrdinals: normalizeFloorOrdinals(record.enemySpawnFloorOrdinals),
@@ -150,7 +153,7 @@ function normalizeUnitDocument(value: unknown): UnitDocument {
     startingInRoster: readBoolean(record.startingInRoster, fallback.startingInRoster),
     deployInParty: readBoolean(record.deployInParty, fallback.deployInParty),
     metadata: metadata
-      ? Object.fromEntries(Object.entries(metadata).map(([key, entry]) => [key, String(entry)]))
+      ? Object.fromEntries(Object.entries(metadataWithoutFaction).map(([key, entry]) => [key, String(entry)]))
       : fallback.metadata,
     createdAt: readString(record.createdAt, fallback.createdAt),
     updatedAt: readString(record.updatedAt, fallback.updatedAt)
@@ -173,7 +176,7 @@ function formatReferenceSummary(option: UnitReferenceOption | null) {
     return null;
   }
 
-  return `${option.name} (${option.id}) - ${option.origin === "game" ? "Game" : "Technica"}`;
+  return `${option.name} (${option.id}) - ${option.origin === "game" ? "Game" : option.origin === "preset" ? "Preset" : "Technica"}`;
 }
 
 export function UnitEditor() {
@@ -187,7 +190,8 @@ export function UnitEditor() {
     void Promise.all([
       ensureSummaries("class"),
       ensureSummaries("gear"),
-      ensureSummaries("operation")
+      ensureSummaries("operation"),
+      ensureSummaries("faction")
     ]);
   }, [desktopEnabled, ensureSummaries, repoPath]);
 
@@ -234,6 +238,18 @@ export function UnitEditor() {
 
     return Array.from({ length: highestImportedFloor }, (_, index) => index + 1);
   }, [summaryStates.operation.entries]);
+
+  const factionOptions = useMemo(
+    () =>
+      mergeFactionOptions(
+        summaryStates.faction.entries.map((entry) => ({
+          id: entry.contentId,
+          name: entry.title.trim() || entry.contentId,
+          origin: entry.origin
+        }))
+      ),
+    [summaryStates.faction.entries]
+  );
 
   const gearOptionsBySlot = useMemo<Record<UnitGearSlot, UnitGearOption[]>>(
     () => ({
@@ -282,6 +298,7 @@ export function UnitEditor() {
             const patchUnit = (updater: (current: UnitDocument) => UnitDocument) =>
               patchDocument((current) => updater(normalizeUnitDocument(current)));
             const selectedClass = classOptions.find((option) => option.id === unit.currentClassId) ?? null;
+            const selectedFaction = factionOptions.find((option) => option.id === unit.faction) ?? null;
             const loadoutSelection = Object.fromEntries(
               (Object.keys(unit.loadout) as UnitLoadoutField[]).map((field) => {
                 const slot = LOADOUT_SLOT_BY_FIELD[field];
@@ -301,7 +318,8 @@ export function UnitEditor() {
                   onClick={() => void Promise.all([
                     ensureSummaries("class", { force: true }),
                     ensureSummaries("gear", { force: true }),
-                    ensureSummaries("operation", { force: true })
+                    ensureSummaries("operation", { force: true }),
+                    ensureSummaries("faction", { force: true })
                   ])}
                 >
                   Refresh repo suggestions
@@ -348,6 +366,28 @@ export function UnitEditor() {
                       : desktopEnabled && repoPath.trim()
                         ? "No class suggestions found in the current Chaos Core repo."
                         : "Set the Chaos Core repo path to pull class suggestions."}
+                </small>
+              </label>
+              <label className="field">
+                <span>Faction</span>
+                <select
+                  value={unit.faction}
+                  onChange={(event) => patchUnit((current) => ({ ...current, faction: event.target.value }))}
+                >
+                  {!unit.faction.trim() ? <option value="">Select faction...</option> : null}
+                  {unit.faction.trim() && !selectedFaction ? (
+                    <option value={unit.faction}>Custom ({unit.faction})</option>
+                  ) : null}
+                  {factionOptions.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.name} ({option.id})
+                    </option>
+                  ))}
+                </select>
+                <small className="muted">
+                  {selectedFaction
+                    ? `${selectedFaction.name} (${selectedFaction.id})${selectedFaction.origin === "preset" ? " - Preset" : selectedFaction.origin === "game" ? " - Game" : " - Technica"}`
+                    : `${factionOptions.length} faction option(s), including Chaos Core presets.`}
                 </small>
               </label>
               <label className="field">
@@ -645,6 +685,7 @@ export function UnitEditor() {
             <div className="toolbar split">
               <div className="chip-row">
                 <span className="pill">{unit.currentClassId}</span>
+                {unit.faction ? <span className="pill">{unit.faction}</span> : null}
                 <span className="pill">{unit.traits.length} trait(s)</span>
                 <span className="pill">{isEnemyUnit ? "Enemy unit" : "Player unit"}</span>
                 <span className="pill">{unit.requiredQuestIds.length} quest gate(s)</span>

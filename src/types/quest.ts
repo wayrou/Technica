@@ -57,6 +57,12 @@ export interface QuestStep {
   branches: QuestBranch[];
 }
 
+export interface QuestCompletionTurnIn {
+  npcId: string;
+  keyItemId: string;
+  quantity: number;
+}
+
 export interface QuestDocument {
   schemaVersion: string;
   sourceApp: "Technica";
@@ -70,7 +76,9 @@ export interface QuestDocument {
   tags: string[];
   prerequisites: string[];
   requiredQuestIds: string[];
+  requiredKeyItemIds: string[];
   followUpQuestIds: string[];
+  completionTurnIn?: QuestCompletionTurnIn;
   rewards: QuestReward[];
   states: QuestState[];
   objectives: QuestObjective[];

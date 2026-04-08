@@ -1,16 +1,22 @@
+import { useEffect, useMemo } from "react";
 import { ChaosCoreDatabasePanel } from "../../components/ChaosCoreDatabasePanel";
 import { ImageAssetField } from "../../components/ImageAssetField";
 import { Panel } from "../../components/Panel";
 import { createBlankFieldEnemy, createSampleFieldEnemy } from "../../data/sampleFieldEnemy";
+import { useChaosCoreDatabase } from "../../hooks/useChaosCoreDatabase";
 import { StructuredDocumentStudio } from "../content/StructuredDocumentStudio";
 import type { ExportTarget } from "../../types/common";
+import { mergeFactionOptions } from "../../types/faction";
 import type { FieldEnemyDocument, FieldEnemyItemDropDocument } from "../../types/fieldEnemy";
+import { resourceKeys, resourceLabels } from "../../types/resources";
 import type { LoadedChaosCoreDatabaseEntry } from "../../utils/chaosCoreDatabase";
 import { validateFieldEnemyDocument } from "../../utils/contentValidation";
 import { isoNow } from "../../utils/date";
 import { notify } from "../../utils/dialogs";
 import { buildFieldEnemyBundleForTarget } from "../../utils/exporters";
 import { parseKeyValueLines, parseMultilineList, serializeKeyValueLines, serializeMultilineList } from "../../utils/records";
+
+type UnknownRecord = Record<string, unknown>;
 
 function touchFieldEnemy(document: FieldEnemyDocument): FieldEnemyDocument {
   return {
@@ -43,6 +49,87 @@ function serializeFloorOrdinals(values: number[]) {
   return values.join(", ");
 }
 
+function toRecord(value: unknown): UnknownRecord | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as UnknownRecord) : null;
+}
+
+function readString(value: unknown, fallback: string) {
+  return typeof value === "string" ? value : fallback;
+}
+
+function readNumber(value: unknown, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function normalizeFieldEnemyDocument(value: unknown): FieldEnemyDocument {
+  const fallback = createBlankFieldEnemy();
+  const record = toRecord(value);
+  if (!record) {
+    return fallback;
+  }
+
+  const stats = toRecord(record.stats);
+  const spawn = toRecord(record.spawn);
+  const drops = toRecord(record.drops);
+  const metadata = toRecord(record.metadata);
+  const resources = toRecord(drops?.resources);
+  const { faction: _legacyFaction, ...metadataWithoutFaction } = metadata ?? {};
+
+  return {
+    ...fallback,
+    schemaVersion: readString(record.schemaVersion, fallback.schemaVersion),
+    sourceApp: "Technica",
+    id: readString(record.id, fallback.id),
+    name: readString(record.name, fallback.name),
+    description: readString(record.description, fallback.description),
+    faction: readString(record.faction, readString(metadata?.faction, fallback.faction)),
+    kind: readString(record.kind, fallback.kind),
+    spriteKey: readString(record.spriteKey, fallback.spriteKey),
+    spriteAsset:
+      record.spriteAsset && typeof record.spriteAsset === "object"
+        ? (record.spriteAsset as FieldEnemyDocument["spriteAsset"])
+        : fallback.spriteAsset,
+    stats: {
+      maxHp: readNumber(stats?.maxHp, fallback.stats.maxHp),
+      speed: readNumber(stats?.speed, fallback.stats.speed),
+      aggroRange: readNumber(stats?.aggroRange, fallback.stats.aggroRange),
+      width: readNumber(stats?.width, fallback.stats.width),
+      height: readNumber(stats?.height, fallback.stats.height)
+    },
+    spawn: {
+      mapIds: Array.isArray(spawn?.mapIds) ? spawn.mapIds.map(String).map((entry) => entry.trim()).filter(Boolean) : fallback.spawn.mapIds,
+      floorOrdinals: Array.isArray(spawn?.floorOrdinals)
+        ? spawn.floorOrdinals.map((entry) => Number(entry)).filter((entry) => Number.isFinite(entry) && entry > 0).map((entry) => Math.floor(entry))
+        : fallback.spawn.floorOrdinals,
+      spawnCount: readNumber(spawn?.spawnCount ?? spawn?.count, fallback.spawn.spawnCount)
+    },
+    drops: {
+      wad: readNumber(drops?.wad, fallback.drops.wad),
+      resources: {
+        ...fallback.drops.resources,
+        ...Object.fromEntries(
+          resourceKeys.map((resourceKey) => [resourceKey, readNumber(resources?.[resourceKey], fallback.drops.resources[resourceKey])])
+        )
+      },
+      items: Array.isArray(drops?.items)
+        ? drops.items.map((entry) => {
+            const item = toRecord(entry);
+            return {
+              id: readString(item?.id, ""),
+              quantity: readNumber(item?.quantity, 1),
+              chance: readNumber(item?.chance, 1)
+            };
+          })
+        : fallback.drops.items
+    },
+    metadata: metadata
+      ? Object.fromEntries(Object.entries(metadataWithoutFaction).map(([key, entry]) => [key, String(entry)]))
+      : fallback.metadata,
+    createdAt: readString(record.createdAt, fallback.createdAt),
+    updatedAt: readString(record.updatedAt, fallback.updatedAt)
+  };
+}
+
 function createDropItem(): FieldEnemyItemDropDocument {
   return {
     id: "",
@@ -52,6 +139,28 @@ function createDropItem(): FieldEnemyItemDropDocument {
 }
 
 export function FieldEnemyEditor() {
+  const { desktopEnabled, repoPath, summaryStates, ensureSummaries } = useChaosCoreDatabase();
+
+  useEffect(() => {
+    if (!desktopEnabled || !repoPath.trim()) {
+      return;
+    }
+
+    void ensureSummaries("faction");
+  }, [desktopEnabled, ensureSummaries, repoPath]);
+
+  const factionOptions = useMemo(
+    () =>
+      mergeFactionOptions(
+        summaryStates.faction.entries.map((entry) => ({
+          id: entry.contentId,
+          name: entry.title.trim() || entry.contentId,
+          origin: entry.origin
+        }))
+      ),
+    [summaryStates.faction.entries]
+  );
+
   function loadDatabaseEntry(entry: LoadedChaosCoreDatabaseEntry, setDocument: (document: FieldEnemyDocument) => void) {
     try {
       const parsed = JSON.parse(entry.editorContent ?? entry.sourceContent ?? entry.runtimeContent);
@@ -59,7 +168,7 @@ export function FieldEnemyEditor() {
         notify("That Chaos Core database entry does not match the Technica field enemy format.");
         return;
       }
-      setDocument(touchFieldEnemy(parsed));
+      setDocument(touchFieldEnemy(normalizeFieldEnemyDocument(parsed)));
     } catch {
       notify("Could not load the selected field enemy from the Chaos Core database.");
     }
@@ -73,14 +182,21 @@ export function FieldEnemyEditor() {
       initialDocument={createSampleFieldEnemy()}
       createBlank={createBlankFieldEnemy}
       createSample={createSampleFieldEnemy}
-      validate={validateFieldEnemyDocument}
-      buildBundleForTarget={buildFieldEnemyBundleForTarget}
-      getTitle={(document) => document.name}
+      validate={(document) => validateFieldEnemyDocument(normalizeFieldEnemyDocument(document))}
+      buildBundleForTarget={(document, target) => buildFieldEnemyBundleForTarget(normalizeFieldEnemyDocument(document), target)}
+      getTitle={(document) => normalizeFieldEnemyDocument(document).name}
       isImportPayload={isFieldEnemyDocument}
-      touchDocument={touchFieldEnemy}
+      touchDocument={(document) => touchFieldEnemy(normalizeFieldEnemyDocument(document))}
       replacePrompt="Replace the current field enemy draft with the imported file?"
       invalidImportMessage="That file does not look like a Technica field enemy draft or export."
       renderWorkspace={({ document, setDocument, patchDocument, exportTarget, setExportTarget, loadSample, clearDocument, importDraft, saveDraft, exportBundle, canSendToDesktop, isSendingToDesktop, sendToDesktop }) => (
+        (() => {
+          const fieldEnemy = normalizeFieldEnemyDocument(document);
+          const selectedFaction = factionOptions.find((option) => option.id === fieldEnemy.faction) ?? null;
+          const patchFieldEnemy = (updater: (current: FieldEnemyDocument) => FieldEnemyDocument) =>
+            patchDocument((current) => updater(normalizeFieldEnemyDocument(current)));
+
+          return (
         <>
           <Panel
             title="Field Enemy Setup"
@@ -99,29 +215,51 @@ export function FieldEnemyEditor() {
             <div className="form-grid">
               <label className="field">
                 <span>Enemy id</span>
-                <input value={document.id} onChange={(event) => patchDocument((current) => ({ ...current, id: event.target.value }))} />
+                <input value={fieldEnemy.id} onChange={(event) => patchFieldEnemy((current) => ({ ...current, id: event.target.value }))} />
               </label>
               <label className="field">
                 <span>Name</span>
-                <input value={document.name} onChange={(event) => patchDocument((current) => ({ ...current, name: event.target.value }))} />
+                <input value={fieldEnemy.name} onChange={(event) => patchFieldEnemy((current) => ({ ...current, name: event.target.value }))} />
+              </label>
+              <label className="field">
+                <span>Faction</span>
+                <select
+                  value={fieldEnemy.faction}
+                  onChange={(event) => patchFieldEnemy((current) => ({ ...current, faction: event.target.value }))}
+                >
+                  {!fieldEnemy.faction.trim() ? <option value="">Select faction...</option> : null}
+                  {fieldEnemy.faction.trim() && !selectedFaction ? (
+                    <option value={fieldEnemy.faction}>Custom ({fieldEnemy.faction})</option>
+                  ) : null}
+                  {factionOptions.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.name} ({option.id})
+                    </option>
+                  ))}
+                </select>
+                <small className="muted">
+                  {selectedFaction
+                    ? `${selectedFaction.name} (${selectedFaction.id})${selectedFaction.origin === "preset" ? " - Preset" : selectedFaction.origin === "game" ? " - Game" : " - Technica"}`
+                    : `${factionOptions.length} faction option(s), including Chaos Core presets.`}
+                </small>
               </label>
               <label className="field">
                 <span>Kind</span>
-                <input value={document.kind} onChange={(event) => patchDocument((current) => ({ ...current, kind: event.target.value }))} />
+                <input value={fieldEnemy.kind} onChange={(event) => patchFieldEnemy((current) => ({ ...current, kind: event.target.value }))} />
               </label>
               <label className="field">
                 <span>Sprite key</span>
                 <input
-                  value={document.spriteKey}
-                  onChange={(event) => patchDocument((current) => ({ ...current, spriteKey: event.target.value }))}
+                  value={fieldEnemy.spriteKey}
+                  onChange={(event) => patchFieldEnemy((current) => ({ ...current, spriteKey: event.target.value }))}
                 />
               </label>
               <label className="field full">
                 <span>Description</span>
                 <textarea
                   rows={4}
-                  value={document.description}
-                  onChange={(event) => patchDocument((current) => ({ ...current, description: event.target.value }))}
+                  value={fieldEnemy.description}
+                  onChange={(event) => patchFieldEnemy((current) => ({ ...current, description: event.target.value }))}
                 />
               </label>
             </div>
@@ -133,9 +271,9 @@ export function FieldEnemyEditor() {
                   <span>Max HP</span>
                   <input
                     type="number"
-                    value={document.stats.maxHp}
+                    value={fieldEnemy.stats.maxHp}
                     onChange={(event) =>
-                      patchDocument((current) => ({
+                      patchFieldEnemy((current) => ({
                         ...current,
                         stats: {
                           ...current.stats,
@@ -149,9 +287,9 @@ export function FieldEnemyEditor() {
                   <span>Speed</span>
                   <input
                     type="number"
-                    value={document.stats.speed}
+                    value={fieldEnemy.stats.speed}
                     onChange={(event) =>
-                      patchDocument((current) => ({
+                      patchFieldEnemy((current) => ({
                         ...current,
                         stats: {
                           ...current.stats,
@@ -165,9 +303,9 @@ export function FieldEnemyEditor() {
                   <span>Aggro range</span>
                   <input
                     type="number"
-                    value={document.stats.aggroRange}
+                    value={fieldEnemy.stats.aggroRange}
                     onChange={(event) =>
-                      patchDocument((current) => ({
+                      patchFieldEnemy((current) => ({
                         ...current,
                         stats: {
                           ...current.stats,
@@ -181,9 +319,9 @@ export function FieldEnemyEditor() {
                   <span>Width</span>
                   <input
                     type="number"
-                    value={document.stats.width}
+                    value={fieldEnemy.stats.width}
                     onChange={(event) =>
-                      patchDocument((current) => ({
+                      patchFieldEnemy((current) => ({
                         ...current,
                         stats: {
                           ...current.stats,
@@ -197,9 +335,9 @@ export function FieldEnemyEditor() {
                   <span>Height</span>
                   <input
                     type="number"
-                    value={document.stats.height}
+                    value={fieldEnemy.stats.height}
                     onChange={(event) =>
-                      patchDocument((current) => ({
+                      patchFieldEnemy((current) => ({
                         ...current,
                         stats: {
                           ...current.stats,
@@ -219,9 +357,9 @@ export function FieldEnemyEditor() {
                   <span>Spawns per map</span>
                   <input
                     type="number"
-                    value={document.spawn.spawnCount}
+                    value={fieldEnemy.spawn.spawnCount}
                     onChange={(event) =>
-                      patchDocument((current) => ({
+                      patchFieldEnemy((current) => ({
                         ...current,
                         spawn: {
                           ...current.spawn,
@@ -234,9 +372,9 @@ export function FieldEnemyEditor() {
                 <label className="field">
                   <span>Floor numbers</span>
                   <input
-                    value={serializeFloorOrdinals(document.spawn.floorOrdinals)}
+                    value={serializeFloorOrdinals(fieldEnemy.spawn.floorOrdinals)}
                     onChange={(event) =>
-                      patchDocument((current) => ({
+                      patchFieldEnemy((current) => ({
                         ...current,
                         spawn: {
                           ...current.spawn,
@@ -250,9 +388,9 @@ export function FieldEnemyEditor() {
                   <span>Specific map ids</span>
                   <textarea
                     rows={4}
-                    value={serializeMultilineList(document.spawn.mapIds)}
+                    value={serializeMultilineList(fieldEnemy.spawn.mapIds)}
                     onChange={(event) =>
-                      patchDocument((current) => ({
+                      patchFieldEnemy((current) => ({
                         ...current,
                         spawn: {
                           ...current.spawn,
@@ -272,9 +410,9 @@ export function FieldEnemyEditor() {
                   <span>WAD</span>
                   <input
                     type="number"
-                    value={document.drops.wad}
+                    value={fieldEnemy.drops.wad}
                     onChange={(event) =>
-                      patchDocument((current) => ({
+                      patchFieldEnemy((current) => ({
                         ...current,
                         drops: {
                           ...current.drops,
@@ -284,89 +422,34 @@ export function FieldEnemyEditor() {
                     }
                   />
                 </label>
-                <label className="field">
-                  <span>Metal Scrap</span>
-                  <input
-                    type="number"
-                    value={document.drops.resources.metalScrap}
-                    onChange={(event) =>
-                      patchDocument((current) => ({
-                        ...current,
-                        drops: {
-                          ...current.drops,
-                          resources: {
-                            ...current.drops.resources,
-                            metalScrap: Number(event.target.value || 0)
+                {resourceKeys.map((resourceKey) => (
+                  <label key={resourceKey} className="field">
+                    <span>{resourceLabels[resourceKey]}</span>
+                    <input
+                      type="number"
+                      value={fieldEnemy.drops.resources[resourceKey]}
+                      onChange={(event) =>
+                        patchFieldEnemy((current) => ({
+                          ...current,
+                          drops: {
+                            ...current.drops,
+                            resources: {
+                              ...current.drops.resources,
+                              [resourceKey]: Number(event.target.value || 0)
+                            }
                           }
-                        }
-                      }))
-                    }
-                  />
-                </label>
-                <label className="field">
-                  <span>Wood</span>
-                  <input
-                    type="number"
-                    value={document.drops.resources.wood}
-                    onChange={(event) =>
-                      patchDocument((current) => ({
-                        ...current,
-                        drops: {
-                          ...current.drops,
-                          resources: {
-                            ...current.drops.resources,
-                            wood: Number(event.target.value || 0)
-                          }
-                        }
-                      }))
-                    }
-                  />
-                </label>
-                <label className="field">
-                  <span>Chaos Shards</span>
-                  <input
-                    type="number"
-                    value={document.drops.resources.chaosShards}
-                    onChange={(event) =>
-                      patchDocument((current) => ({
-                        ...current,
-                        drops: {
-                          ...current.drops,
-                          resources: {
-                            ...current.drops.resources,
-                            chaosShards: Number(event.target.value || 0)
-                          }
-                        }
-                      }))
-                    }
-                  />
-                </label>
-                <label className="field">
-                  <span>Steam Components</span>
-                  <input
-                    type="number"
-                    value={document.drops.resources.steamComponents}
-                    onChange={(event) =>
-                      patchDocument((current) => ({
-                        ...current,
-                        drops: {
-                          ...current.drops,
-                          resources: {
-                            ...current.drops.resources,
-                            steamComponents: Number(event.target.value || 0)
-                          }
-                        }
-                      }))
-                    }
-                  />
-                </label>
+                        }))
+                      }
+                    />
+                  </label>
+                ))}
               </div>
 
               <div className="dialogue-entry-list">
-                {document.drops.items.length === 0 ? (
+                {fieldEnemy.drops.items.length === 0 ? (
                   <div className="empty-state compact">Add optional item drops with quantity and 0-1 chance values.</div>
                 ) : (
-                  document.drops.items.map((drop, index) => (
+                  fieldEnemy.drops.items.map((drop, index) => (
                     <article key={`${drop.id || "item"}-${index}`} className="dialogue-entry-card">
                       <div className="dialogue-entry-header">
                         <span className="flow-badge jump">Drop {index + 1}</span>
@@ -374,7 +457,7 @@ export function FieldEnemyEditor() {
                           type="button"
                           className="ghost-button danger"
                           onClick={() =>
-                            patchDocument((current) => ({
+                            patchFieldEnemy((current) => ({
                               ...current,
                               drops: {
                                 ...current.drops,
@@ -392,7 +475,7 @@ export function FieldEnemyEditor() {
                           <input
                             value={drop.id}
                             onChange={(event) =>
-                              patchDocument((current) => ({
+                              patchFieldEnemy((current) => ({
                                 ...current,
                                 drops: {
                                   ...current.drops,
@@ -410,7 +493,7 @@ export function FieldEnemyEditor() {
                             type="number"
                             value={drop.quantity}
                             onChange={(event) =>
-                              patchDocument((current) => ({
+                              patchFieldEnemy((current) => ({
                                 ...current,
                                 drops: {
                                   ...current.drops,
@@ -431,7 +514,7 @@ export function FieldEnemyEditor() {
                             step="0.05"
                             value={drop.chance}
                             onChange={(event) =>
-                              patchDocument((current) => ({
+                              patchFieldEnemy((current) => ({
                                 ...current,
                                 drops: {
                                   ...current.drops,
@@ -454,7 +537,7 @@ export function FieldEnemyEditor() {
                   type="button"
                   className="ghost-button"
                   onClick={() =>
-                    patchDocument((current) => ({
+                    patchFieldEnemy((current) => ({
                       ...current,
                       drops: {
                         ...current.drops,
@@ -474,17 +557,17 @@ export function FieldEnemyEditor() {
                 label="Sprite"
                 emptyLabel="Drop enemy sprite art"
                 hint="Used by the field renderer when a published sprite path is available."
-                asset={document.spriteAsset}
-                onChange={(spriteAsset) => patchDocument((current) => ({ ...current, spriteAsset }))}
+                asset={fieldEnemy.spriteAsset}
+                onChange={(spriteAsset) => patchFieldEnemy((current) => ({ ...current, spriteAsset }))}
               />
               <div className="form-grid">
                 <label className="field full">
                   <span>Metadata</span>
                   <textarea
                     rows={4}
-                    value={serializeKeyValueLines(document.metadata)}
+                    value={serializeKeyValueLines(fieldEnemy.metadata)}
                     onChange={(event) =>
-                      patchDocument((current) => ({
+                      patchFieldEnemy((current) => ({
                         ...current,
                         metadata: parseKeyValueLines(event.target.value)
                       }))
@@ -496,9 +579,10 @@ export function FieldEnemyEditor() {
 
             <div className="toolbar split">
               <div className="chip-row">
-                <span className="pill">{document.kind || "light"}</span>
-                <span className="pill">{document.spawn.spawnCount} spawn(s)</span>
-                <span className="pill">{document.drops.items.length} item drop(s)</span>
+                <span className="pill">{fieldEnemy.kind || "light"}</span>
+                {fieldEnemy.faction ? <span className="pill">{fieldEnemy.faction}</span> : null}
+                <span className="pill">{fieldEnemy.spawn.spawnCount} spawn(s)</span>
+                <span className="pill">{fieldEnemy.drops.items.length} item drop(s)</span>
               </div>
               <div className="toolbar">
                 <label className="inline-select">
@@ -528,12 +612,14 @@ export function FieldEnemyEditor() {
 
           <ChaosCoreDatabasePanel
             contentType="field_enemy"
-            currentDocument={document}
-            buildBundle={(current) => buildFieldEnemyBundleForTarget(current, "chaos-core")}
+            currentDocument={fieldEnemy}
+            buildBundle={(current) => buildFieldEnemyBundleForTarget(normalizeFieldEnemyDocument(current), "chaos-core")}
             onLoadEntry={(entry) => loadDatabaseEntry(entry, setDocument)}
             subtitle="Publish lightweight field enemy definitions into Chaos Core and reopen those records here for spawn and drop tuning."
           />
         </>
+          );
+        })()
       )}
     />
   );

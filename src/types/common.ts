@@ -6,6 +6,8 @@ export type EditorKind =
   | "dialogue"
   | "mail"
   | "quest"
+  | "key_item"
+  | "faction"
   | "map"
   | "field_enemy"
   | "npc"

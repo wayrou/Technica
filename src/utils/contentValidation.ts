@@ -5,13 +5,16 @@ import type { CraftingDocument } from "../types/crafting";
 import type { DecorationDocument } from "../types/decoration";
 import type { DishDocument } from "../types/dish";
 import type { ImageAsset, ValidationIssue } from "../types/common";
+import type { FactionDocument } from "../types/faction";
 import type { FieldEnemyDocument } from "../types/fieldEnemy";
 import type { FieldModDocument } from "../types/fieldmod";
 import type { GearDocument } from "../types/gear";
 import type { ItemDocument } from "../types/item";
+import type { KeyItemDocument } from "../types/keyItem";
 import type { MailDocument } from "../types/mail";
 import type { NpcDocument } from "../types/npc";
 import type { OperationDocument } from "../types/operation";
+import { resourceKeys, resourceLabels, type ResourceWalletDocument } from "../types/resources";
 import type { SchemaDocument } from "../types/schema";
 import type { UnitDocument } from "../types/unit";
 import { mailCategories } from "../types/mail";
@@ -93,6 +96,22 @@ function validateImageAsset(asset: ImageAsset | undefined, field: string, label:
   }
 }
 
+function validateResourceWallet(
+  wallet: Partial<ResourceWalletDocument>,
+  fieldPrefix: string,
+  labelPrefix: string,
+  issues: ValidationIssue[],
+) {
+  resourceKeys.forEach((resourceKey) => {
+    requirePositive(
+      Number(wallet[resourceKey] ?? 0),
+      `${fieldPrefix}.${resourceKey}`,
+      `${labelPrefix} ${resourceLabels[resourceKey].toLowerCase()}`,
+      issues,
+    );
+  });
+}
+
 export function validateGearDocument(document: GearDocument): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
@@ -170,11 +189,32 @@ export function validateItemDocument(document: ItemDocument): ValidationIssue[] 
   return issues;
 }
 
+export function validateKeyItemDocument(document: KeyItemDocument): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  requireText(document.id, "id", "Key item id", issues);
+  requireText(document.name, "name", "Key item name", issues);
+  requireText(document.description, "description", "Key item description", issues);
+  validateImageAsset(document.iconAsset, "iconAsset", "Key item icon", issues);
+
+  return issues;
+}
+
+export function validateFactionDocument(document: FactionDocument): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  requireText(document.name, "name", "Faction name", issues);
+  requireText(document.description, "description", "Faction description", issues);
+
+  return issues;
+}
+
 export function validateFieldEnemyDocument(document: FieldEnemyDocument): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
   requireText(document.id, "id", "Field enemy id", issues);
   requireText(document.name, "name", "Field enemy name", issues);
+  requireText(document.faction, "faction", "Field enemy faction", issues);
   requireText(document.kind, "kind", "Enemy kind", issues);
   requirePositive(document.stats.maxHp, "stats.maxHp", "Max HP", issues, false);
   requirePositive(document.stats.speed, "stats.speed", "Move speed", issues, false);
@@ -183,15 +223,7 @@ export function validateFieldEnemyDocument(document: FieldEnemyDocument): Valida
   requirePositive(document.stats.height, "stats.height", "Height", issues, false);
   requirePositive(document.spawn.spawnCount, "spawn.spawnCount", "Spawns per map", issues, false);
   requirePositive(document.drops.wad, "drops.wad", "WAD drop", issues);
-  requirePositive(document.drops.resources.metalScrap, "drops.resources.metalScrap", "Metal Scrap drop", issues);
-  requirePositive(document.drops.resources.wood, "drops.resources.wood", "Wood drop", issues);
-  requirePositive(document.drops.resources.chaosShards, "drops.resources.chaosShards", "Chaos Shards drop", issues);
-  requirePositive(
-    document.drops.resources.steamComponents,
-    "drops.resources.steamComponents",
-    "Steam Components drop",
-    issues
-  );
+  validateResourceWallet(document.drops.resources, "drops.resources", "Drop", issues);
 
   if (document.spawn.mapIds.length === 0 && document.spawn.floorOrdinals.length === 0) {
     issues.push({
@@ -256,10 +288,7 @@ export function validateCraftingDocument(document: CraftingDocument): Validation
   requireText(document.id, "id", "Recipe id", issues);
   requireText(document.name, "name", "Recipe name", issues);
   requireText(document.description, "description", "Recipe description", issues);
-  requirePositive(document.cost.metalScrap, "cost.metalScrap", "Metal scrap cost", issues);
-  requirePositive(document.cost.wood, "cost.wood", "Wood cost", issues);
-  requirePositive(document.cost.chaosShards, "cost.chaosShards", "Chaos shard cost", issues);
-  requirePositive(document.cost.steamComponents, "cost.steamComponents", "Steam component cost", issues);
+  validateResourceWallet(document.cost, "cost", "Cost", issues);
 
   if (document.grants.length === 0) {
     issues.push({
@@ -397,24 +426,15 @@ export function validateSchemaDocument(document: SchemaDocument): ValidationIssu
   requireText(document.id, "id", "Schema id", issues);
   requireText(document.name, "name", "Schema name", issues);
   requireText(document.description, "description", "Schema description", issues);
-  requirePositive(document.buildCost.metalScrap, "buildCost.metalScrap", "Build metal scrap cost", issues);
-  requirePositive(document.buildCost.wood, "buildCost.wood", "Build wood cost", issues);
-  requirePositive(document.buildCost.chaosShards, "buildCost.chaosShards", "Build chaos shard cost", issues);
-  requirePositive(document.buildCost.steamComponents, "buildCost.steamComponents", "Build steam component cost", issues);
-  requirePositive(document.unlockCost.metalScrap, "unlockCost.metalScrap", "Unlock metal scrap cost", issues);
-  requirePositive(document.unlockCost.wood, "unlockCost.wood", "Unlock wood cost", issues);
-  requirePositive(document.unlockCost.chaosShards, "unlockCost.chaosShards", "Unlock chaos shard cost", issues);
-  requirePositive(document.unlockCost.steamComponents, "unlockCost.steamComponents", "Unlock steam component cost", issues);
+  validateResourceWallet(document.buildCost, "buildCost", "Build cost", issues);
+  validateResourceWallet(document.unlockCost, "unlockCost", "Unlock cost", issues);
   requirePositive(document.unlockWadCost, "unlockWadCost", "Unlock WAD cost", issues);
   warnOnDuplicates(document.requiredQuestIds, "requiredQuestIds", "Required quest ids", issues);
   warnOnDuplicates(document.preferredRoomTags, "preferredRoomTags", "Preferred room tags", issues);
 
   if (document.unlockSource === "schema") {
     const hasAnyUnlockCost = [
-      document.unlockCost.metalScrap,
-      document.unlockCost.wood,
-      document.unlockCost.chaosShards,
-      document.unlockCost.steamComponents,
+      ...resourceKeys.map((resourceKey) => document.unlockCost[resourceKey]),
       document.unlockWadCost
     ].some((value) => value > 0);
 
@@ -444,29 +464,11 @@ export function validateSchemaDocument(document: SchemaDocument): ValidationIssu
       });
     }
 
-    requirePositive(
-      modifier.output.metalScrap,
-      `tagOutputModifiers.${index}.output.metalScrap`,
-      `Tag output modifier ${index + 1} metal scrap`,
-      issues
-    );
-    requirePositive(
-      modifier.output.wood,
-      `tagOutputModifiers.${index}.output.wood`,
-      `Tag output modifier ${index + 1} wood`,
-      issues
-    );
-    requirePositive(
-      modifier.output.chaosShards,
-      `tagOutputModifiers.${index}.output.chaosShards`,
-      `Tag output modifier ${index + 1} chaos shards`,
-      issues
-    );
-    requirePositive(
-      modifier.output.steamComponents,
-      `tagOutputModifiers.${index}.output.steamComponents`,
-      `Tag output modifier ${index + 1} steam components`,
-      issues
+    validateResourceWallet(
+      modifier.output,
+      `tagOutputModifiers.${index}.output`,
+      `Tag output modifier ${index + 1}`,
+      issues,
     );
   });
 
@@ -500,25 +502,9 @@ export function validateSchemaDocument(document: SchemaDocument): ValidationIssu
     requirePositive(document.powerOutputWatts, "powerOutputWatts", "Power output", issues);
     requirePositive(document.commsOutputBw, "commsOutputBw", "Comms output", issues);
     requirePositive(document.supplyOutputCrates, "supplyOutputCrates", "Supply output", issues);
-    requirePositive(document.upkeep.metalScrap, "upkeep.metalScrap", "Upkeep metal scrap", issues);
-    requirePositive(document.upkeep.wood, "upkeep.wood", "Upkeep wood", issues);
-    requirePositive(document.upkeep.chaosShards, "upkeep.chaosShards", "Upkeep chaos shards", issues);
-    requirePositive(document.upkeep.steamComponents, "upkeep.steamComponents", "Upkeep steam components", issues);
+    validateResourceWallet(document.upkeep, "upkeep", "Upkeep", issues);
     requirePositive(document.wadUpkeepPerTick, "wadUpkeepPerTick", "WAD upkeep per tick", issues);
-    requirePositive(document.incomePerTick.metalScrap, "incomePerTick.metalScrap", "Income metal scrap", issues);
-    requirePositive(document.incomePerTick.wood, "incomePerTick.wood", "Income wood", issues);
-    requirePositive(
-      document.incomePerTick.chaosShards,
-      "incomePerTick.chaosShards",
-      "Income chaos shards",
-      issues
-    );
-    requirePositive(
-      document.incomePerTick.steamComponents,
-      "incomePerTick.steamComponents",
-      "Income steam components",
-      issues
-    );
+    validateResourceWallet(document.incomePerTick, "incomePerTick", "Income", issues);
     requirePositive(document.supportRadius, "supportRadius", "Support radius", issues);
   } else {
     if (document.shortCode.trim()) {
@@ -593,6 +579,7 @@ export function validateUnitDocument(document: UnitDocument): ValidationIssue[] 
 
   requireText(document.id, "id", "Unit id", issues);
   requireText(document.name, "name", "Unit name", issues);
+  requireText(document.faction, "faction", "Unit faction", issues);
   requireText(document.currentClassId, "currentClassId", "Current class id", issues);
   requirePositive(document.stats.maxHp, "stats.maxHp", "Max HP", issues, false);
   requirePositive(document.stats.atk, "stats.atk", "ATK", issues);
@@ -788,6 +775,7 @@ export function validateNpcDocument(document: NpcDocument): ValidationIssue[] {
 
   requireText(document.id, "id", "NPC id", issues);
   requireText(document.name, "name", "NPC name", issues);
+  requireText(document.faction, "faction", "NPC faction", issues);
   requireText(document.mapId, "mapId", "Map id", issues);
   requirePositive(document.tileX, "tileX", "Tile X", issues);
   requirePositive(document.tileY, "tileY", "Tile Y", issues);

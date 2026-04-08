@@ -13,6 +13,7 @@ export interface NpcDocument {
   sourceApp: "Technica";
   id: string;
   name: string;
+  faction: string;
   mapId: string;
   tileX: number;
   tileY: number;

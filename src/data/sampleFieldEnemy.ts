@@ -1,4 +1,5 @@
 import type { FieldEnemyDocument } from "../types/fieldEnemy";
+import { createResourceWalletDocument } from "../types/resources";
 import { isoNow } from "../utils/date";
 
 function createBaseFieldEnemy(): FieldEnemyDocument {
@@ -10,6 +11,7 @@ function createBaseFieldEnemy(): FieldEnemyDocument {
     id: "field_enemy_new",
     name: "Untitled Field Enemy",
     description: "",
+    faction: "",
     kind: "light",
     spriteKey: "",
     stats: {
@@ -26,12 +28,7 @@ function createBaseFieldEnemy(): FieldEnemyDocument {
     },
     drops: {
       wad: 0,
-      resources: {
-        metalScrap: 0,
-        wood: 0,
-        chaosShards: 0,
-        steamComponents: 0,
-      },
+      resources: createResourceWalletDocument(),
       items: [],
     },
     metadata: {},
@@ -52,6 +49,7 @@ export function createSampleFieldEnemy(): FieldEnemyDocument {
     id: "field_enemy_brass_scuttler",
     name: "Brass Scuttler",
     description: "A light skirmisher that prowls collapsed survey corridors and stripped relay rooms.",
+    faction: "scrap",
     spriteKey: "enemy_brass_scuttler",
     stats: {
       maxHp: 8,
@@ -67,12 +65,9 @@ export function createSampleFieldEnemy(): FieldEnemyDocument {
     },
     drops: {
       wad: 6,
-      resources: {
+      resources: createResourceWalletDocument({
         metalScrap: 1,
-        wood: 0,
-        chaosShards: 0,
-        steamComponents: 0,
-      },
+      }),
       items: [
         {
           id: "consumable_field_ration",
@@ -82,7 +77,6 @@ export function createSampleFieldEnemy(): FieldEnemyDocument {
       ],
     },
     metadata: {
-      faction: "scavenger",
       behavior: "rushdown",
     },
     createdAt: timestamp,

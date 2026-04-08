@@ -17,10 +17,12 @@ import type { CraftingDocument } from "../types/crafting";
 import type { DecorationDocument } from "../types/decoration";
 import type { DialogueDocument } from "../types/dialogue";
 import type { DishDocument } from "../types/dish";
+import type { FactionDocument } from "../types/faction";
 import type { FieldEnemyDocument } from "../types/fieldEnemy";
 import type { FieldModDocument } from "../types/fieldmod";
 import type { GearDocument } from "../types/gear";
 import type { ItemDocument } from "../types/item";
+import type { KeyItemDocument } from "../types/keyItem";
 import type { MapDocument } from "../types/map";
 import type { MailDocument } from "../types/mail";
 import type { NpcDocument } from "../types/npc";
@@ -34,10 +36,12 @@ import {
   buildChaosCoreCodexBundle,
   buildChaosCoreCraftingBundle,
   buildChaosCoreDishBundle,
+  buildChaosCoreFactionBundle,
   buildChaosCoreFieldEnemyBundle,
   buildChaosCoreFieldModBundle,
   buildChaosCoreGearBundle,
   buildChaosCoreItemBundle,
+  buildChaosCoreKeyItemBundle,
   buildChaosCoreMailBundle,
   buildChaosCoreNpcBundle,
   buildChaosCoreOperationBundle,
@@ -252,6 +256,8 @@ function buildGenericBundle<TDocument>(
       | "operation"
       | "class"
       | "field_enemy"
+      | "key_item"
+      | "faction"
       | "crafting"
       | "dish"
       | "fieldmod"
@@ -437,6 +443,49 @@ Importer notes:
 - Item drops use 0-1 chance values and explicit quantities.
 `,
     extraFiles: spriteAsset ? [spriteAsset.file] : []
+  });
+}
+
+export function buildKeyItemBundle(document: KeyItemDocument): ExportBundle {
+  const contentId = runtimeId(document.id || document.name, "key_item");
+  const iconAsset = document.iconAsset ? createImageAssetExport(contentId, "icon", document.iconAsset) : null;
+  return buildGenericBundle(document, {
+    contentType: "key_item",
+    title: document.name,
+    fallbackId: contentId,
+    targetSchemaVersion: "technica-key-item.v1",
+    description: "Quest-only key item export with player-facing text and icon metadata.",
+    entryFile: "key_item.json",
+    readme: `# Technica Key Item Export
+
+Name: ${document.name}
+Id: ${document.id}
+
+Importer notes:
+- Preserve the player-facing name, description, and icon.
+- Key items are intended for quest unlocks, quest rewards, and NPC turn-ins rather than normal combat inventory loops.
+`,
+    extraFiles: iconAsset ? [iconAsset.file] : []
+  });
+}
+
+export function buildFactionBundle(document: FactionDocument): ExportBundle {
+  const contentId = runtimeId(document.id || document.name, "faction");
+  return buildGenericBundle(document, {
+    contentType: "faction",
+    title: document.name,
+    fallbackId: contentId,
+    targetSchemaVersion: "technica-faction.v1",
+    description: "Faction export with reusable naming and lore metadata.",
+    entryFile: "faction.json",
+    readme: `# Technica Faction Export
+
+Name: ${document.name}
+Id: ${document.id}
+
+Importer notes:
+- Preserve the faction name and description so downstream tools can reuse them consistently.
+`
   });
 }
 
@@ -726,6 +775,22 @@ export function buildItemBundleForTarget(document: ItemDocument, target: ExportT
   }
 
   return buildItemBundle(document);
+}
+
+export function buildKeyItemBundleForTarget(document: KeyItemDocument, target: ExportTarget) {
+  if (target === "chaos-core") {
+    return buildChaosCoreKeyItemBundle(document);
+  }
+
+  return buildKeyItemBundle(document);
+}
+
+export function buildFactionBundleForTarget(document: FactionDocument, target: ExportTarget) {
+  if (target === "chaos-core") {
+    return buildChaosCoreFactionBundle(document);
+  }
+
+  return buildFactionBundle(document);
 }
 
 export function buildFieldEnemyBundleForTarget(document: FieldEnemyDocument, target: ExportTarget) {

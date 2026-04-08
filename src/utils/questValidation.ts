@@ -84,6 +84,13 @@ export function validateQuestDocument(document: QuestDocument) {
     });
   });
 
+  findDuplicates(document.requiredKeyItemIds).forEach((duplicate) => {
+    issues.push({
+      severity: "warning",
+      message: `Required key item id '${duplicate}' is duplicated.`
+    });
+  });
+
   const stateIds = new Set(document.states.map((state) => state.id));
   const objectiveIds = new Set(document.objectives.map((objective) => objective.id));
   const stepIds = new Set(document.steps.map((step) => step.id));
@@ -107,6 +114,32 @@ export function validateQuestDocument(document: QuestDocument) {
       severity: "error",
       message: `Failure state '${document.failureStateId}' does not exist.`
     });
+  }
+
+  if (document.completionTurnIn) {
+    if (!document.completionTurnIn.npcId.trim()) {
+      issues.push({
+        severity: "error",
+        field: "completionTurnIn.npcId",
+        message: "Quest turn-ins need an NPC id."
+      });
+    }
+
+    if (!document.completionTurnIn.keyItemId.trim()) {
+      issues.push({
+        severity: "error",
+        field: "completionTurnIn.keyItemId",
+        message: "Quest turn-ins need a key item id."
+      });
+    }
+
+    if (!Number.isFinite(document.completionTurnIn.quantity) || document.completionTurnIn.quantity <= 0) {
+      issues.push({
+        severity: "error",
+        field: "completionTurnIn.quantity",
+        message: "Quest turn-in quantity must be greater than 0."
+      });
+    }
   }
 
   document.objectives.forEach((objective) => {

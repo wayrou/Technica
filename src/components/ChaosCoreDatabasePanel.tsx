@@ -49,6 +49,7 @@ export function ChaosCoreDatabasePanel<TDocument>({
   const [isLoadingEntry, setIsLoadingEntry] = useState(false);
   const [isRemovingEntry, setIsRemovingEntry] = useState(false);
   const [armedRemoveEntryKey, setArmedRemoveEntryKey] = useState("");
+  const effectiveRepoPath = repoPath.trim() || repoPathDraft.trim();
   const summaryState = summaryStates[contentType];
   const entries = summaryState.entries;
 
@@ -62,6 +63,11 @@ export function ChaosCoreDatabasePanel<TDocument>({
       return;
     }
 
+    if (!effectiveRepoPath) {
+      setSelectedEntryKey("");
+      return;
+    }
+
     void ensureSummaries(contentType).then((nextEntries) => {
       setSelectedEntryKey((current) => {
         if (current && nextEntries.some((entry) => entry.entryKey === current)) {
@@ -70,7 +76,7 @@ export function ChaosCoreDatabasePanel<TDocument>({
         return nextEntries[0]?.entryKey ?? "";
       });
     });
-  }, [contentType, desktopEnabled, ensureSummaries, isOpen]);
+  }, [contentType, desktopEnabled, effectiveRepoPath, ensureSummaries, isOpen]);
 
   useEffect(() => {
     setArmedRemoveEntryKey("");
@@ -109,7 +115,7 @@ export function ChaosCoreDatabasePanel<TDocument>({
       return [];
     }
 
-    if (!repoPath.trim()) {
+    if (!effectiveRepoPath) {
       setSelectedEntryKey("");
       return [];
     }
@@ -130,7 +136,7 @@ export function ChaosCoreDatabasePanel<TDocument>({
       return;
     }
 
-    if (!repoPath.trim() || !selectedEntry) {
+    if (!effectiveRepoPath || !selectedEntry) {
       return;
     }
 
@@ -146,7 +152,7 @@ export function ChaosCoreDatabasePanel<TDocument>({
 
     setIsRemovingEntry(true);
     try {
-      await removeChaosCoreDatabaseEntry(repoPath.trim(), contentType, selectedEntry.entryKey);
+      await removeChaosCoreDatabaseEntry(effectiveRepoPath, contentType, selectedEntry.entryKey);
       await refreshEntries(true);
       emitChaosCoreDatabaseUpdate(contentType);
       notify(
@@ -167,7 +173,7 @@ export function ChaosCoreDatabasePanel<TDocument>({
       return;
     }
 
-    if (!repoPath.trim() || !selectedEntry) {
+    if (!effectiveRepoPath || !selectedEntry) {
       return;
     }
 
@@ -187,7 +193,7 @@ export function ChaosCoreDatabasePanel<TDocument>({
       return;
     }
 
-    if (!repoPath.trim()) {
+    if (!effectiveRepoPath) {
       notify("Set the Chaos Core repo path first.");
       return;
     }
@@ -203,7 +209,7 @@ export function ChaosCoreDatabasePanel<TDocument>({
         canWriteBackSelectedEntry &&
         selectedEntry?.contentId === bundle.manifest.contentId;
       const result = await publishChaosCoreBundle(
-        repoPath.trim(),
+        effectiveRepoPath,
         contentType,
         bundle,
         preferredPublishTargetEntryKey ?? matchingEntry?.entryKey ?? (shouldUpdateSelectedEntry ? selectedEntry?.entryKey : undefined),
@@ -248,7 +254,7 @@ export function ChaosCoreDatabasePanel<TDocument>({
               type="button"
               className="ghost-button"
               onClick={() => void refreshEntries(true)}
-              disabled={!desktopEnabled || !repoPath.trim() || summaryState.status === "loading"}
+              disabled={!desktopEnabled || !effectiveRepoPath || summaryState.status === "loading"}
             >
               Refresh
             </button>
@@ -352,7 +358,7 @@ export function ChaosCoreDatabasePanel<TDocument>({
 
           {contentType === "card" ? (
             <ChaosCoreCardGallery
-              repoPath={repoPath.trim()}
+              repoPath={effectiveRepoPath}
               entries={entries}
               selectedEntryKey={selectedEntryKey}
               onSelectEntryKey={setSelectedEntryKey}

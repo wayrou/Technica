@@ -1,4 +1,5 @@
 import type { CraftingDocument } from "../types/crafting";
+import { createResourceWalletDocument } from "../types/resources";
 import { isoNow } from "../utils/date";
 
 export function createBlankCraftingRecipe(): CraftingDocument {
@@ -11,12 +12,7 @@ export function createBlankCraftingRecipe(): CraftingDocument {
     name: "Untitled Recipe",
     category: "armor",
     description: "",
-    cost: {
-      metalScrap: 0,
-      wood: 0,
-      chaosShards: 0,
-      steamComponents: 0
-    },
+    cost: createResourceWalletDocument(),
     grants: [
       {
         itemId: "",
@@ -46,12 +42,10 @@ export function createSampleCraftingRecipe(): CraftingDocument {
     name: "Steam Valve Wristguard",
     category: "armor",
     description: "An accessory recipe that vents heat from mechanical weapons.",
-    cost: {
+    cost: createResourceWalletDocument({
       metalScrap: 2,
-      wood: 0,
-      chaosShards: 0,
       steamComponents: 3
-    },
+    }),
     grants: [
       {
         itemId: "accessory_steam_valve_wristguard",

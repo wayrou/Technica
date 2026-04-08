@@ -16,6 +16,7 @@ import type { MapDocument, MapObject, MapTile, MapZone, TerrainType } from "../t
 import type { NpcDocument } from "../types/npc";
 import type { OperationDocument } from "../types/operation";
 import type { QuestDocument, QuestObjective, QuestReward } from "../types/quest";
+import { resourceKeys } from "../types/resources";
 import type { UnitDocument } from "../types/unit";
 import { isoNow } from "./date";
 import { extractDialogueOccurrenceRules } from "./dialogueOccurrence";
@@ -754,6 +755,27 @@ function buildQuestRewards(rewards: QuestReward[]) {
   const runtimeRewards: ChaosCoreQuestReward = {};
   const extensionEffects: Array<{ key: string; value: string | number | boolean }> = [];
   const extensionRewards: QuestReward[] = [];
+  const normalizedResourceKeyByAlias = new Map<string, string>([
+    ["wad", "wad"],
+    ["metal", "metalScrap"],
+    ["metal_scrap", "metalScrap"],
+    ["metalscrap", "metalScrap"],
+    ["wood", "wood"],
+    ["chaos", "chaosShards"],
+    ["chaos_shards", "chaosShards"],
+    ["chaosshards", "chaosShards"],
+    ["shards", "chaosShards"],
+    ["steam", "steamComponents"],
+    ["steam_components", "steamComponents"],
+    ["steamcomponents", "steamComponents"],
+    ["alloy", "alloy"],
+    ["drawcord", "drawcord"],
+    ["fittings", "fittings"],
+    ["resin", "resin"],
+    ["charge_cells", "chargeCells"],
+    ["chargecells", "chargeCells"],
+    ["charge-cells", "chargeCells"],
+  ]);
 
   rewards.forEach((reward) => {
     if (reward.type === "xp") {
@@ -762,14 +784,17 @@ function buildQuestRewards(rewards: QuestReward[]) {
     }
 
     if (reward.type === "currency") {
-      const currencyKey = runtimeId(reward.value || reward.label, "wad");
+      const currencyAlias = runtimeId(reward.value || reward.label, "wad");
+      const currencyKey = normalizedResourceKeyByAlias.get(currencyAlias) ?? currencyAlias;
       if (currencyKey === "wad") {
         runtimeRewards.wad = (runtimeRewards.wad ?? 0) + reward.amount;
-      } else {
+      } else if (resourceKeys.includes(currencyKey as (typeof resourceKeys)[number])) {
         runtimeRewards.resources = {
           ...(runtimeRewards.resources ?? {}),
           [currencyKey]: ((runtimeRewards.resources ?? {})[currencyKey] ?? 0) + reward.amount
         };
+      } else {
+        extensionRewards.push(reward);
       }
       return;
     }
@@ -820,6 +845,26 @@ function extractQuestDependencies(document: QuestDocument): ExportDependency[] {
     dependencies.push({ contentType: "quest", id: runtimeId(questId), relation: "unlock-requires-quest" });
   });
 
+  document.requiredKeyItemIds.forEach((keyItemId) => {
+    dependencies.push({ contentType: "key_item", id: runtimeId(keyItemId), relation: "unlock-requires-key-item" });
+  });
+
+  if (document.completionTurnIn?.npcId) {
+    dependencies.push({
+      contentType: "npc",
+      id: runtimeId(document.completionTurnIn.npcId),
+      relation: "turn-in-npc"
+    });
+  }
+
+  if (document.completionTurnIn?.keyItemId) {
+    dependencies.push({
+      contentType: "key_item",
+      id: runtimeId(document.completionTurnIn.keyItemId),
+      relation: "turn-in-key-item"
+    });
+  }
+
   return dependencies;
 }
 
@@ -863,7 +908,15 @@ export function buildChaosCoreQuestBundle(document: QuestDocument, references = 
       tags: document.tags,
       prerequisites: document.prerequisites,
       requiredQuestIds: document.requiredQuestIds.map((entry) => runtimeId(entry)),
+      requiredKeyItemIds: document.requiredKeyItemIds.map((entry) => runtimeId(entry)),
       followUpQuestIds: document.followUpQuestIds.map((entry) => runtimeId(entry)),
+      completionTurnIn: document.completionTurnIn
+        ? {
+            npcId: runtimeId(document.completionTurnIn.npcId),
+            keyItemId: runtimeId(document.completionTurnIn.keyItemId),
+            quantity: document.completionTurnIn.quantity
+          }
+        : undefined,
       chaosCoreExtensions: {
         onComplete: extensionEffects.length > 0 ? { setFlags: extensionEffects } : undefined,
         unsupportedRewards: extensionRewards.length > 0 ? extensionRewards : undefined

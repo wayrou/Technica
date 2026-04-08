@@ -7,6 +7,7 @@ import {
   type CraftingDocument,
   type RecipeAcquisitionMethod
 } from "../../types/crafting";
+import { resourceKeys, resourceLabels } from "../../types/resources";
 import { isoNow } from "../../utils/date";
 import { buildCraftingBundleForTarget } from "../../utils/exporters";
 import { validateCraftingDocument } from "../../utils/contentValidation";
@@ -128,74 +129,28 @@ export function CraftingEditor() {
           <div className="subsection">
             <h4>Resource Cost</h4>
             <div className="form-grid">
-              <label className="field">
-                <span>Metal scrap</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={normalizedDocument.cost.metalScrap}
-                  onChange={(event) =>
-                    patchDocument((current) => ({
-                      ...normalizeCraftingRecipe(current),
-                      cost: {
-                        ...current.cost,
-                        metalScrap: Number(event.target.value || 0)
-                      }
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Wood</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={normalizedDocument.cost.wood}
-                  onChange={(event) =>
-                    patchDocument((current) => ({
-                      ...normalizeCraftingRecipe(current),
-                      cost: {
-                        ...current.cost,
-                        wood: Number(event.target.value || 0)
-                      }
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Chaos shards</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={normalizedDocument.cost.chaosShards}
-                  onChange={(event) =>
-                    patchDocument((current) => ({
-                      ...normalizeCraftingRecipe(current),
-                      cost: {
-                        ...current.cost,
-                        chaosShards: Number(event.target.value || 0)
-                      }
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Steam components</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={normalizedDocument.cost.steamComponents}
-                  onChange={(event) =>
-                    patchDocument((current) => ({
-                      ...normalizeCraftingRecipe(current),
-                      cost: {
-                        ...current.cost,
-                        steamComponents: Number(event.target.value || 0)
-                      }
-                    }))
-                  }
-                />
-              </label>
+              {resourceKeys.map((resourceKey) => (
+                <label key={resourceKey} className="field">
+                  <span>{resourceLabels[resourceKey]}</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={normalizedDocument.cost[resourceKey]}
+                    onChange={(event) =>
+                      patchDocument((current) => {
+                        const recipe = normalizeCraftingRecipe(current);
+                        return {
+                          ...recipe,
+                          cost: {
+                            ...recipe.cost,
+                            [resourceKey]: Number(event.target.value || 0)
+                          }
+                        };
+                      })
+                    }
+                  />
+                </label>
+              ))}
             </div>
           </div>
 

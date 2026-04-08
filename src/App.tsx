@@ -25,6 +25,12 @@ const MailEditor = lazy(() =>
 const QuestCreator = lazy(() =>
   import("./features/quest/QuestCreator").then((module) => ({ default: module.QuestCreator }))
 );
+const KeyItemEditor = lazy(() =>
+  import("./features/keyItem/KeyItemEditor").then((module) => ({ default: module.KeyItemEditor }))
+);
+const FactionEditor = lazy(() =>
+  import("./features/faction/FactionEditor").then((module) => ({ default: module.FactionEditor }))
+);
 const MapEditor = lazy(() =>
   import("./features/map/MapEditor").then((module) => ({ default: module.MapEditor }))
 );
@@ -106,6 +112,14 @@ const MOBILE_INBOX_TARGETS: Partial<Record<EditorKind, { storageKey: string; tab
     storageKey: "technica.quest.document",
     tabId: "quest"
   },
+  key_item: {
+    storageKey: "technica.keyItem.document",
+    tabId: "key_item"
+  },
+  faction: {
+    storageKey: "technica.faction.document",
+    tabId: "faction"
+  },
   field_enemy: {
     storageKey: "technica.fieldEnemy.document",
     tabId: "field_enemy"
@@ -180,6 +194,14 @@ const tabs: Array<{ id: TechnicaTabId; label: string }> = [
   {
     id: "quest",
     label: "Quest Editor"
+  },
+  {
+    id: "key_item",
+    label: "Key Item Editor"
+  },
+  {
+    id: "faction",
+    label: "Faction Editor"
   },
   {
     id: "map",
@@ -432,9 +454,15 @@ export default function App() {
     if (activeTab === "quest") {
       return <QuestCreator />;
     }
-    if (activeTab === "map") {
-      return <MapEditor />;
-    }
+  if (activeTab === "key_item") {
+    return <KeyItemEditor />;
+  }
+  if (activeTab === "faction") {
+    return <FactionEditor />;
+  }
+  if (activeTab === "map") {
+    return <MapEditor />;
+  }
     if (activeTab === "field_enemy") {
       return <FieldEnemyEditor />;
     }

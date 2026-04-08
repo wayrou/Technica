@@ -8,6 +8,7 @@ import type {
   SchemaTagOutputModifier,
   SchemaUnlockSource
 } from "../types/schema";
+import { createResourceWalletDocument, resourceKeys } from "../types/resources";
 import { createId } from "./id";
 
 type UnknownRecord = Record<string, unknown>;
@@ -77,12 +78,7 @@ function readStringList(value: unknown): string[] {
 }
 
 export function createSchemaResourceWallet(partial?: Partial<SchemaResourceWallet>): SchemaResourceWallet {
-  return {
-    metalScrap: partial?.metalScrap ?? 0,
-    wood: partial?.wood ?? 0,
-    chaosShards: partial?.chaosShards ?? 0,
-    steamComponents: partial?.steamComponents ?? 0
-  };
+  return createResourceWalletDocument(partial);
 }
 
 export function createSchemaOperationalRequirements(
@@ -108,12 +104,12 @@ export function createSchemaTagOutputModifier(
 
 function normalizeWallet(value: unknown, fallback: SchemaResourceWallet): SchemaResourceWallet {
   const record = toRecord(value);
-  return createSchemaResourceWallet({
-    metalScrap: readNumber(record?.metalScrap) ?? fallback.metalScrap,
-    wood: readNumber(record?.wood) ?? fallback.wood,
-    chaosShards: readNumber(record?.chaosShards) ?? fallback.chaosShards,
-    steamComponents: readNumber(record?.steamComponents) ?? fallback.steamComponents
-  });
+  return createSchemaResourceWallet(
+    resourceKeys.reduce<Partial<SchemaResourceWallet>>((wallet, key) => {
+      wallet[key] = readNumber(record?.[key]) ?? fallback[key];
+      return wallet;
+    }, {}),
+  );
 }
 
 function normalizeOperationalRequirements(

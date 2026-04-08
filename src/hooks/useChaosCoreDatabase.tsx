@@ -15,8 +15,6 @@ import {
   CHAOS_CORE_DATABASE_UPDATE_EVENT,
   CHAOS_CORE_DATABASE_UPDATE_STORAGE_KEY,
   discoverChaosCoreRepo,
-  listAllChaosCoreDatabase,
-  listAllChaosCoreDatabaseFromSession,
   listChaosCoreDatabase,
   listChaosCoreDatabaseFromSession,
   loadChaosCoreDatabaseEntry,
@@ -31,6 +29,8 @@ const DATABASE_CONTENT_TYPES: DatabaseContentType[] = [
   "dialogue",
   "mail",
   "quest",
+  "key_item",
+  "faction",
   "map",
   "field_enemy",
   "npc",
@@ -111,6 +111,7 @@ export function ChaosCoreDatabaseProvider({ children }: ChaosCoreDatabaseProvide
   const [summaryStates, setSummaryStates] = useState<Record<DatabaseContentType, ChaosCoreSummaryState>>(
     createInitialSummaryStates()
   );
+  const summaryStatesRef = useRef(summaryStates);
   const loadedEntriesRef = useRef(new Map<string, LoadedChaosCoreDatabaseEntry>());
   const summaryRequestRef = useRef(new Map<string, Promise<ChaosCoreDatabaseEntry[]>>());
   const allSummaryRequestRef = useRef<Promise<Partial<Record<DatabaseContentType, ChaosCoreDatabaseEntry[]>>> | null>(
@@ -125,6 +126,19 @@ export function ChaosCoreDatabaseProvider({ children }: ChaosCoreDatabaseProvide
   useEffect(() => {
     setRepoPathDraft(repoPath);
   }, [repoPath]);
+
+  useEffect(() => {
+    summaryStatesRef.current = summaryStates;
+  }, [summaryStates]);
+
+  const getActiveRepoPath = useCallback(() => {
+    const committedRepoPath = repoPathRef.current.trim();
+    if (committedRepoPath) {
+      return committedRepoPath;
+    }
+
+    return repoPathDraft.trim();
+  }, [repoPathDraft]);
 
   const clearLoadedEntriesForType = useCallback((contentType: DatabaseContentType) => {
     Array.from(loadedEntriesRef.current.keys()).forEach((cacheKey) => {
@@ -195,11 +209,12 @@ export function ChaosCoreDatabaseProvider({ children }: ChaosCoreDatabaseProvide
         return [];
       }
 
-      if (!sessionEnabled && !repoPathRef.current) {
+      const activeRepoPath = getActiveRepoPath();
+      if (!sessionEnabled && !activeRepoPath) {
         return [];
       }
 
-      const currentState = summaryStates[contentType];
+      const currentState = summaryStatesRef.current[contentType] ?? EMPTY_SUMMARY_STATE;
       if (!options?.force && currentState.status === "ready" && !currentState.stale) {
         return currentState.entries;
       }
@@ -230,7 +245,7 @@ export function ChaosCoreDatabaseProvider({ children }: ChaosCoreDatabaseProvide
                   options
                 )
               ).entries
-            : await listChaosCoreDatabase(repoPathRef.current, contentType, options);
+            : await listChaosCoreDatabase(activeRepoPath, contentType, options);
 
           setSummaryStates((current) => ({
             ...current,
@@ -263,7 +278,7 @@ export function ChaosCoreDatabaseProvider({ children }: ChaosCoreDatabaseProvide
       summaryRequestRef.current.set(requestKey, request);
       return request;
     },
-    [databaseEnabled, repoPathRef, runtime.pairingToken, runtime.sessionOrigin, sessionEnabled, summaryStates]
+    [databaseEnabled, getActiveRepoPath, runtime.pairingToken, runtime.sessionOrigin, sessionEnabled]
   );
 
   const ensureAllSummaries = useCallback(
@@ -272,19 +287,21 @@ export function ChaosCoreDatabaseProvider({ children }: ChaosCoreDatabaseProvide
         return {};
       }
 
-      if (!sessionEnabled && !repoPathRef.current) {
+      const activeRepoPath = getActiveRepoPath();
+      if (!sessionEnabled && !activeRepoPath) {
         return {};
       }
 
-      const hasStaleType = DATABASE_CONTENT_TYPES.some((contentType) => summaryStates[contentType].stale);
-      const hasIdleType = DATABASE_CONTENT_TYPES.some((contentType) => summaryStates[contentType].status === "idle");
+      const currentSummaryStates = summaryStatesRef.current;
+      const hasStaleType = DATABASE_CONTENT_TYPES.some((contentType) => currentSummaryStates[contentType].stale);
+      const hasIdleType = DATABASE_CONTENT_TYPES.some((contentType) => currentSummaryStates[contentType].status === "idle");
       const allReady = DATABASE_CONTENT_TYPES.every(
-        (contentType) => summaryStates[contentType].status === "ready" && !summaryStates[contentType].stale
+        (contentType) => currentSummaryStates[contentType].status === "ready" && !currentSummaryStates[contentType].stale
       );
 
       if (!options?.force && allReady && !hasStaleType && !hasIdleType) {
         return Object.fromEntries(
-          DATABASE_CONTENT_TYPES.map((contentType) => [contentType, summaryStates[contentType].entries])
+          DATABASE_CONTENT_TYPES.map((contentType) => [contentType, currentSummaryStates[contentType].entries])
         ) as Partial<Record<DatabaseContentType, ChaosCoreDatabaseEntry[]>>;
       }
 
@@ -293,56 +310,14 @@ export function ChaosCoreDatabaseProvider({ children }: ChaosCoreDatabaseProvide
       }
 
       const request = (async () => {
-        setSummaryStates((current) =>
-          Object.fromEntries(
-            DATABASE_CONTENT_TYPES.map((contentType) => [
-              contentType,
-              {
-                ...current[contentType],
-                status: "loading",
-                error: null
-              }
-            ])
-          ) as Record<DatabaseContentType, ChaosCoreSummaryState>
-        );
-
         try {
-          const response = sessionEnabled && runtime.sessionOrigin && runtime.pairingToken
-            ? await listAllChaosCoreDatabaseFromSession(runtime.sessionOrigin, runtime.pairingToken, options)
-            : await listAllChaosCoreDatabase(repoPathRef.current, options);
-
-          const nextEntriesByType = response.entriesByType ?? {};
-
-          setSummaryStates(
-            Object.fromEntries(
-            DATABASE_CONTENT_TYPES.map((contentType) => [
-              contentType,
-                {
-                  entries: nextEntriesByType[contentType] ?? [],
-                  status: "ready",
-                  stale: false,
-                  error: null
-                }
-              ])
-            ) as Record<DatabaseContentType, ChaosCoreSummaryState>
-          );
-
+          const nextEntriesByType: Partial<Record<DatabaseContentType, ChaosCoreDatabaseEntry[]>> = {};
+          for (const contentType of DATABASE_CONTENT_TYPES) {
+            nextEntriesByType[contentType] = await ensureSummaries(contentType, options);
+          }
           return nextEntriesByType;
         } catch (error) {
           const message = resolveChaosCoreErrorMessage(error, "Could not load the Chaos Core database.");
-          setSummaryStates((current) =>
-            Object.fromEntries(
-            DATABASE_CONTENT_TYPES.map((contentType) => [
-              contentType,
-                {
-                  ...current[contentType],
-                  status: "error",
-                  stale: true,
-                  error: message
-                }
-              ])
-            ) as Record<DatabaseContentType, ChaosCoreSummaryState>
-          );
           throw new Error(message);
         } finally {
           allSummaryRequestRef.current = null;
@@ -352,7 +327,7 @@ export function ChaosCoreDatabaseProvider({ children }: ChaosCoreDatabaseProvide
       allSummaryRequestRef.current = request;
       return request;
     },
-    [databaseEnabled, sessionEnabled, summaryStates, runtime.pairingToken, runtime.sessionOrigin]
+    [databaseEnabled, ensureSummaries, getActiveRepoPath, sessionEnabled]
   );
 
   const loadEntry = useCallback(
@@ -361,12 +336,13 @@ export function ChaosCoreDatabaseProvider({ children }: ChaosCoreDatabaseProvide
         throw new Error("Chaos Core database access is not available in this Technica runtime.");
       }
 
-      if (!sessionEnabled && !repoPathRef.current) {
+      const activeRepoPath = getActiveRepoPath();
+      if (!sessionEnabled && !activeRepoPath) {
         throw new Error("Set the Chaos Core repo path first.");
       }
 
-      const cacheKey = buildLoadedCacheKey(repoPathRef.current, contentType, entryKey);
-      if (!options?.force && !summaryStates[contentType].stale) {
+      const cacheKey = buildLoadedCacheKey(activeRepoPath, contentType, entryKey);
+      if (!options?.force && !summaryStatesRef.current[contentType].stale) {
         const cached = loadedEntriesRef.current.get(cacheKey);
         if (cached) {
           return cached;
@@ -390,7 +366,7 @@ export function ChaosCoreDatabaseProvider({ children }: ChaosCoreDatabaseProvide
                   options
                 )
               ).entry
-            : await loadChaosCoreDatabaseEntry(repoPathRef.current, contentType, entryKey, options);
+            : await loadChaosCoreDatabaseEntry(activeRepoPath, contentType, entryKey, options);
 
           loadedEntriesRef.current.set(cacheKey, loadedEntry);
           return loadedEntry;
@@ -402,7 +378,7 @@ export function ChaosCoreDatabaseProvider({ children }: ChaosCoreDatabaseProvide
       loadRequestRef.current.set(cacheKey, request);
       return request;
     },
-    [databaseEnabled, sessionEnabled, summaryStates, runtime.pairingToken, runtime.sessionOrigin]
+    [databaseEnabled, getActiveRepoPath, sessionEnabled, runtime.pairingToken, runtime.sessionOrigin]
   );
 
   useEffect(() => {
