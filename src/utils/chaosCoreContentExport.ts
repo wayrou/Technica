@@ -8,10 +8,13 @@ import {
   type KeyValueRecord
 } from "../types/common";
 import type { CardDocument } from "../types/card";
+import type { ChassisDocument } from "../types/chassis";
+import type { ChatterDocument } from "../types/chatter";
 import type { ClassDocument, ClassUnlockConditionDocument } from "../types/class";
 import type { CodexDocument } from "../types/codex";
 import type { CraftingDocument } from "../types/crafting";
 import type { DishDocument } from "../types/dish";
+import type { DoctrineDocument } from "../types/doctrine";
 import type { FactionDocument } from "../types/faction";
 import type { FieldEnemyDocument } from "../types/fieldEnemy";
 import type { FieldModDocument } from "../types/fieldmod";
@@ -429,6 +432,194 @@ Importer notes:
 
   return {
     bundleName: `${slugify(document.name, contentId)}-chaos-core-faction-export`,
+    manifest,
+    files: [
+      { name: "manifest.json", content: prettyJson(manifest) },
+      { name: entryFile, content: prettyJson(runtimeDocument) },
+      { name: sourceFile, content: prettyJson(document) },
+      { name: "README.md", content: readme }
+    ]
+  };
+}
+
+function buildChassisDependencies(document: ChassisDocument): ExportDependency[] {
+  return document.requiredQuestIds.map((questId) => ({
+    contentType: "quest" as const,
+    id: runtimeId(questId),
+    relation: "requires-completed-quest"
+  }));
+}
+
+export function buildChaosCoreChassisBundle(
+  document: ChassisDocument,
+  references = createWorkspaceReferenceIndex({})
+): ExportBundle {
+  buildChassisDependencies(document).forEach((dependency) => {
+    assertKnownReference(dependency.id, references.questIds, "Chassis export", "quest id");
+  });
+
+  const contentId = runtimeId(document.id || document.name, "chassis");
+  const entryFile = `${contentId}.chassis.json`;
+  const sourceFile = `${contentId}.source.json`;
+  const runtimeDocument = pruneEmpty({
+    id: contentId,
+    name: document.name,
+    slotType: document.slotType,
+    baseMassKg: document.kg,
+    baseBulkBu: document.bu,
+    basePowerW: document.w,
+    baseStability: document.stability,
+    maxCardSlots: document.cardSlots,
+    allowedCardTags: document.allowedCardTags,
+    allowedCardFamilies: document.allowedCardFamilies,
+    description: document.description,
+    buildCost: toPartialResourceWallet(document.buildCost),
+    unlockAfterFloor: document.unlockAfterFloor,
+    requiredQuestIds: document.requiredQuestIds.map((questId) => runtimeId(questId))
+  });
+
+  const manifest = createManifest(
+    "chassis",
+    "gear-chassis.v2",
+    contentId,
+    document.name,
+    "Chaos Core runtime chassis export.",
+    entryFile,
+    ["manifest.json", entryFile, sourceFile, "README.md"],
+    buildChassisDependencies(document)
+  );
+
+  const readme = `# Chaos Core Chassis Export
+
+Runtime entry: \`${entryFile}\`
+Content id: \`${contentId}\`
+
+Importer notes:
+- Imported chassis register into Chaos Core's gear-builder catalog alongside built-in chassis.
+- Build cost uses the full resource wallet, including advanced materials.
+- \`unlockAfterFloor\` and \`requiredQuestIds\` gate shop/workbench availability.
+- \`${sourceFile}\` preserves the original Technica authoring document.
+`;
+
+  return {
+    bundleName: `${slugify(document.name, contentId)}-chaos-core-chassis-export`,
+    manifest,
+    files: [
+      { name: "manifest.json", content: prettyJson(manifest) },
+      { name: entryFile, content: prettyJson(runtimeDocument) },
+      { name: sourceFile, content: prettyJson(document) },
+      { name: "README.md", content: readme }
+    ]
+  };
+}
+
+function buildDoctrineDependencies(document: DoctrineDocument): ExportDependency[] {
+  return document.requiredQuestIds.map((questId) => ({
+    contentType: "quest" as const,
+    id: runtimeId(questId),
+    relation: "requires-completed-quest"
+  }));
+}
+
+export function buildChaosCoreDoctrineBundle(
+  document: DoctrineDocument,
+  references = createWorkspaceReferenceIndex({})
+): ExportBundle {
+  buildDoctrineDependencies(document).forEach((dependency) => {
+    assertKnownReference(dependency.id, references.questIds, "Doctrine export", "quest id");
+  });
+
+  const contentId = runtimeId(document.id || document.name, "doctrine");
+  const entryFile = `${contentId}.doctrine.json`;
+  const sourceFile = `${contentId}.source.json`;
+  const runtimeDocument = pruneEmpty({
+    id: contentId,
+    name: document.name,
+    shortDescription: document.shortDescription,
+    intentTags: document.intentTags,
+    stabilityModifier: document.stabilityModifier,
+    strainBias: document.strainBias,
+    procBias: document.procBias,
+    buildCostModifier: toPartialResourceWallet(document.buildCostModifier),
+    doctrineRules: document.doctrineRules,
+    description: document.description,
+    unlockAfterFloor: document.unlockAfterFloor,
+    requiredQuestIds: document.requiredQuestIds.map((questId) => runtimeId(questId))
+  });
+
+  const manifest = createManifest(
+    "doctrine",
+    "gear-doctrine.v2",
+    contentId,
+    document.name,
+    "Chaos Core runtime doctrine export.",
+    entryFile,
+    ["manifest.json", entryFile, sourceFile, "README.md"],
+    buildDoctrineDependencies(document)
+  );
+
+  const readme = `# Chaos Core Doctrine Export
+
+Runtime entry: \`${entryFile}\`
+Content id: \`${contentId}\`
+
+Importer notes:
+- Imported doctrines register into Chaos Core's gear-builder catalog alongside built-in doctrines.
+- Build-cost modifiers use the full resource wallet, including advanced materials.
+- \`unlockAfterFloor\` and \`requiredQuestIds\` gate shop/workbench availability.
+- \`${sourceFile}\` preserves the original Technica authoring document.
+`;
+
+  return {
+    bundleName: `${slugify(document.name, contentId)}-chaos-core-doctrine-export`,
+    manifest,
+    files: [
+      { name: "manifest.json", content: prettyJson(manifest) },
+      { name: entryFile, content: prettyJson(runtimeDocument) },
+      { name: sourceFile, content: prettyJson(document) },
+      { name: "README.md", content: readme }
+    ]
+  };
+}
+
+export function buildChaosCoreChatterBundle(document: ChatterDocument): ExportBundle {
+  const contentId = runtimeId(document.id || document.location, "chatter");
+  const entryFile = `${contentId}.chatter.json`;
+  const sourceFile = `${contentId}.source.json`;
+  const runtimeDocument = pruneEmpty({
+    id: contentId,
+    location: document.location,
+    content: document.content,
+    aerissResponse: document.aerissResponse,
+    createdAt: document.createdAt,
+    updatedAt: document.updatedAt,
+  });
+
+  const manifest = createManifest(
+    "chatter",
+    "chatter.v1",
+    contentId,
+    `${document.location} chatter`,
+    "Chaos Core runtime chatter export.",
+    entryFile,
+    ["manifest.json", entryFile, sourceFile, "README.md"],
+    []
+  );
+
+  const readme = `# Chaos Core Chatter Export
+
+Runtime entry: \`${entryFile}\`
+Content id: \`${contentId}\`
+
+Importer notes:
+- Imported chatter registers into Chaos Core's ambient node chatter pools.
+- \`location\` currently supports \`black_market\`, \`tavern\`, and \`port\`.
+- \`aerissResponse\` is used directly when the player clicks on that chatter line.
+- \`${sourceFile}\` preserves the original Technica authoring document.
+`;
+
+  return {
+    bundleName: `${slugify(`${document.location}-chatter`, contentId)}-chaos-core-chatter-export`,
     manifest,
     files: [
       { name: "manifest.json", content: prettyJson(manifest) },

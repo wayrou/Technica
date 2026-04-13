@@ -11,12 +11,15 @@ import {
   type ExportTarget
 } from "../types/common";
 import type { CardDocument } from "../types/card";
+import type { ChassisDocument } from "../types/chassis";
+import type { ChatterDocument } from "../types/chatter";
 import type { ClassDocument } from "../types/class";
 import type { CodexDocument } from "../types/codex";
 import type { CraftingDocument } from "../types/crafting";
 import type { DecorationDocument } from "../types/decoration";
 import type { DialogueDocument } from "../types/dialogue";
 import type { DishDocument } from "../types/dish";
+import type { DoctrineDocument } from "../types/doctrine";
 import type { FactionDocument } from "../types/faction";
 import type { FieldEnemyDocument } from "../types/fieldEnemy";
 import type { FieldModDocument } from "../types/fieldmod";
@@ -32,9 +35,12 @@ import type { SchemaDocument } from "../types/schema";
 import type { UnitDocument } from "../types/unit";
 import {
   buildChaosCoreCardBundle,
+  buildChaosCoreChassisBundle,
+  buildChaosCoreChatterBundle,
   buildChaosCoreClassBundle,
   buildChaosCoreCodexBundle,
   buildChaosCoreCraftingBundle,
+  buildChaosCoreDoctrineBundle,
   buildChaosCoreDishBundle,
   buildChaosCoreFactionBundle,
   buildChaosCoreFieldEnemyBundle,
@@ -250,6 +256,7 @@ function buildGenericBundle<TDocument>(
   options: {
     contentType:
       | "gear"
+      | "chatter"
       | "item"
       | "card"
       | "unit"
@@ -258,6 +265,8 @@ function buildGenericBundle<TDocument>(
       | "field_enemy"
       | "key_item"
       | "faction"
+      | "chassis"
+      | "doctrine"
       | "crafting"
       | "dish"
       | "fieldmod"
@@ -486,6 +495,71 @@ Id: ${document.id}
 Importer notes:
 - Preserve the faction name and description so downstream tools can reuse them consistently.
 `
+  });
+}
+
+export function buildChassisBundle(document: ChassisDocument): ExportBundle {
+  const contentId = runtimeId(document.id || document.name, "chassis");
+  return buildGenericBundle(document, {
+    contentType: "chassis",
+    title: document.name,
+    fallbackId: contentId,
+    targetSchemaVersion: "technica-chassis.v1",
+    description: "Gear-builder chassis export with logistics, stability, card slots, material cost, and unlock metadata.",
+    entryFile: "chassis.json",
+    readme: `# Technica Chassis Export
+
+Name: ${document.name}
+Id: ${document.id}
+
+Importer notes:
+- Preserve slot type, logistics profile, base stability, and max card slots exactly.
+- Build cost uses the full Chaos Core resource wallet, including advanced materials.
+- Unlock floor and required quest ids control when the chassis can surface in downstream shop or workbench adapters.
+`
+  });
+}
+
+export function buildDoctrineBundle(document: DoctrineDocument): ExportBundle {
+  const contentId = runtimeId(document.id || document.name, "doctrine");
+  return buildGenericBundle(document, {
+    contentType: "doctrine",
+    title: document.name,
+    fallbackId: contentId,
+    targetSchemaVersion: "technica-doctrine.v1",
+    description: "Doctrine export with intent tags, build modifiers, behavior notes, and unlock metadata.",
+    entryFile: "doctrine.json",
+    readme: `# Technica Doctrine Export
+
+Name: ${document.name}
+Id: ${document.id}
+
+Importer notes:
+- Preserve intent tags, stability modifier, strain/proc bias, and doctrine rules.
+- Build-cost modifiers use the full Chaos Core resource wallet.
+- Unlock floor and required quest ids control when the doctrine can surface in downstream shop or workbench adapters.
+`
+  });
+}
+
+export function buildChatterBundle(document: ChatterDocument): ExportBundle {
+  const contentId = runtimeId(document.id || document.location, "chatter");
+  return buildGenericBundle(document, {
+    contentType: "chatter",
+    title: `${document.location} chatter`,
+    fallbackId: contentId,
+    targetSchemaVersion: "technica-chatter.v1",
+    description: "Ambient chatter export with a node location, player-facing chatter text, and Aeriss's response.",
+    entryFile: "chatter.json",
+    readme: `# Technica Chatter Export
+
+Location: ${document.location}
+Id: ${document.id}
+
+Importer notes:
+- Preserve the chatter location, NPC line, and Aeriss response together.
+- Current Chaos Core chatter nodes are the black market, tavern, and port.
+`,
   });
 }
 
@@ -791,6 +865,30 @@ export function buildFactionBundleForTarget(document: FactionDocument, target: E
   }
 
   return buildFactionBundle(document);
+}
+
+export function buildChassisBundleForTarget(document: ChassisDocument, target: ExportTarget) {
+  if (target === "chaos-core") {
+    return buildChaosCoreChassisBundle(document, createWorkspaceReferenceIndex({}));
+  }
+
+  return buildChassisBundle(document);
+}
+
+export function buildDoctrineBundleForTarget(document: DoctrineDocument, target: ExportTarget) {
+  if (target === "chaos-core") {
+    return buildChaosCoreDoctrineBundle(document, createWorkspaceReferenceIndex({}));
+  }
+
+  return buildDoctrineBundle(document);
+}
+
+export function buildChatterBundleForTarget(document: ChatterDocument, target: ExportTarget) {
+  if (target === "chaos-core") {
+    return buildChaosCoreChatterBundle(document);
+  }
+
+  return buildChatterBundle(document);
 }
 
 export function buildFieldEnemyBundleForTarget(document: FieldEnemyDocument, target: ExportTarget) {

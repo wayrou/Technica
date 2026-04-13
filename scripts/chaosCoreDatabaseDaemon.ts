@@ -61,6 +61,7 @@ const BUILT_IN_SOURCE_FILES: Record<ContentType, string[]> = {
   dialogue: ["src/field/npcs.ts"],
   quest: ["src/quests/questData.ts"],
   key_item: [],
+  chatter: [],
   faction: ["src/content/technica/defaultFactions.ts"],
   map: ["src/field/maps.ts"],
   npc: ["src/field/npcs.ts"],

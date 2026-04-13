@@ -18,9 +18,12 @@ export function getRequestedPopoutTab(): TechnicaPopoutId | null {
   if (
     tab === "dialogue" ||
     tab === "mail" ||
+    tab === "chatter" ||
     tab === "quest" ||
     tab === "key_item" ||
     tab === "faction" ||
+    tab === "chassis" ||
+    tab === "doctrine" ||
     tab === "map" ||
     tab === "field_enemy" ||
     tab === "npc" ||

@@ -35,10 +35,10 @@ export function createSampleMail(): MailDocument {
     category: "official",
     content:
       "Your requisition for the foundry stabilizer kit has been approved. Report to the lower stores before next deployment.\n\nBring the sealant canister with you. Maintenance signed off on the transfer, but they want visual confirmation before they release the second crate.",
-    unlockAfterFloor: 2,
-    requiredDialogueIds: ["npc_commander"],
+    unlockAfterFloor: 0,
+    requiredDialogueIds: [],
     requiredGearIds: [],
-    requiredItemIds: ["item_foundry_sealant"],
+    requiredItemIds: [],
     requiredSchemaIds: [],
     requiredFieldModIds: [],
     createdAt: timestamp,

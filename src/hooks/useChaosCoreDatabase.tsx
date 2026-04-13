@@ -28,9 +28,12 @@ import {
 const DATABASE_CONTENT_TYPES: DatabaseContentType[] = [
   "dialogue",
   "mail",
+  "chatter",
   "quest",
   "key_item",
   "faction",
+  "chassis",
+  "doctrine",
   "map",
   "field_enemy",
   "npc",

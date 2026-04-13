@@ -22,6 +22,9 @@ const DialogueStudio = lazy(() =>
 const MailEditor = lazy(() =>
   import("./features/mail/MailEditor").then((module) => ({ default: module.MailEditor }))
 );
+const ChatterEditor = lazy(() =>
+  import("./features/chatter/ChatterEditor").then((module) => ({ default: module.ChatterEditor }))
+);
 const QuestCreator = lazy(() =>
   import("./features/quest/QuestCreator").then((module) => ({ default: module.QuestCreator }))
 );
@@ -30,6 +33,12 @@ const KeyItemEditor = lazy(() =>
 );
 const FactionEditor = lazy(() =>
   import("./features/faction/FactionEditor").then((module) => ({ default: module.FactionEditor }))
+);
+const ChassisEditor = lazy(() =>
+  import("./features/chassis/ChassisEditor").then((module) => ({ default: module.ChassisEditor }))
+);
+const DoctrineEditor = lazy(() =>
+  import("./features/doctrine/DoctrineEditor").then((module) => ({ default: module.DoctrineEditor }))
 );
 const MapEditor = lazy(() =>
   import("./features/map/MapEditor").then((module) => ({ default: module.MapEditor }))
@@ -108,6 +117,10 @@ const MOBILE_INBOX_TARGETS: Partial<Record<EditorKind, { storageKey: string; tab
     storageKey: "technica.mail.document",
     tabId: "mail"
   },
+  chatter: {
+    storageKey: "technica.chatter.document",
+    tabId: "chatter"
+  },
   quest: {
     storageKey: "technica.quest.document",
     tabId: "quest"
@@ -119,6 +132,14 @@ const MOBILE_INBOX_TARGETS: Partial<Record<EditorKind, { storageKey: string; tab
   faction: {
     storageKey: "technica.faction.document",
     tabId: "faction"
+  },
+  chassis: {
+    storageKey: "technica.chassis.document",
+    tabId: "chassis"
+  },
+  doctrine: {
+    storageKey: "technica.doctrine.document",
+    tabId: "doctrine"
   },
   field_enemy: {
     storageKey: "technica.fieldEnemy.document",
@@ -192,6 +213,10 @@ const tabs: Array<{ id: TechnicaTabId; label: string }> = [
     label: "Mail Editor"
   },
   {
+    id: "chatter",
+    label: "Chatter Editor"
+  },
+  {
     id: "quest",
     label: "Quest Editor"
   },
@@ -202,6 +227,14 @@ const tabs: Array<{ id: TechnicaTabId; label: string }> = [
   {
     id: "faction",
     label: "Faction Editor"
+  },
+  {
+    id: "chassis",
+    label: "Chassis Editor"
+  },
+  {
+    id: "doctrine",
+    label: "Doctrine Editor"
   },
   {
     id: "map",
@@ -451,6 +484,9 @@ export default function App() {
     if (activeTab === "mail") {
       return <MailEditor />;
     }
+    if (activeTab === "chatter") {
+      return <ChatterEditor />;
+    }
     if (activeTab === "quest") {
       return <QuestCreator />;
     }
@@ -459,6 +495,12 @@ export default function App() {
   }
   if (activeTab === "faction") {
     return <FactionEditor />;
+  }
+  if (activeTab === "chassis") {
+    return <ChassisEditor />;
+  }
+  if (activeTab === "doctrine") {
+    return <DoctrineEditor />;
   }
   if (activeTab === "map") {
     return <MapEditor />;

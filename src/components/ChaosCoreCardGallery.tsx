@@ -24,6 +24,7 @@ interface ChaosCoreCardGalleryProps {
   entries: ChaosCoreDatabaseEntry[];
   selectedEntryKey: string;
   onSelectEntryKey: (entryKey: string) => void;
+  onActivateEntryKey?: (entryKey: string) => void;
 }
 
 const CARD_TILE_MIN_WIDTH = 220;
@@ -186,7 +187,8 @@ export function ChaosCoreCardGallery({
   repoPath,
   entries,
   selectedEntryKey,
-  onSelectEntryKey
+  onSelectEntryKey,
+  onActivateEntryKey
 }: ChaosCoreCardGalleryProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const artSrcCacheRef = useRef(new Map<string, string | undefined>());
@@ -316,6 +318,7 @@ export function ChaosCoreCardGallery({
                   type="button"
                   className={`database-card-tile rarity-${rarityClass}${selected ? " active" : ""}`}
                   onClick={() => onSelectEntryKey(preview.entryKey)}
+                  onDoubleClick={() => onActivateEntryKey?.(preview.entryKey)}
                 >
                   <div className={`database-card-face${selected ? " selected" : ""}`}>
                     <div className="database-card-face-cost">{preview.strainCostLabel}</div>

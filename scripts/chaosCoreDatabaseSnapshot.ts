@@ -19,9 +19,12 @@ import { runtimeId } from "../src/utils/id";
 export type ContentType =
   | "dialogue"
   | "mail"
+  | "chatter"
   | "quest"
   | "key_item"
   | "faction"
+  | "chassis"
+  | "doctrine"
   | "map"
   | "field_enemy"
   | "npc"
@@ -129,6 +132,38 @@ type RuntimeFactionShape = {
   description?: string;
 };
 
+type RuntimeChassisShape = {
+  id: string;
+  name: string;
+  slotType: "weapon" | "helmet" | "chestpiece" | "accessory";
+  baseMassKg: number;
+  baseBulkBu: number;
+  basePowerW: number;
+  baseStability: number;
+  maxCardSlots: number;
+  allowedCardTags?: string[];
+  allowedCardFamilies?: string[];
+  description?: string;
+  buildCost?: Partial<Record<ResourceKey, number>>;
+  unlockAfterFloor?: number;
+  requiredQuestIds?: string[];
+};
+
+type RuntimeDoctrineShape = {
+  id: string;
+  name: string;
+  shortDescription?: string;
+  intentTags?: string[];
+  stabilityModifier?: number;
+  strainBias?: number;
+  procBias?: number;
+  buildCostModifier?: Partial<Record<ResourceKey, number>>;
+  doctrineRules?: string;
+  description?: string;
+  unlockAfterFloor?: number;
+  requiredQuestIds?: string[];
+};
+
 type RuntimeNpcShape = {
   id: string;
   name: string;
@@ -195,6 +230,15 @@ type RuntimeMailShape = {
   updatedAt?: string;
 };
 
+type RuntimeChatterShape = {
+  id: string;
+  location?: "black_market" | "tavern" | "port";
+  content?: string;
+  aerissResponse?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
 type TsExpressionMarker = {
   __technicaTsExpression: string;
 };
@@ -202,9 +246,12 @@ type TsExpressionMarker = {
 export const CONTENT_TYPES: ContentType[] = [
   "dialogue",
   "mail",
+  "chatter",
   "quest",
   "key_item",
   "faction",
+  "chassis",
+  "doctrine",
   "map",
   "field_enemy",
   "npc",
@@ -222,9 +269,12 @@ export const CONTENT_TYPES: ContentType[] = [
 const CONTENT_EXTENSIONS: Record<ContentType, string> = {
   dialogue: ".dialogue.json",
   mail: ".mail.json",
+  chatter: ".chatter.json",
   quest: ".quest.json",
   key_item: ".key_item.json",
   faction: ".faction.json",
+  chassis: ".chassis.json",
+  doctrine: ".doctrine.json",
   map: ".fieldmap.json",
   field_enemy: ".field_enemy.json",
   npc: ".npc.json",
@@ -239,7 +289,44 @@ const CONTENT_EXTENSIONS: Record<ContentType, string> = {
   codex: ".codex.json"
 };
 
-const BUILT_IN_MAP_IDS = ["base_camp", "free_zone_1", "quarters"];
+type BuiltInMapDefinition = {
+  contentId: string;
+  loaderRelativePath: string;
+  loaderFunction: string;
+  runtimeFile: string;
+  sourceFile: string;
+};
+
+const BUILT_IN_MAP_DEFINITIONS: BuiltInMapDefinition[] = [
+  {
+    contentId: "base_camp",
+    loaderRelativePath: "src/field/maps.ts",
+    loaderFunction: "getFieldMap",
+    runtimeFile: "src/field/maps.ts",
+    sourceFile: "src/field/maps.ts"
+  },
+  {
+    contentId: "free_zone_1",
+    loaderRelativePath: "src/field/maps.ts",
+    loaderFunction: "getFieldMap",
+    runtimeFile: "src/field/maps.ts",
+    sourceFile: "src/field/maps.ts"
+  },
+  {
+    contentId: "quarters",
+    loaderRelativePath: "src/field/maps.ts",
+    loaderFunction: "getFieldMap",
+    runtimeFile: "src/field/maps.ts",
+    sourceFile: "src/field/maps.ts"
+  },
+  {
+    contentId: "outer_deck_overworld",
+    loaderRelativePath: "src/field/maps.ts",
+    loaderFunction: "getFieldMap",
+    runtimeFile: "src/field/outerDeckMaps.ts",
+    sourceFile: "src/field/outerDeckMaps.ts"
+  }
+];
 
 export function installNodeStubs() {
   const root = globalThis as Record<string, unknown>;
@@ -633,6 +720,54 @@ function runtimeFactionToEditorDocument(runtimeFaction: RuntimeFactionShape) {
     id: runtimeFaction.id,
     name: runtimeFaction.name,
     description: runtimeFaction.description ?? ""
+  };
+}
+
+function runtimeChassisToEditorDocument(runtimeChassis: RuntimeChassisShape) {
+  return {
+    ...createDocumentBase(),
+    id: runtimeChassis.id,
+    name: runtimeChassis.name,
+    slotType: runtimeChassis.slotType ?? "weapon",
+    stability: Number(runtimeChassis.baseStability ?? 0),
+    kg: Number(runtimeChassis.baseMassKg ?? 0),
+    bu: Number(runtimeChassis.baseBulkBu ?? 0),
+    w: Number(runtimeChassis.basePowerW ?? 0),
+    cardSlots: Number(runtimeChassis.maxCardSlots ?? 0),
+    description: String(runtimeChassis.description ?? ""),
+    buildCost: createResourceWalletDocument(runtimeChassis.buildCost),
+    unlockAfterFloor: Number(runtimeChassis.unlockAfterFloor ?? 0),
+    requiredQuestIds: Array.isArray(runtimeChassis.requiredQuestIds)
+      ? Array.from(new Set(runtimeChassis.requiredQuestIds.map(String).map((entry: string) => entry.trim()).filter(Boolean)))
+      : [],
+    allowedCardTags: Array.isArray(runtimeChassis.allowedCardTags)
+      ? Array.from(new Set(runtimeChassis.allowedCardTags.map(String).map((entry: string) => entry.trim()).filter(Boolean)))
+      : [],
+    allowedCardFamilies: Array.isArray(runtimeChassis.allowedCardFamilies)
+      ? Array.from(new Set(runtimeChassis.allowedCardFamilies.map(String).map((entry: string) => entry.trim()).filter(Boolean)))
+      : []
+  };
+}
+
+function runtimeDoctrineToEditorDocument(runtimeDoctrine: RuntimeDoctrineShape) {
+  return {
+    ...createDocumentBase(),
+    id: runtimeDoctrine.id,
+    name: runtimeDoctrine.name,
+    shortDescription: String(runtimeDoctrine.shortDescription ?? ""),
+    intentTags: Array.isArray(runtimeDoctrine.intentTags)
+      ? Array.from(new Set(runtimeDoctrine.intentTags.map(String).map((entry: string) => entry.trim()).filter(Boolean)))
+      : [],
+    stabilityModifier: Number(runtimeDoctrine.stabilityModifier ?? 0),
+    strainBias: Number(runtimeDoctrine.strainBias ?? 0),
+    procBias: Number(runtimeDoctrine.procBias ?? 0),
+    buildCostModifier: createResourceWalletDocument(runtimeDoctrine.buildCostModifier),
+    doctrineRules: String(runtimeDoctrine.doctrineRules ?? ""),
+    description: String(runtimeDoctrine.description ?? ""),
+    unlockAfterFloor: Number(runtimeDoctrine.unlockAfterFloor ?? 0),
+    requiredQuestIds: Array.isArray(runtimeDoctrine.requiredQuestIds)
+      ? Array.from(new Set(runtimeDoctrine.requiredQuestIds.map(String).map((entry: string) => entry.trim()).filter(Boolean)))
+      : []
   };
 }
 
@@ -1044,6 +1179,30 @@ function runtimeMailToEditorDocument(runtimeMail: RuntimeMailShape) {
   };
 }
 
+function normalizeChatterLocation(location: unknown) {
+  switch (String(location ?? "").trim().toLowerCase()) {
+    case "black_market":
+    case "tavern":
+    case "port":
+      return String(location).trim().toLowerCase();
+    default:
+      return "tavern";
+  }
+}
+
+function runtimeChatterToEditorDocument(runtimeChatter: RuntimeChatterShape) {
+  return {
+    schemaVersion: "1.0.0",
+    sourceApp: "Technica",
+    id: String(runtimeChatter.id ?? "chatter_entry"),
+    location: normalizeChatterLocation(runtimeChatter.location),
+    content: String(runtimeChatter.content ?? ""),
+    aerissResponse: String(runtimeChatter.aerissResponse ?? ""),
+    createdAt: String(runtimeChatter.createdAt ?? isoNow()),
+    updatedAt: String(runtimeChatter.updatedAt ?? isoNow())
+  };
+}
+
 function legacyDialogueToEditorDocument(dialogueId: string, title: string, lines: string[]) {
   const rawSource = [
     `@id ${dialogueId}`,
@@ -1064,12 +1223,18 @@ function buildEditorDocumentFromRuntime(contentType: ContentType, runtimeData: a
       return runtimeMapToEditorDocument(runtimeData);
     case "mail":
       return runtimeMailToEditorDocument(runtimeData);
+    case "chatter":
+      return runtimeChatterToEditorDocument(runtimeData);
     case "quest":
       return runtimeQuestToEditorDocument(runtimeData);
     case "key_item":
       return runtimeKeyItemToEditorDocument(runtimeData);
     case "faction":
       return runtimeFactionToEditorDocument(runtimeData);
+    case "chassis":
+      return runtimeChassisToEditorDocument(runtimeData);
+    case "doctrine":
+      return runtimeDoctrineToEditorDocument(runtimeData);
     case "field_enemy":
       return runtimeFieldEnemyToEditorDocument(runtimeData);
     case "dialogue":
@@ -1289,8 +1454,26 @@ function buildEntrySummaryData(contentType: ContentType, runtimeData: any, edito
         questOnly: Boolean(runtimeData?.questOnly ?? true)
       };
     }
+    case "chatter": {
+      return {
+        location: normalizeChatterLocation(editorData?.location ?? runtimeData?.location)
+      };
+    }
     case "class": {
       return typeof runtimeData?.tier === "number" ? { tier: runtimeData.tier } : undefined;
+    }
+    case "chassis": {
+      return {
+        slotType: String(runtimeData?.slotType ?? "weapon"),
+        cardSlots: Number(runtimeData?.maxCardSlots ?? 0),
+        unlockAfterFloor: Number(editorData?.unlockAfterFloor ?? runtimeData?.unlockAfterFloor ?? 0)
+      };
+    }
+    case "doctrine": {
+      return {
+        intentTags: Array.isArray(runtimeData?.intentTags) ? runtimeData.intentTags.map(String) : [],
+        unlockAfterFloor: Number(editorData?.unlockAfterFloor ?? runtimeData?.unlockAfterFloor ?? 0)
+      };
     }
       case "mail": {
         return {
@@ -1676,6 +1859,9 @@ async function listBuiltInEntries(
     case "mail": {
       return [];
     }
+    case "chatter": {
+      return [];
+    }
     case "faction": {
       const generated = await readGeneratedRecords(repoPath, "faction");
       const { DEFAULT_FACTIONS } = await importRepoModule<{
@@ -1697,24 +1883,83 @@ async function listBuiltInEntries(
           )
         );
     }
-    case "map": {
-      const generated = await readGeneratedRecords(repoPath, "map");
-      const maps = await importRepoModule<{ getFieldMap: (mapId: string) => any }>(repoPath, "src/field/maps.ts");
-      return BUILT_IN_MAP_IDS
-        .filter((mapId) => !generated.has(mapId) && !disabledIds.has(mapId))
-        .map((mapId) => {
-          const runtimeData = sanitizeJson(maps.getFieldMap(mapId));
-          return buildSnapshotEntry(
-            "map",
+    case "chassis": {
+      const generated = await readGeneratedRecords(repoPath, "chassis");
+      const { ALL_CHASSIS } = await importRepoModule<{
+        ALL_CHASSIS: RuntimeChassisShape[];
+      }>(repoPath, "src/data/gearChassis.ts");
+
+      return ALL_CHASSIS
+        .filter((runtimeData) => !generated.has(runtimeData.id) && !disabledIds.has(runtimeData.id))
+        .map((runtimeData) =>
+          buildSnapshotEntry(
+            "chassis",
             "game",
             runtimeData.id,
             runtimeData.name,
-            "src/field/maps.ts",
-            "src/field/maps.ts",
-            runtimeData,
-            runtimeMapToEditorDocument(runtimeData)
-          );
-        });
+            "src/data/gearChassis.ts",
+            "src/data/gearChassis.ts",
+            sanitizeJson(runtimeData),
+            runtimeChassisToEditorDocument(runtimeData)
+          )
+        );
+    }
+    case "doctrine": {
+      const generated = await readGeneratedRecords(repoPath, "doctrine");
+      const { ALL_DOCTRINES } = await importRepoModule<{
+        ALL_DOCTRINES: RuntimeDoctrineShape[];
+      }>(repoPath, "src/data/gearDoctrines.ts");
+
+      return ALL_DOCTRINES
+        .filter((runtimeData) => !generated.has(runtimeData.id) && !disabledIds.has(runtimeData.id))
+        .map((runtimeData) =>
+          buildSnapshotEntry(
+            "doctrine",
+            "game",
+            runtimeData.id,
+            runtimeData.name,
+            "src/data/gearDoctrines.ts",
+            "src/data/gearDoctrines.ts",
+            sanitizeJson(runtimeData),
+            runtimeDoctrineToEditorDocument(runtimeData)
+          )
+        );
+    }
+    case "map": {
+      const generated = await readGeneratedRecords(repoPath, "map");
+      const moduleCache = new Map<string, Record<string, unknown>>();
+      return (
+        await Promise.all(
+          BUILT_IN_MAP_DEFINITIONS
+            .filter(({ contentId }) => !generated.has(contentId) && !disabledIds.has(contentId))
+            .map(async ({ contentId, loaderRelativePath, loaderFunction, runtimeFile, sourceFile }) => {
+              let loaderModule = moduleCache.get(loaderRelativePath);
+              if (!loaderModule) {
+                loaderModule = await importRepoModule<Record<string, unknown>>(repoPath, loaderRelativePath);
+                moduleCache.set(loaderRelativePath, loaderModule);
+              }
+
+              const loadMap = loaderModule[loaderFunction];
+              if (typeof loadMap !== "function") {
+                throw new Error(
+                  `Could not find '${loaderFunction}' in '${loaderRelativePath}' while loading built-in map '${contentId}'.`
+                );
+              }
+
+              const runtimeData = sanitizeJson((loadMap as (mapId: string) => any)(contentId));
+              return buildSnapshotEntry(
+                "map",
+                "game",
+                runtimeData.id,
+                runtimeData.name,
+                runtimeFile,
+                sourceFile,
+                runtimeData,
+                runtimeMapToEditorDocument(runtimeData)
+              );
+            })
+        )
+      ).filter((entry): entry is SnapshotEntry => Boolean(entry && entry.contentId));
     }
 
     case "field_enemy":
@@ -2918,6 +3163,44 @@ function normalizeClassForBuiltInSource(runtimeData: any) {
   };
 }
 
+function normalizeChassisForBuiltInSource(runtimeData: any) {
+  return {
+    id: String(runtimeData.id),
+    name: String(runtimeData.name ?? runtimeData.id ?? "Untitled Chassis"),
+    slotType: runtimeData.slotType ?? "weapon",
+    baseMassKg: Number(runtimeData.baseMassKg ?? 0),
+    baseBulkBu: Number(runtimeData.baseBulkBu ?? 0),
+    basePowerW: Number(runtimeData.basePowerW ?? 0),
+    baseStability: Number(runtimeData.baseStability ?? 0),
+    maxCardSlots: Number(runtimeData.maxCardSlots ?? 0),
+    allowedCardTags: Array.isArray(runtimeData.allowedCardTags) ? runtimeData.allowedCardTags.map(String) : undefined,
+    allowedCardFamilies: Array.isArray(runtimeData.allowedCardFamilies)
+      ? runtimeData.allowedCardFamilies.map(String)
+      : undefined,
+    description: String(runtimeData.description ?? ""),
+    buildCost: createResourceWalletDocument(runtimeData.buildCost),
+    unlockAfterFloor: Number(runtimeData.unlockAfterFloor ?? 0),
+    requiredQuestIds: Array.isArray(runtimeData.requiredQuestIds) ? runtimeData.requiredQuestIds.map(String) : undefined
+  };
+}
+
+function normalizeDoctrineForBuiltInSource(runtimeData: any) {
+  return {
+    id: String(runtimeData.id),
+    name: String(runtimeData.name ?? runtimeData.id ?? "Untitled Doctrine"),
+    shortDescription: String(runtimeData.shortDescription ?? ""),
+    intentTags: Array.isArray(runtimeData.intentTags) ? runtimeData.intentTags.map(String) : [],
+    stabilityModifier: Number(runtimeData.stabilityModifier ?? 0),
+    strainBias: Number(runtimeData.strainBias ?? 0),
+    procBias: Number(runtimeData.procBias ?? 0),
+    buildCostModifier: createResourceWalletDocument(runtimeData.buildCostModifier),
+    doctrineRules: String(runtimeData.doctrineRules ?? ""),
+    description: String(runtimeData.description ?? ""),
+    unlockAfterFloor: Number(runtimeData.unlockAfterFloor ?? 0),
+    requiredQuestIds: Array.isArray(runtimeData.requiredQuestIds) ? runtimeData.requiredQuestIds.map(String) : undefined
+  };
+}
+
 function toEquipmentCardRange(range: unknown) {
   if (typeof range === "string") {
     return range;
@@ -3818,6 +4101,70 @@ async function writeBuiltInNpcEntry(
   };
 }
 
+async function writeBuiltInChassisEntry(
+  repoPath: string,
+  previousContentId: string,
+  sourceRelativePath: string,
+  runtimeData: any
+) {
+  if (sourceRelativePath !== "src/data/gearChassis.ts") {
+    throw new Error(
+      `Built-in chassis '${previousContentId}' must be written back through 'src/data/gearChassis.ts'.`
+    );
+  }
+
+  const nextContentId = String(runtimeData.id ?? previousContentId);
+  const sourcePath = path.join(repoPath, "src", "data", "gearChassis.ts");
+  const sourceText = await fs.readFile(sourcePath, "utf8");
+  const nextSourceText = upsertArrayObjectEntry(
+    sourceText,
+    "ALL_CHASSIS",
+    previousContentId,
+    nextContentId,
+    normalizeChassisForBuiltInSource(runtimeData)
+  );
+
+  await fs.writeFile(sourcePath, nextSourceText, "utf8");
+
+  return {
+    entryKey: `game:${nextContentId}`,
+    contentId: nextContentId,
+    runtimeFile: "src/data/gearChassis.ts"
+  };
+}
+
+async function writeBuiltInDoctrineEntry(
+  repoPath: string,
+  previousContentId: string,
+  sourceRelativePath: string,
+  runtimeData: any
+) {
+  if (sourceRelativePath !== "src/data/gearDoctrines.ts") {
+    throw new Error(
+      `Built-in doctrine '${previousContentId}' must be written back through 'src/data/gearDoctrines.ts'.`
+    );
+  }
+
+  const nextContentId = String(runtimeData.id ?? previousContentId);
+  const sourcePath = path.join(repoPath, "src", "data", "gearDoctrines.ts");
+  const sourceText = await fs.readFile(sourcePath, "utf8");
+  const nextSourceText = upsertArrayObjectEntry(
+    sourceText,
+    "ALL_DOCTRINES",
+    previousContentId,
+    nextContentId,
+    normalizeDoctrineForBuiltInSource(runtimeData)
+  );
+
+  await fs.writeFile(sourcePath, nextSourceText, "utf8");
+
+  return {
+    entryKey: `game:${nextContentId}`,
+    contentId: nextContentId,
+    runtimeFile: "src/data/gearDoctrines.ts"
+  };
+}
+
 async function writeBuiltInEntry(
   repoPath: string,
   contentType: ContentType,
@@ -3846,6 +4193,20 @@ async function writeBuiltInEntry(
         id: nextContentId
       });
       break;
+    case "chassis":
+      return writeBuiltInChassisEntry(
+        repoPath,
+        previousContentId,
+        sourceRelativePath || "src/data/gearChassis.ts",
+        runtimeData
+      );
+    case "doctrine":
+      return writeBuiltInDoctrineEntry(
+        repoPath,
+        previousContentId,
+        sourceRelativePath || "src/data/gearDoctrines.ts",
+        runtimeData
+      );
     case "class":
       sourcePath = path.join(repoPath, "src", "core", "classes.ts");
       declarationName = "CLASS_DEFINITIONS";

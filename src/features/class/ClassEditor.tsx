@@ -93,6 +93,24 @@ function createUnlockCondition(): ClassUnlockConditionDocument {
   return { type: "milestone", description: "Describe the unlock gate" };
 }
 
+function formatWeaponTypeLabel(weaponType: string) {
+  return weaponType.replace(/_/g, " ").replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function toggleWeaponTypeSelection(
+  currentWeaponTypes: ClassDocument["weaponTypes"],
+  weaponType: ClassDocument["weaponTypes"][number]
+): ClassDocument["weaponTypes"] {
+  const nextSelectedTypes = new Set(currentWeaponTypes);
+  if (nextSelectedTypes.has(weaponType)) {
+    nextSelectedTypes.delete(weaponType);
+  } else {
+    nextSelectedTypes.add(weaponType);
+  }
+
+  return supportedWeaponTypes.filter((entry) => nextSelectedTypes.has(entry));
+}
+
 function loadDatabaseEntry(entry: LoadedChaosCoreDatabaseEntry, setDocument: (document: ClassDocument) => void) {
   try {
     const parsed = normalizeClassDocument(JSON.parse(entry.editorContent ?? entry.sourceContent ?? entry.runtimeContent));
@@ -150,7 +168,34 @@ export function ClassEditor() {
                   <label className="field"><span>Name</span><input value={classDocument.name} onChange={(event) => patchClass((current) => ({ ...current, name: event.target.value }))} /></label>
                   <label className="field full"><span>Description</span><textarea rows={4} value={classDocument.description} onChange={(event) => patchClass((current) => ({ ...current, description: event.target.value }))} /></label>
                   <label className="field"><span>Tier</span><select value={classDocument.tier} onChange={(event) => patchClass((current) => ({ ...current, tier: Number(event.target.value) as ClassDocument["tier"] }))}><option value={0}>0</option><option value={1}>1</option><option value={2}>2</option><option value={3}>3</option></select></label>
-                  <label className="field"><span>Weapon types</span><input list="technica-weapon-types" value={serializeCommaList(classDocument.weaponTypes)} onChange={(event) => patchClass((current) => ({ ...current, weaponTypes: parseCommaList(event.target.value) as ClassDocument["weaponTypes"] }))} /></label>
+                  <div className="field full">
+                    <span>Weapon types</span>
+                    <div className="chip-row">
+                      {supportedWeaponTypes.map((weaponType) => {
+                        const selected = classDocument.weaponTypes.includes(weaponType);
+                        return (
+                          <button
+                            key={weaponType}
+                            type="button"
+                            className={selected ? "pill pill-button accent" : "pill pill-button"}
+                            onClick={() =>
+                              patchClass((current) => ({
+                                ...current,
+                                weaponTypes: toggleWeaponTypeSelection(current.weaponTypes, weaponType)
+                              }))
+                            }
+                          >
+                            {formatWeaponTypeLabel(weaponType)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="muted">
+                      {classDocument.weaponTypes.length > 0
+                        ? `${classDocument.weaponTypes.length} weapon type${classDocument.weaponTypes.length === 1 ? "" : "s"} selected. Click a pill to toggle it.`
+                        : "No weapon types selected yet. Click one or more pills to add them."}
+                    </p>
+                  </div>
                   <label className="field full"><span>Innate ability</span><input value={classDocument.innateAbility} onChange={(event) => patchClass((current) => ({ ...current, innateAbility: event.target.value }))} /></label>
                 </div>
 
@@ -241,12 +286,6 @@ export function ClassEditor() {
                 subtitle="Publish class definitions into the Chaos Core repo and reopen those database records here for revision."
               />
             </div>
-
-            <datalist id="technica-weapon-types">
-              {supportedWeaponTypes.map((weaponType) => (
-                <option key={weaponType} value={weaponType} />
-              ))}
-            </datalist>
           </div>
         );
       }}

@@ -5,9 +5,12 @@ export const TECHNICA_SOURCE_APP_VERSION = "0.1.0";
 export type EditorKind =
   | "dialogue"
   | "mail"
+  | "chatter"
   | "quest"
   | "key_item"
   | "faction"
+  | "chassis"
+  | "doctrine"
   | "map"
   | "field_enemy"
   | "npc"

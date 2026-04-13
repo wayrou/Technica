@@ -5,12 +5,15 @@ use std::env;
 use std::path::PathBuf;
 use std::process::Command;
 
-const DATABASE_CONTENT_TYPES: [&str; 17] = [
+const DATABASE_CONTENT_TYPES: [&str; 20] = [
     "dialogue",
     "mail",
+    "chatter",
     "quest",
     "key_item",
     "faction",
+    "chassis",
+    "doctrine",
     "map",
     "field_enemy",
     "npc",

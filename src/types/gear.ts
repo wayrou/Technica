@@ -4,6 +4,7 @@ export type SupportedWeaponType =
   | "sword"
   | "greatsword"
   | "shortsword"
+  | "shield"
   | "bow"
   | "greatbow"
   | "gun"
@@ -24,6 +25,7 @@ export const supportedWeaponTypes: SupportedWeaponType[] = [
   "sword",
   "greatsword",
   "shortsword",
+  "shield",
   "bow",
   "greatbow",
   "gun",

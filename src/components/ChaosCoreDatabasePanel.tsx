@@ -177,9 +177,23 @@ export function ChaosCoreDatabasePanel<TDocument>({
       return;
     }
 
+    await handleLoadEntry(selectedEntry.entryKey);
+  }
+
+  async function handleLoadEntry(entryKey: string) {
+    if (!desktopEnabled) {
+      notify("Open Technica in desktop mode to load directly from the Chaos Core repo.");
+      return;
+    }
+
+    if (!effectiveRepoPath || !entryKey) {
+      return;
+    }
+
     setIsLoadingEntry(true);
     try {
-      onLoadEntry(await loadEntry(contentType, selectedEntry.entryKey));
+      setSelectedEntryKey(entryKey);
+      onLoadEntry(await loadEntry(contentType, entryKey));
     } catch (error) {
       notify(resolveChaosCoreErrorMessage(error, "Could not load the selected Chaos Core entry."));
     } finally {
@@ -362,6 +376,7 @@ export function ChaosCoreDatabasePanel<TDocument>({
               entries={entries}
               selectedEntryKey={selectedEntryKey}
               onSelectEntryKey={setSelectedEntryKey}
+              onActivateEntryKey={(entryKey) => void handleLoadEntry(entryKey)}
             />
           ) : (
             <div className="database-list">
@@ -374,6 +389,7 @@ export function ChaosCoreDatabasePanel<TDocument>({
                   type="button"
                   className={entry.entryKey === selectedEntryKey ? "database-entry active" : "database-entry"}
                   onClick={() => setSelectedEntryKey(entry.entryKey)}
+                  onDoubleClick={() => void handleLoadEntry(entry.entryKey)}
                 >
                   <strong>{entry.title}</strong>
                   <span>{entry.contentId}</span>

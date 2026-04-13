@@ -79,7 +79,7 @@ struct PublishResult {
 
 fn normalize_content_type(content_type: &str) -> Result<&str, String> {
     match content_type {
-        "dialogue" | "mail" | "quest" | "key_item" | "faction" | "map" | "field_enemy" | "npc" | "item" | "gear" | "card" | "unit" | "operation" | "class" | "fieldmod" | "schema" | "codex" | "decoration" => {
+        "dialogue" | "mail" | "chatter" | "quest" | "key_item" | "faction" | "chassis" | "doctrine" | "map" | "field_enemy" | "npc" | "item" | "gear" | "card" | "unit" | "operation" | "class" | "fieldmod" | "schema" | "codex" | "decoration" => {
             Ok(content_type)
         }
         _ => Err(format!("Unsupported Chaos Core content type '{}'.", content_type)),
@@ -139,12 +139,72 @@ fn generated_version_path(repo_path: &Path) -> PathBuf {
         .join("version.json")
 }
 
+fn generated_registry_path(repo_path: &Path) -> PathBuf {
+    repo_path
+        .join("src")
+        .join("content")
+        .join("technica")
+        .join("generated")
+        .join("registry.json")
+}
+
+fn runtime_file_extension(content_type: &str) -> Option<&'static str> {
+    match content_type {
+        "dialogue" => Some(".dialogue.json"),
+        "mail" => Some(".mail.json"),
+        "chatter" => Some(".chatter.json"),
+        "quest" => Some(".quest.json"),
+        "key_item" => Some(".key_item.json"),
+        "faction" => Some(".faction.json"),
+        "chassis" => Some(".chassis.json"),
+        "doctrine" => Some(".doctrine.json"),
+        "map" => Some(".fieldmap.json"),
+        "field_enemy" => Some(".field_enemy.json"),
+        "npc" => Some(".npc.json"),
+        "item" => Some(".item.json"),
+        "gear" => Some(".gear.json"),
+        "card" => Some(".card.json"),
+        "fieldmod" => Some(".fieldmod.json"),
+        "unit" => Some(".unit.json"),
+        "operation" => Some(".operation.json"),
+        "class" => Some(".class.json"),
+        "codex" => Some(".codex.json"),
+        _ => None,
+    }
+}
+
+fn published_runtime_registry_content_types() -> &'static [&'static str] {
+    &[
+        "dialogue",
+        "mail",
+        "chatter",
+        "quest",
+        "key_item",
+        "faction",
+        "chassis",
+        "doctrine",
+        "map",
+        "field_enemy",
+        "npc",
+        "item",
+        "gear",
+        "card",
+        "fieldmod",
+        "unit",
+        "operation",
+        "class",
+        "codex",
+    ]
+}
+
 fn built_in_source_file(content_type: &str) -> Option<&'static str> {
     match content_type {
         "map" => Some("src/field/maps.ts"),
         "dialogue" => Some("src/field/npcs.ts"),
         "npc" => Some("src/field/npcs.ts"),
         "quest" => Some("src/quests/questData.ts"),
+        "chassis" => Some("src/data/gearChassis.ts"),
+        "doctrine" => Some("src/data/gearDoctrines.ts"),
         "class" => Some("src/core/classes.ts"),
         "schema" => Some("src/core/schemaSystem.ts"),
         "codex" => Some("src/core/codexSystem.ts"),
@@ -258,6 +318,54 @@ fn replace_asset_paths(value: Value, replacements: &[(String, String)]) -> Value
 
 fn write_text(path: &Path, content: &str) -> Result<(), String> {
     fs::write(path, content).map_err(|error| format!("Could not write '{}': {}", path.display(), error))
+}
+
+fn refresh_generated_registry(repo_root: &Path) -> Result<(), String> {
+    let registry_path = generated_registry_path(repo_root);
+    let registry_parent = registry_path
+        .parent()
+        .ok_or_else(|| "Could not resolve Chaos Core generated registry directory.".to_string())?;
+    ensure_dir(registry_parent)?;
+
+    let mut entries_by_type = std::collections::BTreeMap::<String, Vec<String>>::new();
+
+    for content_type in published_runtime_registry_content_types() {
+        let Some(extension) = runtime_file_extension(content_type) else {
+            continue;
+        };
+
+        let runtime_dir = runtime_root(repo_root, content_type);
+        if !runtime_dir.exists() {
+            continue;
+        }
+
+        let mut content_ids: Vec<String> = fs::read_dir(&runtime_dir)
+            .map_err(|error| format!("Could not read '{}': {}", runtime_dir.display(), error))?
+            .filter_map(|entry| entry.ok())
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .filter_map(|file_name| file_name.strip_suffix(extension).map(str::to_string))
+            .collect();
+
+        content_ids.sort();
+
+        if !content_ids.is_empty() {
+            entries_by_type.insert((*content_type).to_string(), content_ids);
+        }
+    }
+
+    let updated_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("Could not resolve generated-registry timestamp: {}", error))?
+        .as_millis();
+    let registry = serde_json::json!({
+        "updatedAt": updated_at,
+        "entriesByType": entries_by_type
+    });
+
+    write_text(
+        &registry_path,
+        &serde_json::to_string_pretty(&registry).unwrap_or_default(),
+    )
 }
 
 fn touch_generated_version(repo_root: &Path, content_type: &str, content_id: &str) -> Result<(), String> {
@@ -565,6 +673,7 @@ fn publish_chaos_core_bundle(request: PublishBundleRequest) -> Result<PublishRes
                 );
                 let _ = fs::remove_file(&temp_payload_path);
                 let stdout = writeback_output?;
+                refresh_generated_registry(&repo_root)?;
                 touch_generated_version(&repo_root, content_type, &content_id)?;
                 let _ = database_daemon::invalidate_chaos_core_database_cache(&request.repo_path, Some(content_type));
 
@@ -635,6 +744,7 @@ fn publish_chaos_core_bundle(request: PublishBundleRequest) -> Result<PublishRes
         }
     }
 
+    refresh_generated_registry(&repo_root)?;
     touch_generated_version(&repo_root, content_type, &content_id)?;
     let _ = database_daemon::invalidate_chaos_core_database_cache(&request.repo_path, Some(content_type));
 
@@ -665,6 +775,7 @@ fn remove_chaos_core_database_entry(
             remove_matching_files(&runtime_root(&repo_root, content_type), content_id)?;
             remove_matching_files(&source_root(&repo_root, content_type), content_id)?;
             remove_matching_files(&manifest_root(&repo_root, content_type), content_id)?;
+            refresh_generated_registry(&repo_root)?;
             touch_generated_version(&repo_root, content_type, content_id)?;
             let _ = database_daemon::invalidate_chaos_core_database_cache(&repo_path, Some(content_type));
             Ok(())
@@ -687,6 +798,7 @@ fn remove_chaos_core_database_entry(
                 &disabled_dir.join(format!("{}.disabled.json", content_id)),
                 &serde_json::to_string_pretty(&tombstone).unwrap_or_default(),
             )?;
+            refresh_generated_registry(&repo_root)?;
             touch_generated_version(&repo_root, content_type, content_id)?;
             let _ = database_daemon::invalidate_chaos_core_database_cache(&repo_path, Some(content_type));
             Ok(())

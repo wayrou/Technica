@@ -1,9 +1,12 @@
 import type { CardDocument } from "../types/card";
+import type { ChassisDocument } from "../types/chassis";
+import type { ChatterDocument } from "../types/chatter";
 import type { ClassDocument } from "../types/class";
 import type { CodexDocument } from "../types/codex";
 import type { CraftingDocument } from "../types/crafting";
 import type { DecorationDocument } from "../types/decoration";
 import type { DishDocument } from "../types/dish";
+import type { DoctrineDocument } from "../types/doctrine";
 import type { ImageAsset, ValidationIssue } from "../types/common";
 import type { FactionDocument } from "../types/faction";
 import type { FieldEnemyDocument } from "../types/fieldEnemy";
@@ -205,6 +208,53 @@ export function validateFactionDocument(document: FactionDocument): ValidationIs
 
   requireText(document.name, "name", "Faction name", issues);
   requireText(document.description, "description", "Faction description", issues);
+
+  return issues;
+}
+
+export function validateChassisDocument(document: ChassisDocument): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  requireText(document.id, "id", "Chassis id", issues);
+  requireText(document.name, "name", "Chassis name", issues);
+  requireText(document.slotType, "slotType", "Slot type", issues);
+  requireText(document.description, "description", "Chassis description", issues);
+  requirePositive(document.stability, "stability", "Stability", issues);
+  requirePositive(document.kg, "kg", "KG", issues);
+  requirePositive(document.bu, "bu", "BU", issues);
+  requirePositive(document.w, "w", "W", issues);
+  requirePositive(document.cardSlots, "cardSlots", "Card slots", issues, false);
+  requirePositive(document.unlockAfterFloor, "unlockAfterFloor", "Unlock after floor", issues);
+  validateResourceWallet(document.buildCost, "buildCost", "Build cost", issues);
+  warnOnDuplicates(document.requiredQuestIds, "requiredQuestIds", "Required quest ids", issues);
+  warnOnDuplicates(document.allowedCardTags, "allowedCardTags", "Allowed card tags", issues);
+  warnOnDuplicates(document.allowedCardFamilies, "allowedCardFamilies", "Allowed card families", issues);
+
+  return issues;
+}
+
+export function validateDoctrineDocument(document: DoctrineDocument): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  requireText(document.id, "id", "Doctrine id", issues);
+  requireText(document.name, "name", "Doctrine name", issues);
+  requireText(document.shortDescription, "shortDescription", "Doctrine short description", issues);
+  requireText(document.description, "description", "Doctrine description", issues);
+  requirePositive(document.unlockAfterFloor, "unlockAfterFloor", "Unlock after floor", issues);
+  validateResourceWallet(document.buildCostModifier, "buildCostModifier", "Build cost modifier", issues);
+  warnOnDuplicates(document.intentTags, "intentTags", "Intent tags", issues);
+  warnOnDuplicates(document.requiredQuestIds, "requiredQuestIds", "Required quest ids", issues);
+
+  return issues;
+}
+
+export function validateChatterDocument(document: ChatterDocument): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  requireText(document.id, "id", "Chatter id", issues);
+  requireText(document.location, "location", "Chatter location", issues);
+  requireText(document.content, "content", "Chatter content", issues);
+  requireText(document.aerissResponse, "aerissResponse", "Aeriss response", issues);
 
   return issues;
 }
