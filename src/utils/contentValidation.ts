@@ -23,6 +23,8 @@ import type { UnitDocument } from "../types/unit";
 import { mailCategories } from "../types/mail";
 import { createLegacyCardEffectsFromFlow } from "./cardComposer";
 import { validateEffectFlowDocument } from "./effectFlow";
+import { normalizeGearDocument } from "./gearDocuments";
+import { toGearBalanceIssues, validateGearBalance } from "./gearBalanceValidation";
 
 function requireText(value: string, field: string, label: string, issues: ValidationIssue[]) {
   if (!value.trim()) {
@@ -44,12 +46,22 @@ function requirePositive(value: number, field: string, label: string, issues: Va
   }
 }
 
-function warnOnDuplicates(values: string[], field: string, label: string, issues: ValidationIssue[]) {
+function requireFiniteNumber(value: number, field: string, label: string, issues: ValidationIssue[]) {
+  if (!Number.isFinite(value)) {
+    issues.push({
+      severity: "error",
+      field,
+      message: `${label} must be a valid number.`
+    });
+  }
+}
+
+function warnOnDuplicates(values: readonly unknown[] | undefined, field: string, label: string, issues: ValidationIssue[]) {
   const seen = new Set<string>();
   const duplicates = new Set<string>();
 
-  values.forEach((value) => {
-    const normalized = value.trim();
+  (values ?? []).forEach((value) => {
+    const normalized = (typeof value === "string" ? value : String(value ?? "")).trim();
     if (!normalized) {
       return;
     }
@@ -116,11 +128,12 @@ function validateResourceWallet(
 }
 
 export function validateGearDocument(document: GearDocument): ValidationIssue[] {
+  const normalizedDocument = normalizeGearDocument(document);
   const issues: ValidationIssue[] = [];
 
-  requireText(document.id, "id", "Gear id", issues);
-  requireText(document.name, "name", "Gear name", issues);
-  if (document.slot === "weapon" && !document.weaponType) {
+  requireText(normalizedDocument.id, "id", "Gear id", issues);
+  requireText(normalizedDocument.name, "name", "Gear name", issues);
+  if (normalizedDocument.slot === "weapon" && !normalizedDocument.weaponType) {
     issues.push({
       severity: "error",
       field: "weaponType",
@@ -128,14 +141,85 @@ export function validateGearDocument(document: GearDocument): ValidationIssue[] 
     });
   }
 
-  requirePositive(document.inventory.massKg, "inventory.massKg", "Mass", issues);
-  requirePositive(document.inventory.bulkBu, "inventory.bulkBu", "Bulk", issues);
-  requirePositive(document.inventory.powerW, "inventory.powerW", "Power draw", issues);
-  requirePositive(document.moduleSlots, "moduleSlots", "Module slots", issues);
-  requirePositive(document.wear, "wear", "Wear", issues);
-  warnOnDuplicates(document.cardsGranted, "cardsGranted", "Granted cards", issues);
-  warnOnDuplicates(document.attachedModules, "attachedModules", "Attached modules", issues);
-  validateImageAsset(document.iconAsset, "iconAsset", "Gear icon", issues);
+  requirePositive(normalizedDocument.inventory.massKg, "inventory.massKg", "Mass", issues);
+  requirePositive(normalizedDocument.inventory.bulkBu, "inventory.bulkBu", "Bulk", issues);
+  requirePositive(normalizedDocument.inventory.powerW, "inventory.powerW", "Power draw", issues);
+  requirePositive(normalizedDocument.moduleSlots, "moduleSlots", "Module slots", issues);
+  requirePositive(normalizedDocument.wear, "wear", "Wear", issues);
+  if (normalizedDocument.acquisition.shop.enabled) {
+    requirePositive(
+      normalizedDocument.acquisition.shop.unlockFloor,
+      "acquisition.shop.unlockFloor",
+      "Shop unlock floor",
+      issues
+    );
+  }
+  if (normalizedDocument.acquisition.enemyDrop.enabled && normalizedDocument.acquisition.enemyDrop.enemyUnitIds.length === 0) {
+    issues.push({
+      severity: "warning",
+      field: "acquisition.enemyDrop.enemyUnitIds",
+      message: "Enemy drop sources work best when you list at least one enemy unit id."
+    });
+  }
+  if (
+    normalizedDocument.acquisition.victoryReward.enabled &&
+    normalizedDocument.acquisition.victoryReward.floorOrdinals.length === 0 &&
+    normalizedDocument.acquisition.victoryReward.regionIds.length === 0
+  ) {
+    issues.push({
+      severity: "warning",
+      field: "acquisition.victoryReward",
+      message: "Victory reward sources work best when you list at least one floor number or region id."
+    });
+  }
+  const seenVictoryFloors = new Set<number>();
+  const duplicateVictoryFloors = new Set<number>();
+  normalizedDocument.acquisition.victoryReward.floorOrdinals.forEach((ordinal) => {
+    if (!Number.isInteger(ordinal) || ordinal <= 0) {
+      issues.push({
+        severity: "error",
+        field: "acquisition.victoryReward.floorOrdinals",
+        message: "Victory reward floor numbers must be whole numbers greater than 0."
+      });
+      return;
+    }
+
+    if (seenVictoryFloors.has(ordinal)) {
+      duplicateVictoryFloors.add(ordinal);
+      return;
+    }
+
+    seenVictoryFloors.add(ordinal);
+  });
+  duplicateVictoryFloors.forEach((ordinal) => {
+    issues.push({
+      severity: "warning",
+      field: "acquisition.victoryReward.floorOrdinals",
+      message: `Victory reward floors contains a duplicate entry: '${ordinal}'.`
+    });
+  });
+  warnOnDuplicates(normalizedDocument.cardsGranted, "cardsGranted", "Granted cards", issues);
+  warnOnDuplicates(normalizedDocument.attachedModules, "attachedModules", "Attached modules", issues);
+  warnOnDuplicates(
+    normalizedDocument.acquisition.enemyDrop.enemyUnitIds,
+    "acquisition.enemyDrop.enemyUnitIds",
+    "Enemy unit ids",
+    issues
+  );
+  warnOnDuplicates(
+    normalizedDocument.acquisition.victoryReward.regionIds,
+    "acquisition.victoryReward.regionIds",
+    "Victory reward region ids",
+    issues
+  );
+  validateImageAsset(normalizedDocument.iconAsset, "iconAsset", "Gear icon", issues);
+  const balanceReport = validateGearBalance(normalizedDocument);
+  issues.push(
+    ...toGearBalanceIssues({
+      ...balanceReport,
+      findings: balanceReport.findings.filter((finding) => finding.code !== "missing_weapon_type"),
+    })
+  );
 
   return issues;
 }
@@ -225,6 +309,14 @@ export function validateChassisDocument(document: ChassisDocument): ValidationIs
   requirePositive(document.w, "w", "W", issues);
   requirePositive(document.cardSlots, "cardSlots", "Card slots", issues, false);
   requirePositive(document.unlockAfterFloor, "unlockAfterFloor", "Unlock after floor", issues);
+  if (document.availableInHavenShop) {
+    requirePositive(
+      document.havenShopUnlockAfterFloor,
+      "havenShopUnlockAfterFloor",
+      "HAVEN shop unlock floor",
+      issues
+    );
+  }
   validateResourceWallet(document.buildCost, "buildCost", "Build cost", issues);
   warnOnDuplicates(document.requiredQuestIds, "requiredQuestIds", "Required quest ids", issues);
   warnOnDuplicates(document.allowedCardTags, "allowedCardTags", "Allowed card tags", issues);
@@ -685,14 +777,19 @@ export function validateUnitDocument(document: UnitDocument): ValidationIssue[] 
 }
 
 export function validateOperationDocument(document: OperationDocument): ValidationIssue[] {
+  const normalizedDocument = document;
   const issues: ValidationIssue[] = [];
 
-  requireText(document.id, "id", "Operation id", issues);
-  requireText(document.codename, "codename", "Codename", issues);
-  requireText(document.description, "description", "Description", issues);
-  requirePositive(document.recommendedPower, "recommendedPower", "Recommended power", issues, false);
+  requireText(normalizedDocument.id, "id", "Operation id", issues);
+  requireText(normalizedDocument.codename, "codename", "Codename", issues);
+  requireText(normalizedDocument.description, "description", "Description", issues);
+  requireText(normalizedDocument.zoneName, "zoneName", "Zone name", issues);
+  requireText(normalizedDocument.objective, "objective", "Objective", issues);
+  requireText(normalizedDocument.beginningState, "beginningState", "Beginning state", issues);
+  requireText(normalizedDocument.endState, "endState", "End state", issues);
+  requirePositive(normalizedDocument.recommendedPower, "recommendedPower", "Recommended power", issues, false);
 
-  if (document.floors.length === 0) {
+  if (normalizedDocument.floors.length === 0) {
     issues.push({
       severity: "error",
       field: "floors",
@@ -700,13 +797,24 @@ export function validateOperationDocument(document: OperationDocument): Validati
     });
   }
 
-  const floorIds = document.floors.map((floor) => floor.id.trim()).filter(Boolean);
+  const floorIds = normalizedDocument.floors.map((floor) => floor.id.trim()).filter(Boolean);
   warnOnDuplicates(floorIds, "floors", "Floor ids", issues);
+  warnOnDuplicates(
+    normalizedDocument.floors.map((floor) => floor.atlasFloorId.trim()).filter(Boolean),
+    "floors",
+    "Atlas floor ids",
+    issues
+  );
 
-  document.floors.forEach((floor, floorIndex) => {
+  normalizedDocument.floors.forEach((floor, floorIndex) => {
     requireText(floor.id, `floors.${floorIndex}.id`, "Floor id", issues);
     requireText(floor.name, `floors.${floorIndex}.name`, "Floor name", issues);
     requireText(floor.startingRoomId, `floors.${floorIndex}.startingRoomId`, "Starting room id", issues);
+    requireText(floor.sectorLabel, `floors.${floorIndex}.sectorLabel`, "Sector label", issues);
+    requireText(floor.passiveEffectText, `floors.${floorIndex}.passiveEffectText`, "Passive effect text", issues);
+    requireText(floor.threatLevel, `floors.${floorIndex}.threatLevel`, "Threat level", issues);
+    requireText(floor.originLabel, `floors.${floorIndex}.originLabel`, "Origin label", issues);
+    requirePositive(floor.floorOrdinal, `floors.${floorIndex}.floorOrdinal`, "Floor ordinal", issues, false);
 
     const roomIds = floor.rooms.map((room) => room.id.trim()).filter(Boolean);
     warnOnDuplicates(roomIds, `floors.${floorIndex}.rooms`, `Room ids on ${floor.name || floor.id}`, issues);
@@ -719,9 +827,91 @@ export function validateOperationDocument(document: OperationDocument): Validati
       });
     }
 
+    if (floor.rooms.length === 0) {
+      issues.push({
+        severity: "error",
+        field: `floors.${floorIndex}.rooms`,
+        message: `Floor '${floor.name || floor.id}' needs at least one room.`
+      });
+    }
+
+    const ingressRooms = floor.rooms.filter((room) => room.role === "ingress");
+    if (ingressRooms.length === 0) {
+      issues.push({
+        severity: "error",
+        field: `floors.${floorIndex}.rooms`,
+        message: `Floor '${floor.name || floor.id}' needs at least one ingress room.`
+      });
+    }
+
+    if (ingressRooms.length > 1) {
+      issues.push({
+        severity: "warning",
+        field: `floors.${floorIndex}.rooms`,
+        message: `Floor '${floor.name || floor.id}' has multiple ingress rooms. Chaos Core usually reads best with one clear insertion root.`
+      });
+    }
+
+    const objectiveRooms = floor.rooms.filter((room) => room.role === "objective" || room.tags.includes("objective"));
+    if (objectiveRooms.length === 0) {
+      issues.push({
+        severity: "error",
+        field: `floors.${floorIndex}.rooms`,
+        message: `Floor '${floor.name || floor.id}' needs at least one objective room.`
+      });
+    }
+
+    if (!floor.rooms.some((room) => room.isPowerSource || room.role === "power")) {
+      issues.push({
+        severity: "warning",
+        field: `floors.${floorIndex}.rooms`,
+        message: `Floor '${floor.name || floor.id}' has no authored power source room.`
+      });
+    }
+
+    const startingRoom = floor.rooms.find((room) => room.id === floor.startingRoomId);
+    if (startingRoom && startingRoom.role !== "ingress") {
+      issues.push({
+        severity: "warning",
+        field: `floors.${floorIndex}.startingRoomId`,
+        message: `Starting room '${startingRoom.id}' is not marked as an ingress room.`
+      });
+    }
+
     floor.rooms.forEach((room, roomIndex) => {
       requireText(room.id, `floors.${floorIndex}.rooms.${roomIndex}.id`, "Room id", issues);
       requireText(room.label, `floors.${floorIndex}.rooms.${roomIndex}.label`, "Room label", issues);
+      requireText(room.role, `floors.${floorIndex}.rooms.${roomIndex}.role`, "Room role", issues);
+      requireText(room.clearMode, `floors.${floorIndex}.rooms.${roomIndex}.clearMode`, "Room clear mode", issues);
+      requireText(room.roomClass, `floors.${floorIndex}.rooms.${roomIndex}.roomClass`, "Room class", issues);
+      requireText(room.sectorTag, `floors.${floorIndex}.rooms.${roomIndex}.sectorTag`, "Sector tag", issues);
+      requireFiniteNumber(room.x, `floors.${floorIndex}.rooms.${roomIndex}.x`, "Room X", issues);
+      requireFiniteNumber(room.y, `floors.${floorIndex}.rooms.${roomIndex}.y`, "Room Y", issues);
+      requirePositive(
+        room.depthFromUplink,
+        `floors.${floorIndex}.rooms.${roomIndex}.depthFromUplink`,
+        "Depth from uplink",
+        issues
+      );
+      requirePositive(
+        room.coreSlotCapacity,
+        `floors.${floorIndex}.rooms.${roomIndex}.coreSlotCapacity`,
+        "Core slot capacity",
+        issues
+      );
+      requirePositive(
+        room.fortificationCapacity,
+        `floors.${floorIndex}.rooms.${roomIndex}.fortificationCapacity`,
+        "Fortification capacity",
+        issues
+      );
+      warnOnDuplicates(room.tags, `floors.${floorIndex}.rooms.${roomIndex}.tags`, `Tags on room '${room.id}'`, issues);
+      warnOnDuplicates(
+        room.shopInventory,
+        `floors.${floorIndex}.rooms.${roomIndex}.shopInventory`,
+        `Shop inventory on room '${room.id}'`,
+        issues
+      );
 
       room.connections.forEach((connectionId) => {
         if (!roomIds.includes(connectionId)) {
@@ -730,9 +920,52 @@ export function validateOperationDocument(document: OperationDocument): Validati
             field: `floors.${floorIndex}.rooms.${roomIndex}.connections`,
             message: `Room '${room.id}' connects to missing room '${connectionId}'.`
           });
+          return;
+        }
+
+        const connectedRoom = floor.rooms.find((candidate) => candidate.id === connectionId);
+        if (connectedRoom && !connectedRoom.connections.includes(room.id)) {
+          issues.push({
+            severity: "warning",
+            field: `floors.${floorIndex}.rooms.${roomIndex}.connections`,
+            message: `Connection '${room.id}' -> '${connectionId}' is one-way. Theater adjacency usually works best when the reverse link is also present.`
+          });
         }
       });
     });
+
+    if (startingRoom && objectiveRooms.length > 0) {
+      const visited = new Set<string>([startingRoom.id]);
+      const queue = [startingRoom.id];
+
+      while (queue.length > 0) {
+        const currentId = queue.shift()!;
+        const currentRoom = floor.rooms.find((room) => room.id === currentId);
+        for (const connectionId of currentRoom?.connections ?? []) {
+          if (!visited.has(connectionId) && roomIds.includes(connectionId)) {
+            visited.add(connectionId);
+            queue.push(connectionId);
+          }
+        }
+      }
+
+      const unreachableObjective = objectiveRooms.every((room) => !visited.has(room.id));
+      if (unreachableObjective) {
+        issues.push({
+          severity: "error",
+          field: `floors.${floorIndex}.rooms`,
+          message: `No authored path connects starting room '${startingRoom.id}' to any objective room on '${floor.name || floor.id}'.`
+        });
+      }
+
+      if (visited.size !== roomIds.length) {
+        issues.push({
+          severity: "warning",
+          field: `floors.${floorIndex}.rooms`,
+          message: `${roomIds.length - visited.size} room(s) on '${floor.name || floor.id}' are disconnected from the starting route.`
+        });
+      }
+    }
   });
 
   return issues;

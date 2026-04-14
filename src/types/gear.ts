@@ -58,6 +58,32 @@ export interface GearInventoryProfile {
   startingOwned: boolean;
 }
 
+export interface GearShopSource {
+  enabled: boolean;
+  unlockFloor: number;
+  notes: string;
+}
+
+export interface GearEnemyDropSource {
+  enabled: boolean;
+  enemyUnitIds: string[];
+  notes: string;
+}
+
+export interface GearVictoryRewardSource {
+  enabled: boolean;
+  floorOrdinals: number[];
+  regionIds: string[];
+  notes: string;
+}
+
+export interface GearAcquisitionDocument {
+  shop: GearShopSource;
+  enemyDrop: GearEnemyDropSource;
+  victoryReward: GearVictoryRewardSource;
+  otherSourcesNotes: string;
+}
+
 export interface GearDocument {
   schemaVersion: string;
   sourceApp: "Technica";
@@ -73,6 +99,7 @@ export interface GearDocument {
   attachedModules: string[];
   wear: number;
   inventory: GearInventoryProfile;
+  acquisition: GearAcquisitionDocument;
   iconAsset?: ImageAsset;
   metadata: KeyValueRecord;
   createdAt: string;

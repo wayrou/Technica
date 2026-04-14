@@ -21,6 +21,8 @@ export function createBlankChassis(): ChassisDocument {
     description: "",
     buildCost: createResourceWalletDocument(),
     unlockAfterFloor: 0,
+    availableInHavenShop: true,
+    havenShopUnlockAfterFloor: 0,
     requiredQuestIds: [],
     allowedCardTags: [],
     allowedCardFamilies: [],
@@ -53,6 +55,8 @@ export function createSampleChassis(): ChassisDocument {
       chargeCells: 1
     }),
     unlockAfterFloor: 2,
+    availableInHavenShop: true,
+    havenShopUnlockAfterFloor: 2,
     requiredQuestIds: [],
     allowedCardTags: ["guard", "stability"],
     allowedCardFamilies: [],

@@ -1,6 +1,28 @@
 import type { GearDocument } from "../types/gear";
 import { isoNow } from "../utils/date";
 
+function createBaseAcquisition() {
+  return {
+    shop: {
+      enabled: false,
+      unlockFloor: 0,
+      notes: ""
+    },
+    enemyDrop: {
+      enabled: false,
+      enemyUnitIds: [],
+      notes: ""
+    },
+    victoryReward: {
+      enabled: false,
+      floorOrdinals: [],
+      regionIds: [],
+      notes: ""
+    },
+    otherSourcesNotes: ""
+  } satisfies GearDocument["acquisition"];
+}
+
 export function createBlankGear(): GearDocument {
   const timestamp = isoNow();
 
@@ -30,6 +52,7 @@ export function createBlankGear(): GearDocument {
       powerW: 0,
       startingOwned: true
     },
+    acquisition: createBaseAcquisition(),
     metadata: {},
     createdAt: timestamp,
     updatedAt: timestamp
@@ -64,6 +87,25 @@ export function createSampleGear(): GearDocument {
       bulkBu: 2,
       powerW: 0,
       startingOwned: true
+    },
+    acquisition: {
+      shop: {
+        enabled: true,
+        unlockFloor: 0,
+        notes: "Frontline outfitter stock in the first HAVEN support shop pass."
+      },
+      enemyDrop: {
+        enabled: false,
+        enemyUnitIds: [],
+        notes: ""
+      },
+      victoryReward: {
+        enabled: true,
+        floorOrdinals: [1],
+        regionIds: ["outer_deck"],
+        notes: "Good fit for early operation clear rewards in HAVEN-adjacent routes."
+      },
+      otherSourcesNotes: "Can also be handed out as a scripted tutorial loadout reward."
     },
     metadata: {
       source: "Technica sample",

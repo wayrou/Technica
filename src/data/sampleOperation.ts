@@ -1,99 +1,175 @@
-import type { OperationDocument } from "../types/operation";
+import {
+  createOperationFloorDocument,
+  createOperationRoomDocument,
+  normalizeOperationDocument,
+  type OperationDocument,
+} from "../types/operation";
 import { isoNow } from "../utils/date";
 
 export function createBlankOperation(): OperationDocument {
   const timestamp = isoNow();
 
-  return {
+  return normalizeOperationDocument({
     schemaVersion: "1.0.0",
     sourceApp: "Technica",
     id: "new_operation",
     codename: "UNTITLED OPERATION",
     description: "",
+    objective: "Push from the ingress route to the objective room and stabilize the theater.",
+    beginningState: "Ingress synchronized. Theater staging complete.",
+    endState: "Objective secured. Theater route stabilized.",
+    zoneName: "Untitled Theater",
+    sprawlDirection: "east",
     recommendedPower: 25,
     floors: [
-      {
+      createOperationFloorDocument({
         id: "floor_1",
         name: "Floor 1",
-        startingRoomId: "room_start",
+        floorOrdinal: 1,
+        sectorLabel: "Approach Wedge",
+        passiveEffectText: "No passive effect authored yet.",
+        threatLevel: "Moderate",
+        layoutStyle: "vector_lance",
+        originLabel: "HAVEN uplink ingress",
+        startingRoomId: "room_ingress",
         rooms: [
-          {
-            id: "room_start",
-            label: "Start",
-            type: "tavern",
+          createOperationRoomDocument({
+            id: "room_ingress",
+            label: "Ingress",
+            role: "ingress",
             x: 0,
             y: 0,
-            connections: [],
-            shopInventory: [],
-            metadata: {}
-          }
-        ]
-      }
+            depthFromUplink: 0,
+            connections: ["room_objective"],
+          }),
+          createOperationRoomDocument({
+            id: "room_objective",
+            label: "Objective",
+            role: "objective",
+            x: 2.5,
+            y: 0,
+            depthFromUplink: 3,
+            connections: ["room_ingress"],
+          }),
+        ],
+      }),
     ],
     metadata: {},
     createdAt: timestamp,
-    updatedAt: timestamp
-  };
+    updatedAt: timestamp,
+  });
 }
 
 export function createSampleOperation(): OperationDocument {
   const timestamp = isoNow();
 
-  return {
+  return normalizeOperationDocument({
     schemaVersion: "1.0.0",
     sourceApp: "Technica",
     id: "op_glass_harbor",
     codename: "GLASS HARBOR",
-    description: "Secure the harbor relay and break the fogbound ambush chain.",
+    description: "Secure the harbor relay, route power through the quay, and break the fogbound ambush chain.",
+    objective: "Push along the harbor wedge, establish the relay link, and secure the objective room at the quay.",
+    beginningState: "Glass Harbor synchronized. Breakwater ingress is mapped and the relay corridor is dark.",
+    endState: "Harbor relay online. Objective quay secured and outward theater control stabilized.",
+    zoneName: "Glass Harbor",
+    sprawlDirection: "east",
     recommendedPower: 48,
     floors: [
-      {
+      createOperationFloorDocument({
         id: "floor_glass_harbor_1",
         name: "Glass Harbor - Breakwater",
-        startingRoomId: "room_harbor_start",
+        floorOrdinal: 1,
+        atlasFloorId: "glass_harbor_floor_1",
+        sectorLabel: "Breakwater Relay",
+        passiveEffectText: "Salt fog dampens optics, but uplink coverage is stable near relay nodes.",
+        threatLevel: "Heavy patrol pressure",
+        layoutStyle: "split_fan",
+        originLabel: "HAVEN breakwater approach",
+        startingRoomId: "room_harbor_ingress",
         rooms: [
-          {
-            id: "room_harbor_start",
+          createOperationRoomDocument({
+            id: "room_harbor_ingress",
             label: "Dock Ingress",
-            type: "tavern",
+            role: "ingress",
             x: 0,
             y: 0,
-            connections: ["room_fog_channel"],
-            shopInventory: [],
-            metadata: {}
-          },
-          {
+            depthFromUplink: 0,
+            connections: ["room_fog_channel", "room_signal_baffle"],
+          }),
+          createOperationRoomDocument({
             id: "room_fog_channel",
             label: "Fog Channel",
+            role: "frontline",
             type: "battle",
-            x: 1,
-            y: 0,
-            connections: ["room_relay_quay"],
+            x: 1.2,
+            y: -0.4,
+            depthFromUplink: 1,
+            connections: ["room_harbor_ingress", "room_relay_spine"],
             battleTemplate: "fog_skirmish",
-            shopInventory: [],
-            metadata: {
-              weather: "fog"
-            }
-          },
-          {
+            tacticalEncounter: "glass_harbor_frontline_01",
+          }),
+          createOperationRoomDocument({
+            id: "room_signal_baffle",
+            label: "Signal Baffle",
+            role: "relay",
+            type: "event",
+            x: 1.4,
+            y: 0.9,
+            depthFromUplink: 1,
+            connections: ["room_harbor_ingress", "room_power_lock"],
+            eventTemplate: "restore_signal_array",
+            tags: ["junction", "relay", "transit_junction"],
+          }),
+          createOperationRoomDocument({
+            id: "room_power_lock",
+            label: "Boiler Lock",
+            role: "power",
+            type: "event",
+            x: 2.6,
+            y: 1.1,
+            depthFromUplink: 2,
+            connections: ["room_signal_baffle", "room_relay_spine"],
+            isPowerSource: true,
+          }),
+          createOperationRoomDocument({
+            id: "room_relay_spine",
+            label: "Relay Spine",
+            role: "core",
+            type: "battle",
+            x: 2.8,
+            y: 0.1,
+            depthFromUplink: 2,
+            connections: ["room_fog_channel", "room_power_lock", "room_relay_quay"],
+            coreSlotCapacity: 2,
+            tags: ["core_candidate", "command_suitable", "relay"],
+          }),
+          createOperationRoomDocument({
             id: "room_relay_quay",
             label: "Relay Quay",
+            role: "objective",
             type: "boss",
-            x: 2,
+            x: 4.1,
             y: 0,
-            connections: [],
-            shopInventory: ["weapon_iron_longsword"],
+            depthFromUplink: 4,
+            connections: ["room_relay_spine"],
+            battleTemplate: "fog_commander",
+            battleMapId: "outer_deck_overworld",
+            tacticalEncounter: "glass_harbor_objective",
+            fortificationCapacity: 4,
+            shopInventory: ["quill_sword"],
             metadata: {
-              objective: "secure_relay"
-            }
-          }
-        ]
-      }
+              objective: "secure_relay",
+            },
+          }),
+        ],
+      }),
     ],
     metadata: {
-      biome: "harbor"
+      biome: "harbor",
+      weatherProfile: "fogbound",
     },
     createdAt: timestamp,
-    updatedAt: timestamp
-  };
+    updatedAt: timestamp,
+  });
 }

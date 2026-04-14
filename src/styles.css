@@ -2570,6 +2570,11 @@ textarea.authoring-editor {
   color: #ffd186;
 }
 
+.pill.danger {
+  background: rgba(236, 107, 107, 0.14);
+  color: #ffb3b3;
+}
+
 .pill-button {
   border: 1px solid rgba(255, 255, 255, 0.08);
   cursor: pointer;
@@ -2850,5 +2855,212 @@ textarea.authoring-editor {
 
   .database-card-tile .database-card-face {
     min-height: 320px;
+  }
+}
+
+.operation-editor-layout {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: 280px minmax(0, 1fr);
+}
+
+.operation-editor-sidebar,
+.operation-preview-card,
+.operation-editor-inspector {
+  border: 1px solid rgba(118, 150, 144, 0.18);
+  background: rgba(3, 14, 15, 0.72);
+  border-radius: 18px;
+}
+
+.operation-editor-sidebar,
+.operation-editor-inspector {
+  padding: 16px;
+}
+
+.operation-sidebar-header,
+.operation-inspector-header,
+.operation-preview-card__header {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.operation-sidebar-header p,
+.operation-inspector-header p,
+.operation-preview-card__header p {
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  margin: 4px 0 0;
+}
+
+.operation-sidebar-header.compact {
+  margin-top: 18px;
+}
+
+.operation-floor-list,
+.operation-room-list {
+  display: grid;
+  gap: 10px;
+}
+
+.operation-floor-card,
+.operation-room-card {
+  align-items: center;
+  background: rgba(9, 30, 31, 0.94);
+  border: 1px solid rgba(118, 150, 144, 0.18);
+  border-radius: 14px;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  padding: 11px 12px;
+  text-align: left;
+  width: 100%;
+}
+
+.operation-floor-card.selected,
+.operation-room-card.selected {
+  border-color: rgba(41, 211, 165, 0.58);
+  box-shadow: 0 0 0 1px rgba(41, 211, 165, 0.18) inset;
+}
+
+.operation-floor-card {
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.operation-floor-card__title {
+  font-weight: 600;
+}
+
+.operation-floor-card__meta,
+.operation-room-card__body small {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.operation-room-card__swatch {
+  border-radius: 999px;
+  flex: 0 0 12px;
+  height: 12px;
+  margin-top: 2px;
+  width: 12px;
+}
+
+.operation-room-card__body {
+  display: grid;
+  gap: 3px;
+}
+
+.operation-editor-main {
+  display: grid;
+  gap: 18px;
+}
+
+.operation-summary-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.operation-preview-card {
+  padding: 16px;
+}
+
+.operation-preview-stage {
+  background:
+    radial-gradient(circle at top, rgba(41, 211, 165, 0.08), transparent 42%),
+    linear-gradient(180deg, rgba(5, 16, 18, 0.92), rgba(2, 10, 11, 0.96));
+  border: 1px solid rgba(118, 150, 144, 0.12);
+  border-radius: 16px;
+  min-height: 380px;
+  overflow: hidden;
+  position: relative;
+}
+
+.operation-preview-svg {
+  display: block;
+  height: 100%;
+  min-height: 380px;
+  width: 100%;
+}
+
+.operation-preview-edge {
+  stroke: rgba(173, 209, 200, 0.42);
+  stroke-width: 3;
+}
+
+.operation-preview-node {
+  cursor: pointer;
+}
+
+.operation-preview-node-ring {
+  fill: none;
+  opacity: 0;
+  stroke: rgba(255, 255, 255, 0.7);
+  stroke-width: 3;
+}
+
+.operation-preview-node.selected .operation-preview-node-ring {
+  opacity: 1;
+}
+
+.operation-preview-node-label {
+  fill: rgba(7, 11, 12, 0.92);
+  font-size: 18px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.operation-legend-dot {
+  border-radius: 999px;
+  display: inline-block;
+  height: 10px;
+  margin-right: 6px;
+  width: 10px;
+}
+
+.operation-editor-detail-grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.operation-connection-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.operation-connection-option {
+  align-items: flex-start;
+  background: rgba(9, 30, 31, 0.94);
+  border: 1px solid rgba(118, 150, 144, 0.18);
+  border-radius: 12px;
+  display: flex;
+  gap: 9px;
+  padding: 9px 10px;
+}
+
+.operation-connection-option span {
+  display: grid;
+  gap: 3px;
+}
+
+.operation-connection-option small {
+  color: var(--text-muted);
+}
+
+.operation-empty-state {
+  color: var(--text-muted);
+  padding: 18px 4px;
+}
+
+@media (max-width: 1100px) {
+  .operation-editor-layout,
+  .operation-editor-detail-grid {
+    grid-template-columns: 1fr;
   }
 }

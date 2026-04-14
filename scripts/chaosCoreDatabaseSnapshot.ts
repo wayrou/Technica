@@ -11,6 +11,7 @@ import {
   resourceLabels,
   type ResourceKey,
 } from "../src/types/resources";
+import { normalizeOperationDocument } from "../src/types/operation";
 import { parseDialogueSource } from "../src/utils/dialogueParser";
 import { summarizeDialogueOccurrenceRules } from "../src/utils/dialogueOccurrence";
 import { isoNow } from "../src/utils/date";
@@ -146,6 +147,8 @@ type RuntimeChassisShape = {
   description?: string;
   buildCost?: Partial<Record<ResourceKey, number>>;
   unlockAfterFloor?: number;
+  availableInHavenShop?: boolean;
+  havenShopUnlockAfterFloor?: number;
   requiredQuestIds?: string[];
 };
 
@@ -724,6 +727,8 @@ function runtimeFactionToEditorDocument(runtimeFaction: RuntimeFactionShape) {
 }
 
 function runtimeChassisToEditorDocument(runtimeChassis: RuntimeChassisShape) {
+  const unlockAfterFloor = Number(runtimeChassis.unlockAfterFloor ?? 0);
+  const availableInHavenShop = runtimeChassis.availableInHavenShop !== false;
   return {
     ...createDocumentBase(),
     id: runtimeChassis.id,
@@ -736,7 +741,11 @@ function runtimeChassisToEditorDocument(runtimeChassis: RuntimeChassisShape) {
     cardSlots: Number(runtimeChassis.maxCardSlots ?? 0),
     description: String(runtimeChassis.description ?? ""),
     buildCost: createResourceWalletDocument(runtimeChassis.buildCost),
-    unlockAfterFloor: Number(runtimeChassis.unlockAfterFloor ?? 0),
+    unlockAfterFloor,
+    availableInHavenShop,
+    havenShopUnlockAfterFloor: availableInHavenShop
+      ? Number(runtimeChassis.havenShopUnlockAfterFloor ?? unlockAfterFloor)
+      : 0,
     requiredQuestIds: Array.isArray(runtimeChassis.requiredQuestIds)
       ? Array.from(new Set(runtimeChassis.requiredQuestIds.map(String).map((entry: string) => entry.trim()).filter(Boolean)))
       : [],
@@ -800,6 +809,11 @@ function runtimeNpcToEditorDocument(runtimeNpc: RuntimeNpcShape) {
 }
 
 function runtimeGearToEditorDocument(runtimeGear: any) {
+  const acquisition = runtimeGear.acquisition ?? {};
+  const shop = acquisition.shop ?? {};
+  const enemyDrop = acquisition.enemyDrop ?? {};
+  const victoryReward = acquisition.victoryReward ?? {};
+
   return {
     ...createDocumentBase(),
     id: runtimeGear.id,
@@ -824,6 +838,27 @@ function runtimeGearToEditorDocument(runtimeGear: any) {
       bulkBu: Number(runtimeGear.inventory?.bulkBu ?? 0),
       powerW: Number(runtimeGear.inventory?.powerW ?? 0),
       startingOwned: runtimeGear.inventory?.startingOwned ?? true
+    },
+    acquisition: {
+      shop: {
+        enabled: Boolean(acquisition.shop),
+        unlockFloor: Number(shop.unlockFloor ?? 0),
+        notes: String(shop.notes ?? "")
+      },
+      enemyDrop: {
+        enabled: Boolean(acquisition.enemyDrop),
+        enemyUnitIds: Array.isArray(enemyDrop.enemyUnitIds) ? enemyDrop.enemyUnitIds.map(String) : [],
+        notes: String(enemyDrop.notes ?? "")
+      },
+      victoryReward: {
+        enabled: Boolean(acquisition.victoryReward),
+        floorOrdinals: Array.isArray(victoryReward.floorOrdinals)
+          ? victoryReward.floorOrdinals.map((ordinal: unknown) => Number(ordinal)).filter(Number.isFinite)
+          : [],
+        regionIds: Array.isArray(victoryReward.regionIds) ? victoryReward.regionIds.map(String) : [],
+        notes: String(victoryReward.notes ?? "")
+      },
+      otherSourcesNotes: String(acquisition.otherSourcesNotes ?? "")
     },
     metadata: toKeyValueRecord({
       ...(runtimeGear.metadata ?? {}),
@@ -1062,36 +1097,95 @@ function runtimeUnitToEditorDocument(runtimeUnit: any, state: any) {
 }
 
 function runtimeOperationToEditorDocument(runtimeOperation: any) {
-  const floors = (runtimeOperation.floors ?? []).map((floor: any, floorIndex: number) => {
-    const rooms = floor.rooms ?? floor.nodes ?? [];
-    return {
-      id: floor.id ?? `floor_${floorIndex + 1}`,
-      name: floor.name ?? `Floor ${floorIndex + 1}`,
-      startingRoomId: floor.startingRoomId ?? runtimeOperation.currentRoomId ?? rooms[0]?.id ?? "",
-      rooms: rooms.map((room: any) => ({
-        id: room.id,
-        label: room.label ?? humanizeId(room.id),
-        type: room.type ?? "battle",
-        x: Number(room.position?.x ?? room.x ?? 0),
-        y: Number(room.position?.y ?? room.y ?? 0),
-        connections: [...(room.connections ?? [])],
-        battleTemplate: room.battleTemplate,
-        eventTemplate: room.eventTemplate,
-        shopInventory: [...(room.shopInventory ?? [])],
-        metadata: toKeyValueRecord(room.metadata)
-      }))
-    };
-  });
+  const theaterFloors = runtimeOperation.theaterFloors ?? {};
+  const primaryTheater =
+    runtimeOperation.theater
+    ?? theaterFloors[runtimeOperation.currentFloorIndex ?? 0]
+    ?? Object.values(theaterFloors)[0];
 
-  return {
+  const rawDocument = {
     ...createDocumentBase(),
     id: runtimeOperation.id ?? runtimeId(runtimeOperation.codename, "operation"),
     codename: runtimeOperation.codename ?? "Untitled Operation",
     description: runtimeOperation.description ?? "",
+    objective:
+      runtimeOperation.objective
+      ?? primaryTheater?.definition?.objective
+      ?? runtimeOperation.description
+      ?? "",
+    beginningState:
+      runtimeOperation.beginningState
+      ?? primaryTheater?.definition?.beginningState
+      ?? "Imported operation staging complete. Theater initialized.",
+    endState:
+      runtimeOperation.endState
+      ?? primaryTheater?.definition?.endState
+      ?? "Imported operation objective secured and theater stabilized.",
+    zoneName:
+      runtimeOperation.zoneName
+      ?? primaryTheater?.definition?.zoneName
+      ?? humanizeId(runtimeOperation.id ?? runtimeOperation.codename ?? "operation"),
+    sprawlDirection: runtimeOperation.sprawlDirection ?? "east",
     recommendedPower: Number(runtimeOperation.recommendedPower ?? runtimeOperation.metadata?.recommendedPower ?? 1),
-    floors,
+    floors: (runtimeOperation.floors ?? []).map((floor: any, floorIndex: number) => {
+      const rooms = floor.rooms ?? floor.nodes ?? [];
+      const theaterFloor =
+        theaterFloors[floorIndex]
+        ?? (floorIndex === runtimeOperation.currentFloorIndex ? runtimeOperation.theater : undefined);
+      const definition = theaterFloor?.definition;
+
+      return {
+        id: floor.id ?? definition?.floorId ?? `floor_${floorIndex + 1}`,
+        name: floor.name ?? definition?.name ?? `Floor ${floorIndex + 1}`,
+        floorOrdinal: Number(floor.floorOrdinal ?? definition?.floorOrdinal ?? floorIndex + 1),
+        atlasFloorId: String(floor.atlasFloorId ?? definition?.floorId ?? ""),
+        startingRoomId:
+          floor.startingRoomId
+          ?? floor.startingNodeId
+          ?? definition?.ingressRoomId
+          ?? runtimeOperation.currentRoomId
+          ?? rooms[0]?.id
+          ?? "",
+        sectorLabel: String(floor.sectorLabel ?? definition?.sectorLabel ?? `Sector ${floorIndex + 1}`),
+        passiveEffectText: String(
+          floor.passiveEffectText
+          ?? definition?.passiveEffectText
+          ?? "No passive effect recorded."
+        ),
+        threatLevel: String(floor.threatLevel ?? definition?.threatLevel ?? "Moderate"),
+        layoutStyle: floor.layoutStyle ?? definition?.layoutStyle ?? "vector_lance",
+        originLabel: String(floor.originLabel ?? definition?.originLabel ?? "HAVEN uplink ingress"),
+        rooms: rooms.map((room: any) => ({
+          id: room.id,
+          label: room.label ?? humanizeId(room.id),
+          type: room.type ?? "battle",
+          role: room.role,
+          x: Number(room.localPosition?.x ?? room.position?.x ?? room.x ?? 0),
+          y: Number(room.localPosition?.y ?? room.position?.y ?? room.y ?? 0),
+          depthFromUplink: Number(room.depthFromUplink ?? 0),
+          connections: [...(room.connections ?? room.adjacency ?? [])],
+          clearMode: room.clearMode,
+          roomClass: room.roomClass,
+          sectorTag: room.sectorTag,
+          tags: Array.isArray(room.tags) ? room.tags.map(String) : [],
+          battleMapId: room.battleMapId,
+          battleTemplate: room.battleTemplate,
+          eventTemplate: room.eventTemplate,
+          tacticalEncounter: room.tacticalEncounter,
+          shopInventory: [...(room.shopInventory ?? [])],
+          coreSlotCapacity: Number(room.coreSlotCapacity ?? 0),
+          fortificationCapacity: Number(room.fortificationCapacity ?? 0),
+          requiredKeyType: room.requiredKeyType ?? "",
+          grantsKeyType: room.grantsKeyType ?? "",
+          isPowerSource: Boolean(room.isPowerSource),
+          metadata: toKeyValueRecord(room.metadata)
+        }))
+      };
+    }),
     metadata: toKeyValueRecord(runtimeOperation.metadata)
   };
+
+  return normalizeOperationDocument(rawDocument);
 }
 
 function normalizeCodexEntryType(category: unknown) {
@@ -1466,7 +1560,18 @@ function buildEntrySummaryData(contentType: ContentType, runtimeData: any, edito
       return {
         slotType: String(runtimeData?.slotType ?? "weapon"),
         cardSlots: Number(runtimeData?.maxCardSlots ?? 0),
-        unlockAfterFloor: Number(editorData?.unlockAfterFloor ?? runtimeData?.unlockAfterFloor ?? 0)
+        unlockAfterFloor: Number(editorData?.unlockAfterFloor ?? runtimeData?.unlockAfterFloor ?? 0),
+        availableInHavenShop:
+          typeof editorData?.availableInHavenShop === "boolean"
+            ? editorData.availableInHavenShop
+            : runtimeData?.availableInHavenShop !== false,
+        havenShopUnlockAfterFloor: Number(
+          editorData?.havenShopUnlockAfterFloor
+            ?? runtimeData?.havenShopUnlockAfterFloor
+            ?? editorData?.unlockAfterFloor
+            ?? runtimeData?.unlockAfterFloor
+            ?? 0
+        )
       };
     }
     case "doctrine": {
@@ -3164,6 +3269,8 @@ function normalizeClassForBuiltInSource(runtimeData: any) {
 }
 
 function normalizeChassisForBuiltInSource(runtimeData: any) {
+  const unlockAfterFloor = Number(runtimeData.unlockAfterFloor ?? 0);
+  const availableInHavenShop = runtimeData.availableInHavenShop !== false;
   return {
     id: String(runtimeData.id),
     name: String(runtimeData.name ?? runtimeData.id ?? "Untitled Chassis"),
@@ -3179,7 +3286,11 @@ function normalizeChassisForBuiltInSource(runtimeData: any) {
       : undefined,
     description: String(runtimeData.description ?? ""),
     buildCost: createResourceWalletDocument(runtimeData.buildCost),
-    unlockAfterFloor: Number(runtimeData.unlockAfterFloor ?? 0),
+    unlockAfterFloor,
+    availableInHavenShop,
+    havenShopUnlockAfterFloor: availableInHavenShop
+      ? Number(runtimeData.havenShopUnlockAfterFloor ?? unlockAfterFloor)
+      : 0,
     requiredQuestIds: Array.isArray(runtimeData.requiredQuestIds) ? runtimeData.requiredQuestIds.map(String) : undefined
   };
 }
@@ -3215,6 +3326,42 @@ function toEquipmentCardRange(range: unknown) {
 
 function normalizeGearForBuiltInSource(runtimeData: any) {
   const slot = String(runtimeData.slot ?? "weapon");
+  const rawAcquisition =
+    runtimeData.acquisition && typeof runtimeData.acquisition === "object" ? runtimeData.acquisition : {};
+  const shop =
+    rawAcquisition.shop && typeof rawAcquisition.shop === "object"
+      ? {
+          unlockFloor: Number((rawAcquisition.shop as Record<string, unknown>).unlockFloor ?? 0),
+          notes: String((rawAcquisition.shop as Record<string, unknown>).notes ?? "")
+        }
+      : undefined;
+  const enemyDrop =
+    rawAcquisition.enemyDrop && typeof rawAcquisition.enemyDrop === "object"
+      ? {
+          enemyUnitIds: Array.isArray((rawAcquisition.enemyDrop as Record<string, unknown>).enemyUnitIds)
+            ? ((rawAcquisition.enemyDrop as Record<string, unknown>).enemyUnitIds as unknown[]).map(String)
+            : [],
+          notes: String((rawAcquisition.enemyDrop as Record<string, unknown>).notes ?? "")
+        }
+      : undefined;
+  const victoryReward =
+    rawAcquisition.victoryReward && typeof rawAcquisition.victoryReward === "object"
+      ? {
+          floorOrdinals: Array.isArray((rawAcquisition.victoryReward as Record<string, unknown>).floorOrdinals)
+            ? ((rawAcquisition.victoryReward as Record<string, unknown>).floorOrdinals as unknown[])
+                .map((ordinal) => Number(ordinal))
+                .filter(Number.isFinite)
+            : [],
+          regionIds: Array.isArray((rawAcquisition.victoryReward as Record<string, unknown>).regionIds)
+            ? ((rawAcquisition.victoryReward as Record<string, unknown>).regionIds as unknown[]).map(String)
+            : [],
+          notes: String((rawAcquisition.victoryReward as Record<string, unknown>).notes ?? "")
+        }
+      : undefined;
+  const otherSourcesNotes =
+    typeof rawAcquisition.otherSourcesNotes === "string" && rawAcquisition.otherSourcesNotes.trim()
+      ? rawAcquisition.otherSourcesNotes.trim()
+      : undefined;
   const basePayload = {
     id: String(runtimeData.id),
     name: String(runtimeData.name ?? runtimeData.id ?? "Untitled Gear"),
@@ -3236,6 +3383,15 @@ function normalizeGearForBuiltInSource(runtimeData: any) {
           startingOwned: Boolean(runtimeData.inventory.startingOwned ?? true)
         }
       : undefined,
+    acquisition:
+      shop || enemyDrop || victoryReward || otherSourcesNotes
+        ? {
+            ...(shop ? { shop } : {}),
+            ...(enemyDrop ? { enemyDrop } : {}),
+            ...(victoryReward ? { victoryReward } : {}),
+            ...(otherSourcesNotes ? { otherSourcesNotes } : {})
+          }
+        : undefined,
     iconPath: runtimeData.iconPath ? String(runtimeData.iconPath) : undefined,
     metadata: runtimeData.metadata ?? undefined
   };

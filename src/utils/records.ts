@@ -7,8 +7,8 @@ export function parseCommaList(input: string) {
     .filter(Boolean);
 }
 
-export function serializeCommaList(values: string[]) {
-  return values.join(", ");
+export function serializeCommaList(values?: string[]) {
+  return Array.isArray(values) ? values.join(", ") : "";
 }
 
 export function parseMultilineList(input: string) {
@@ -18,8 +18,8 @@ export function parseMultilineList(input: string) {
     .filter(Boolean);
 }
 
-export function serializeMultilineList(values: string[]) {
-  return values.join("\n");
+export function serializeMultilineList(values?: string[]) {
+  return Array.isArray(values) ? values.join("\n") : "";
 }
 
 export function parseKeyValueLines(input: string) {
@@ -44,8 +44,8 @@ export function parseKeyValueLines(input: string) {
   }, {});
 }
 
-export function serializeKeyValueLines(record: KeyValueRecord) {
-  return Object.entries(record)
+export function serializeKeyValueLines(record?: KeyValueRecord) {
+  return Object.entries(record ?? {})
     .map(([key, value]) => `${key}=${value}`)
     .join("\n");
 }

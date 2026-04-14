@@ -66,6 +66,16 @@ function normalizeChassisDocument(value: unknown): ChassisDocument {
     description: readString(record.description, fallback.description),
     buildCost: createResourceWalletDocument(toRecord(record.buildCost) as Partial<ChassisDocument["buildCost"]> | null),
     unlockAfterFloor: readNumber(record.unlockAfterFloor, fallback.unlockAfterFloor),
+    availableInHavenShop:
+      typeof record.availableInHavenShop === "boolean"
+        ? record.availableInHavenShop
+        : fallback.availableInHavenShop,
+    havenShopUnlockAfterFloor: readNumber(
+      record.havenShopUnlockAfterFloor,
+      typeof record.unlockAfterFloor === "number" && Number.isFinite(record.unlockAfterFloor)
+        ? record.unlockAfterFloor
+        : fallback.havenShopUnlockAfterFloor
+    ),
     requiredQuestIds: normalizeStringList(record.requiredQuestIds),
     allowedCardTags: normalizeStringList(record.allowedCardTags),
     allowedCardFamilies: normalizeStringList(record.allowedCardFamilies),
@@ -269,6 +279,45 @@ export function ChassisEditor() {
                       />
                     </label>
                   ))}
+                </div>
+              </div>
+
+              <div className="subsection">
+                <h4>HAVEN Shop</h4>
+                <div className="form-grid">
+                  <label className="field checkbox-field full">
+                    <input
+                      type="checkbox"
+                      checked={chassis.availableInHavenShop}
+                      onChange={(event) =>
+                        patchChassis((current) => ({
+                          ...current,
+                          availableInHavenShop: event.target.checked,
+                          havenShopUnlockAfterFloor: event.target.checked
+                            ? current.havenShopUnlockAfterFloor
+                            : 0
+                        }))
+                      }
+                    />
+                    <span>Available in the HAVEN shop</span>
+                  </label>
+                  <label className="field">
+                    <span>Shop unlock after floor</span>
+                    <input
+                      type="number"
+                      value={chassis.havenShopUnlockAfterFloor}
+                      disabled={!chassis.availableInHavenShop}
+                      onChange={(event) =>
+                        patchChassis((current) => ({
+                          ...current,
+                          havenShopUnlockAfterFloor: Number(event.target.value || 0)
+                        }))
+                      }
+                    />
+                    <small className="muted">
+                      Controls when HAVEN starts selling this chassis independently of the general chassis unlock.
+                    </small>
+                  </label>
                 </div>
               </div>
 

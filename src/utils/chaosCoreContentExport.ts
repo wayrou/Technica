@@ -23,7 +23,7 @@ import type { ItemDocument } from "../types/item";
 import type { KeyItemDocument } from "../types/keyItem";
 import type { MailDocument } from "../types/mail";
 import type { NpcDocument } from "../types/npc";
-import type { OperationDocument } from "../types/operation";
+import { normalizeOperationDocument, type OperationDocument } from "../types/operation";
 import { toPartialResourceWalletDocument } from "../types/resources";
 import type { SchemaDocument } from "../types/schema";
 import type { UnitDocument } from "../types/unit";
@@ -32,6 +32,7 @@ import { createLegacyCardEffectsFromFlow } from "./cardComposer";
 import { isoNow } from "./date";
 import { summarizeEffectFlow } from "./effectFlow";
 import { createWorkspaceReferenceIndex } from "./chaosCoreExport";
+import { normalizeGearDocument } from "./gearDocuments";
 import { runtimeId, slugify } from "./id";
 
 function prettyJson(value: unknown) {
@@ -178,7 +179,8 @@ function assertKnownReference(
 }
 
 function buildGearDependencies(document: GearDocument): ExportDependency[] {
-  return document.cardsGranted.map((cardId) => ({
+  const normalizedDocument = normalizeGearDocument(document);
+  return normalizedDocument.cardsGranted.map((cardId) => ({
     contentType: "card" as const,
     id: runtimeId(cardId),
     relation: "grants-card"
@@ -189,40 +191,66 @@ export function buildChaosCoreGearBundle(
   document: GearDocument,
   references = createWorkspaceReferenceIndex({ gear: document })
 ): ExportBundle {
-  buildGearDependencies(document).forEach((dependency) => {
+  const normalizedDocument = normalizeGearDocument(document);
+
+  buildGearDependencies(normalizedDocument).forEach((dependency) => {
     assertKnownReference(dependency.id, references.cardIds, "Gear export", "card id");
   });
 
-  const contentId = runtimeId(document.id || document.name, "gear");
+  const contentId = runtimeId(normalizedDocument.id || normalizedDocument.name, "gear");
   const entryFile = `${contentId}.gear.json`;
   const sourceFile = `${contentId}.source.json`;
-  const iconAsset = document.iconAsset ? createImageAssetExport(contentId, "icon", document.iconAsset) : null;
+  const iconAsset = normalizedDocument.iconAsset
+    ? createImageAssetExport(contentId, "icon", normalizedDocument.iconAsset)
+    : null;
   const runtimeDocument = pruneEmpty({
     id: contentId,
-    name: document.name,
-    description: document.description,
-    slot: document.slot,
-    weaponType: document.weaponType,
-    isMechanical: document.isMechanical,
-    stats: document.stats,
-    cardsGranted: document.cardsGranted.map((cardId) => runtimeId(cardId)),
-    moduleSlots: document.moduleSlots,
-    attachedModules: document.attachedModules,
-    wear: document.wear,
-    inventory: document.inventory,
+    name: normalizedDocument.name,
+    description: normalizedDocument.description,
+    slot: normalizedDocument.slot,
+    weaponType: normalizedDocument.weaponType,
+    isMechanical: normalizedDocument.isMechanical,
+    stats: normalizedDocument.stats,
+    cardsGranted: normalizedDocument.cardsGranted.map((cardId) => runtimeId(cardId)),
+    moduleSlots: normalizedDocument.moduleSlots,
+    attachedModules: normalizedDocument.attachedModules,
+    wear: normalizedDocument.wear,
+    inventory: normalizedDocument.inventory,
+    acquisition: {
+      shop: normalizedDocument.acquisition.shop.enabled
+        ? {
+            unlockFloor: normalizedDocument.acquisition.shop.unlockFloor,
+            notes: normalizedDocument.acquisition.shop.notes
+          }
+        : undefined,
+      enemyDrop: normalizedDocument.acquisition.enemyDrop.enabled
+        ? {
+            enemyUnitIds: normalizedDocument.acquisition.enemyDrop.enemyUnitIds.map((enemyUnitId) => runtimeId(enemyUnitId)),
+            notes: normalizedDocument.acquisition.enemyDrop.notes
+          }
+        : undefined,
+      victoryReward: normalizedDocument.acquisition.victoryReward.enabled
+        ? {
+            floorOrdinals: normalizedDocument.acquisition.victoryReward.floorOrdinals,
+            regionIds: normalizedDocument.acquisition.victoryReward.regionIds.map((regionId) => runtimeId(regionId)),
+            notes: normalizedDocument.acquisition.victoryReward.notes
+          }
+        : undefined,
+      otherSourcesNotes: normalizedDocument.acquisition.otherSourcesNotes || undefined
+    },
     iconPath: iconAsset?.runtimePath,
-    metadata: coerceRecord(document.metadata)
+    metadata: coerceRecord(normalizedDocument.metadata)
   });
 
   const manifest = createManifest(
     "gear",
     "equipment.v1",
     contentId,
-    document.name,
+    normalizedDocument.name,
     "Chaos Core runtime equipment export.",
     entryFile,
     ["manifest.json", entryFile, sourceFile, ...(iconAsset ? [iconAsset.runtimePath] : []), "README.md"],
-    buildGearDependencies(document)
+    buildGearDependencies(normalizedDocument)
   );
 
   const readme = `# Chaos Core Gear Export
@@ -232,6 +260,7 @@ Content id: \`${contentId}\`
 
 Importer notes:
 - Imported gear registers into Chaos Core's equipment pool and base storage when marked as starting owned.
+- Acquisition metadata preserves shop availability, enemy drop references, and floor or region victory reward hooks for future runtime adapters.
 - Granted card ids are normalized for direct deck and catalog use.
 - Attached gear icons resolve through \`iconPath\` when present.
 - \`${sourceFile}\` preserves the original Technica authoring document.
@@ -243,7 +272,7 @@ Importer notes:
     files: [
       { name: "manifest.json", content: prettyJson(manifest) },
       { name: entryFile, content: prettyJson(runtimeDocument) },
-      { name: sourceFile, content: prettyJson(document) },
+      { name: sourceFile, content: prettyJson(normalizedDocument) },
       ...(iconAsset ? [iconAsset.file] : []),
       { name: "README.md", content: readme }
     ]
@@ -475,6 +504,10 @@ export function buildChaosCoreChassisBundle(
     description: document.description,
     buildCost: toPartialResourceWallet(document.buildCost),
     unlockAfterFloor: document.unlockAfterFloor,
+    availableInHavenShop: document.availableInHavenShop,
+    havenShopUnlockAfterFloor: document.availableInHavenShop
+      ? document.havenShopUnlockAfterFloor
+      : undefined,
     requiredQuestIds: document.requiredQuestIds.map((questId) => runtimeId(questId))
   });
 
@@ -497,7 +530,8 @@ Content id: \`${contentId}\`
 Importer notes:
 - Imported chassis register into Chaos Core's gear-builder catalog alongside built-in chassis.
 - Build cost uses the full resource wallet, including advanced materials.
-- \`unlockAfterFloor\` and \`requiredQuestIds\` gate shop/workbench availability.
+- \`unlockAfterFloor\` gates general chassis availability, while \`availableInHavenShop\` and \`havenShopUnlockAfterFloor\` control HAVEN shop listing.
+- \`requiredQuestIds\` still gate unlockable visibility.
 - \`${sourceFile}\` preserves the original Technica authoring document.
 `;
 
@@ -1381,9 +1415,10 @@ Importer notes:
 }
 
 function buildOperationDependencies(document: OperationDocument): ExportDependency[] {
+  const normalizedDocument = normalizeOperationDocument(document);
   const dependencies: ExportDependency[] = [];
 
-  document.floors.forEach((floor) => {
+  normalizedDocument.floors.forEach((floor) => {
     floor.rooms.forEach((room) => {
       room.shopInventory.forEach((gearId) => {
         dependencies.push({
@@ -1402,48 +1437,77 @@ export function buildChaosCoreOperationBundle(
   document: OperationDocument,
   references = createWorkspaceReferenceIndex({ operation: document })
 ): ExportBundle {
-  buildOperationDependencies(document).forEach((dependency) => {
+  const normalizedDocument = normalizeOperationDocument(document);
+
+  buildOperationDependencies(normalizedDocument).forEach((dependency) => {
     assertKnownReference(dependency.id, references.gearIds, "Operation export", "gear id");
   });
 
-  const contentId = runtimeId(document.id || document.codename, "operation");
+  const contentId = runtimeId(normalizedDocument.id || normalizedDocument.codename, "operation");
   const entryFile = `${contentId}.operation.json`;
   const sourceFile = `${contentId}.source.json`;
   const runtimeDocument = pruneEmpty({
     id: contentId,
-    codename: document.codename,
-    description: document.description,
-    recommendedPower: document.recommendedPower,
-    floors: document.floors.map((floor) => ({
+    codename: normalizedDocument.codename,
+    description: normalizedDocument.description,
+    objective: normalizedDocument.objective,
+    beginningState: normalizedDocument.beginningState,
+    endState: normalizedDocument.endState,
+    zoneName: normalizedDocument.zoneName,
+    sprawlDirection: normalizedDocument.sprawlDirection,
+    recommendedPower: normalizedDocument.recommendedPower,
+    floors: normalizedDocument.floors.map((floor) => ({
       id: runtimeId(floor.id),
       name: floor.name,
+      floorOrdinal: floor.floorOrdinal,
+      atlasFloorId: floor.atlasFloorId || undefined,
       startingRoomId: runtimeId(floor.startingRoomId),
+      sectorLabel: floor.sectorLabel,
+      passiveEffectText: floor.passiveEffectText,
+      threatLevel: floor.threatLevel,
+      layoutStyle: floor.layoutStyle,
+      originLabel: floor.originLabel,
       rooms: floor.rooms.map((room) =>
         pruneEmpty({
           id: runtimeId(room.id),
           label: room.label,
           type: room.type,
           position: { x: room.x, y: room.y },
+          localPosition: { x: room.x, y: room.y },
           connections: room.connections.map((connectionId) => runtimeId(connectionId)),
+          adjacency: room.connections.map((connectionId) => runtimeId(connectionId)),
+          role: room.role,
+          sectorTag: room.sectorTag,
+          depthFromUplink: room.depthFromUplink,
+          clearMode: room.clearMode,
+          roomClass: room.roomClass,
+          tags: room.tags,
+          battleMapId: room.battleMapId ? runtimeId(room.battleMapId) : undefined,
           battleTemplate: room.battleTemplate,
           eventTemplate: room.eventTemplate,
+          tacticalEncounter: room.tacticalEncounter,
           shopInventory: room.shopInventory.map((gearId) => runtimeId(gearId)),
+          coreSlotCapacity: room.coreSlotCapacity,
+          fortificationCapacity: room.fortificationCapacity,
+          requiredKeyType: room.requiredKeyType || undefined,
+          grantsKeyType: room.grantsKeyType || undefined,
+          isPowerSource: room.isPowerSource,
           metadata: coerceRecord(room.metadata)
         })
       )
     })),
-    metadata: coerceRecord(document.metadata)
+    metadata: coerceRecord(normalizedDocument.metadata)
   });
 
   const manifest = createManifest(
     "operation",
     "operation.v1",
     contentId,
-    document.codename,
+    normalizedDocument.codename,
     "Chaos Core runtime operation export.",
     entryFile,
     ["manifest.json", entryFile, sourceFile, "README.md"],
-    buildOperationDependencies(document)
+    buildOperationDependencies(normalizedDocument)
   );
 
   const readme = `# Chaos Core Operation Export
@@ -1452,18 +1516,19 @@ Runtime entry: \`${entryFile}\`
 Content id: \`${contentId}\`
 
 Importer notes:
-- Imported operations appear in Chaos Core's operation select screen as direct-run missions.
+- Imported operations still appear in Chaos Core's operation select screen as direct-run missions.
+- Theater briefing fields, floor sector metadata, and room-role authoring are exported alongside the compatible floor graph.
 - Room coordinates, connections, and optional shop inventory are exported explicitly.
 - \`${sourceFile}\` preserves the authoring document.
 `;
 
   return {
-    bundleName: `${slugify(document.codename, contentId)}-chaos-core-operation-export`,
+    bundleName: `${slugify(normalizedDocument.codename, contentId)}-chaos-core-operation-export`,
     manifest,
     files: [
       { name: "manifest.json", content: prettyJson(manifest) },
       { name: entryFile, content: prettyJson(runtimeDocument) },
-      { name: sourceFile, content: prettyJson(document) },
+      { name: sourceFile, content: prettyJson(normalizedDocument) },
       { name: "README.md", content: readme }
     ]
   };

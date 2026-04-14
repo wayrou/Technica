@@ -19,6 +19,8 @@ export interface ChassisDocument {
   description: string;
   buildCost: ResourceWalletDocument;
   unlockAfterFloor: number;
+  availableInHavenShop: boolean;
+  havenShopUnlockAfterFloor: number;
   requiredQuestIds: string[];
   allowedCardTags: string[];
   allowedCardFamilies: string[];

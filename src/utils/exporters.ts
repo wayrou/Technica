@@ -63,6 +63,7 @@ import {
 import { createImageAssetExport } from "./assets";
 import { isoNow } from "./date";
 import { downloadBlob, downloadText } from "./file";
+import { normalizeGearDocument } from "./gearDocuments";
 import { runtimeId, slugify } from "./id";
 
 function prettyJson(value: unknown) {
@@ -383,22 +384,26 @@ Importer notes:
 }
 
 export function buildGearBundle(document: GearDocument): ExportBundle {
-  const contentId = runtimeId(document.id || document.name, "gear");
-  const iconAsset = document.iconAsset ? createImageAssetExport(contentId, "icon", document.iconAsset) : null;
-  return buildGenericBundle(document, {
+  const normalizedDocument = normalizeGearDocument(document);
+  const contentId = runtimeId(normalizedDocument.id || normalizedDocument.name, "gear");
+  const iconAsset = normalizedDocument.iconAsset
+    ? createImageAssetExport(contentId, "icon", normalizedDocument.iconAsset)
+    : null;
+  return buildGenericBundle(normalizedDocument, {
     contentType: "gear",
-    title: document.name,
+    title: normalizedDocument.name,
     fallbackId: contentId,
     targetSchemaVersion: "technica-gear.v1",
     description: "Gear export containing structured equipment, inventory, and loadout metadata.",
     entryFile: "gear.json",
     readme: `# Technica Gear Export
 
-Name: ${document.name}
-Id: ${document.id}
+Name: ${normalizedDocument.name}
+Id: ${normalizedDocument.id}
 
 Importer notes:
 - Preserve slot, stat, and inventory profile fields exactly.
+- Preserve acquisition metadata for shops, enemy drops, and reward sourcing exactly.
 - \`cardsGranted\` and \`attachedModules\` are meant to stay stable across downstream adapters.
 - Metadata should be preserved even when the first target does not consume every field.
  - Attached gear icons export to \`assets/\` when present.
@@ -515,7 +520,7 @@ Id: ${document.id}
 Importer notes:
 - Preserve slot type, logistics profile, base stability, and max card slots exactly.
 - Build cost uses the full Chaos Core resource wallet, including advanced materials.
-- Unlock floor and required quest ids control when the chassis can surface in downstream shop or workbench adapters.
+- General unlock floor, HAVEN shop availability, HAVEN shop floor, and required quest ids control when the chassis can surface in downstream shop or workbench adapters.
 `
   });
 }
@@ -837,7 +842,8 @@ export function buildMapBundleForTarget(document: MapDocument, target: ExportTar
 
 export function buildGearBundleForTarget(document: GearDocument, target: ExportTarget) {
   if (target === "chaos-core") {
-    return buildChaosCoreGearBundle(document, createWorkspaceReferenceIndex({ gear: document }));
+    const normalizedDocument = normalizeGearDocument(document);
+    return buildChaosCoreGearBundle(normalizedDocument, createWorkspaceReferenceIndex({ gear: normalizedDocument }));
   }
 
   return buildGearBundle(document);

@@ -21,7 +21,7 @@ import { TECHNICA_MOBILE_INBOX_OPEN_EVENT, type MobileInboxEntry } from "../../u
 import { submitMobileInboxEntry } from "../../utils/mobileSession";
 import { TECHNICA_WORKSPACE_COMMAND_EVENT, type WorkspaceCommand } from "../../utils/workspaceShortcuts";
 
-interface StructuredStudioContext<TDocument> {
+export interface StructuredStudioContext<TDocument> {
   document: TDocument;
   setDocument: Dispatch<SetStateAction<TDocument>>;
   patchDocument: (updater: (current: TDocument) => TDocument) => void;
@@ -121,7 +121,8 @@ export function StructuredDocumentStudio<TDocument>({
 
   async function exportBundle() {
     try {
-      await downloadBundle(await buildBundleForTarget(document, exportTarget));
+      const currentDocument = touchDocument(document);
+      await downloadBundle(await buildBundleForTarget(currentDocument, exportTarget));
     } catch (error) {
       notify(error instanceof Error ? error.message : "Could not export the bundle.");
     }
@@ -203,7 +204,8 @@ export function StructuredDocumentStudio<TDocument>({
         importRef.current?.click();
       }
       if (command === "save-draft") {
-        downloadDraftFile(draftType, getTitle(document), document);
+        const currentDocument = touchDocument(document);
+        downloadDraftFile(draftType, getTitle(currentDocument), currentDocument);
       }
       if (command === "export-bundle") {
         void exportBundle();
@@ -233,7 +235,10 @@ export function StructuredDocumentStudio<TDocument>({
     loadSample,
     clearDocument,
     importDraft: () => importRef.current?.click(),
-    saveDraft: () => downloadDraftFile(draftType, getTitle(document), document),
+    saveDraft: () => {
+      const currentDocument = touchDocument(document);
+      downloadDraftFile(draftType, getTitle(currentDocument), currentDocument);
+    },
     exportBundle,
     sendToDesktop
   };
