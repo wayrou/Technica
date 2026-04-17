@@ -229,6 +229,7 @@ Importer notes:
 - \`tiles\` are stored as rows from top to bottom.
 - Objects and zones use top-left coordinates with width and height in tile units.
 - Terrain, wall, walkable, and metadata fields are intentionally explicit to support multiple downstream adapters.
+- Optional \`vertical\` data is sparse authoring metadata for 3D field-map layers, elevation, and connectors.
 - Preserve ids and metadata when converting into Chaos Core runtime formats.
 `;
 

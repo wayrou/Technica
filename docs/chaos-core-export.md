@@ -40,12 +40,14 @@ Each Chaos Core bundle contains:
 - `objects`
 - `interactionZones`
 - `metadata`
+- `vertical` optional
 
 Notes:
 
 - Unsupported editor terrain values are mapped to a safe Chaos Core tile type.
 - Original visual terrain is preserved in tile metadata when needed.
 - Interactive objects get matching interaction zones if one is not already present.
+- Optional `vertical` data is exported only when enabled in Technica. Chaos Core can ignore it and still run the map with the normal 2D tile grid.
 
 ## Quest runtime shape
 

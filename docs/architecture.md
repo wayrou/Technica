@@ -33,6 +33,7 @@
 - Starts with a grid/tile field map workflow for the MVP.
 - Keeps tile fields explicit instead of compressing them into engine-specific encodings.
 - Stores objects and zones as rectangle-based placements with metadata for later adapters.
+- Supports optional sparse vertical layers for 3D field-map authoring while preserving the base 2D tile grid as a complete playable runtime map.
 
 ## Local-first behavior
 

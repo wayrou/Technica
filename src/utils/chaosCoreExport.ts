@@ -12,7 +12,17 @@ import type { ClassDocument } from "../types/class";
 import type { DialogueChoice, DialogueDocument, DialogueEntry, DialogueLabel, DialogueLine } from "../types/dialogue";
 import type { GearDocument } from "../types/gear";
 import type { ItemDocument } from "../types/item";
-import type { MapDocument, MapObject, MapTile, MapZone, TerrainType } from "../types/map";
+import type {
+  MapDocument,
+  MapObject,
+  MapTile,
+  MapVerticalConnectorKind,
+  MapVerticalDirection,
+  MapVerticalEdgeKind,
+  MapVerticalLayerSystem,
+  MapZone,
+  TerrainType
+} from "../types/map";
 import type { NpcDocument } from "../types/npc";
 import type { OperationDocument } from "../types/operation";
 import type { QuestDocument, QuestObjective, QuestReward } from "../types/quest";
@@ -94,6 +104,50 @@ interface ChaosCoreFieldMap {
   tiles: ChaosCoreFieldTile[][];
   objects: ChaosCoreFieldObject[];
   interactionZones: ChaosCoreInteractionZone[];
+  metadata?: Record<string, unknown>;
+  vertical?: ChaosCoreFieldVerticalData;
+}
+
+interface ChaosCoreFieldVerticalPoint {
+  layerId: string;
+  x: number;
+  y: number;
+}
+
+interface ChaosCoreFieldVerticalCell {
+  x: number;
+  y: number;
+  heightOffset: number;
+  walkable?: boolean;
+  edges?: Partial<Record<MapVerticalDirection, MapVerticalEdgeKind>>;
+  metadata?: Record<string, unknown>;
+}
+
+interface ChaosCoreFieldVerticalLayer {
+  id: string;
+  name: string;
+  elevation: number;
+  visibleIn2d: boolean;
+  cells: ChaosCoreFieldVerticalCell[];
+  metadata?: Record<string, unknown>;
+}
+
+interface ChaosCoreFieldVerticalConnector {
+  id: string;
+  kind: MapVerticalConnectorKind;
+  from: ChaosCoreFieldVerticalPoint;
+  to: ChaosCoreFieldVerticalPoint;
+  bidirectional: boolean;
+  metadata?: Record<string, unknown>;
+}
+
+interface ChaosCoreFieldVerticalData {
+  schemaVersion: 1;
+  sourceSchemaVersion: string;
+  defaultLayerId: string;
+  elevationStep: number;
+  layers: ChaosCoreFieldVerticalLayer[];
+  connectors: ChaosCoreFieldVerticalConnector[];
   metadata?: Record<string, unknown>;
 }
 
@@ -613,6 +667,57 @@ function buildMapDependencies(objects: MapObject[], zones: MapZone[]): ExportDep
   return dependencies;
 }
 
+function buildChaosCoreVerticalData(vertical: MapVerticalLayerSystem | undefined): ChaosCoreFieldVerticalData | undefined {
+  if (!vertical) {
+    return undefined;
+  }
+
+  return pruneEmpty({
+    schemaVersion: 1 as const,
+    sourceSchemaVersion: vertical.schemaVersion,
+    defaultLayerId: runtimeId(vertical.defaultLayerId),
+    elevationStep: vertical.elevationStep,
+    layers: vertical.layers.map((layer) =>
+      pruneEmpty({
+        id: runtimeId(layer.id),
+        name: layer.name,
+        elevation: layer.elevation,
+        visibleIn2d: layer.visibleIn2d,
+        cells: layer.cells.map((cell) =>
+          pruneEmpty({
+            x: cell.x,
+            y: cell.y,
+            heightOffset: cell.heightOffset,
+            walkable: cell.walkable,
+            edges: cell.edges,
+            metadata: coerceRecord(cell.metadata)
+          })
+        ),
+        metadata: coerceRecord(layer.metadata)
+      })
+    ),
+    connectors: vertical.connectors.map((connector) =>
+      pruneEmpty({
+        id: runtimeId(connector.id),
+        kind: connector.kind,
+        from: {
+          layerId: runtimeId(connector.from.layerId),
+          x: connector.from.x,
+          y: connector.from.y
+        },
+        to: {
+          layerId: runtimeId(connector.to.layerId),
+          x: connector.to.x,
+          y: connector.to.y
+        },
+        bidirectional: connector.bidirectional,
+        metadata: coerceRecord(connector.metadata)
+      })
+    ),
+    metadata: coerceRecord(vertical.metadata)
+  });
+}
+
 export function buildChaosCoreMapBundle(document: MapDocument, references = createWorkspaceReferenceIndex({ map: document })): ExportBundle {
   const contentId = runtimeId(document.id || document.name, "field_map");
   const mergedZones = [
@@ -696,7 +801,8 @@ export function buildChaosCoreMapBundle(document: MapDocument, references = crea
         }
       })
     ),
-    metadata: coerceRecord(document.metadata)
+    metadata: coerceRecord(document.metadata),
+    vertical: buildChaosCoreVerticalData(document.vertical)
   });
 
   const entryFile = `${contentId}.fieldmap.json`;
@@ -721,6 +827,7 @@ Content id: \`${contentId}\`
 Importer notes:
 - The runtime file already matches Chaos Core's field map shape closely.
 - \`interactionZones\` are exported explicitly for all interactive map content.
+- Optional \`vertical\` layer data is present only when enabled in Technica and can be ignored by the 2D runtime.
 - \`${sourceFile}\` preserves the original Technica authoring model.
 `;
 

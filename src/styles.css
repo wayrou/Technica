@@ -1709,6 +1709,10 @@ textarea.authoring-editor {
   background: rgba(127, 228, 203, 0.92);
 }
 
+.map-legend-chip.vertical::before {
+  background: rgba(151, 176, 255, 0.92);
+}
+
 .map-viewport.pannable {
   cursor: grab;
 }
@@ -2052,6 +2056,13 @@ textarea.authoring-editor {
     0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
+.map-cell.has-vertical-cell {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 0 0 2px rgba(151, 176, 255, 0.34),
+    0 0 0 1px rgba(5, 10, 18, 0.42);
+}
+
 .map-cell-surface,
 .map-cell-shade,
 .map-cell-coordinate {
@@ -2093,6 +2104,65 @@ textarea.authoring-editor {
   letter-spacing: 0.03em;
 }
 
+.map-cell-height-badge {
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: rgba(10, 14, 26, 0.72);
+  color: rgba(226, 233, 255, 0.94);
+  font-size: 0.58rem;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.map-cell-edge-stack {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.map-cell-edge {
+  position: absolute;
+  background: rgba(8, 11, 16, 0.82);
+  box-shadow: 0 0 0 1px rgba(226, 233, 255, 0.22);
+}
+
+.map-cell-edge-north,
+.map-cell-edge-south {
+  left: 10%;
+  right: 10%;
+  height: 3px;
+}
+
+.map-cell-edge-north {
+  top: 2px;
+}
+
+.map-cell-edge-south {
+  bottom: 2px;
+}
+
+.map-cell-edge-east,
+.map-cell-edge-west {
+  top: 10%;
+  bottom: 10%;
+  width: 3px;
+}
+
+.map-cell-edge-east {
+  right: 2px;
+}
+
+.map-cell-edge-west {
+  left: 2px;
+}
+
 .cell-wall {
   border-width: 2px;
   border-color: rgba(245, 249, 250, 0.84);
@@ -2123,6 +2193,32 @@ textarea.authoring-editor {
   box-shadow:
     0 14px 26px rgba(0, 0, 0, 0.22),
     inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.map-vertical-connector-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 3;
+}
+
+.map-vertical-connector-line {
+  stroke: rgba(190, 205, 255, 0.72);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-dasharray: 6 5;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
+}
+
+.map-vertical-connector-dot {
+  fill: rgba(151, 176, 255, 0.92);
+  stroke: rgba(7, 10, 18, 0.8);
+  stroke-width: 1.5;
+}
+
+.map-vertical-connector-dot.target {
+  fill: rgba(243, 181, 98, 0.94);
 }
 
 .map-overlay.object {

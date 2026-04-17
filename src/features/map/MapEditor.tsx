@@ -17,7 +17,18 @@ import { createSampleMap } from "../../data/sampleMap";
 import { useChaosCoreDatabase } from "../../hooks/useChaosCoreDatabase";
 import { useTechnicaRuntime } from "../../hooks/useTechnicaRuntime";
 import { usePersistentState } from "../../hooks/usePersistentState";
-import type { MapBrushState, MapDocument, MapObject, MapZone } from "../../types/map";
+import type {
+  MapBrushState,
+  MapDocument,
+  MapObject,
+  MapVerticalConnector,
+  MapVerticalConnectorKind,
+  MapVerticalDirection,
+  MapVerticalEdgeKind,
+  MapVerticalLayer,
+  MapVerticalLayerSystem,
+  MapZone
+} from "../../types/map";
 import type { NpcDocument } from "../../types/npc";
 import { isoNow } from "../../utils/date";
 import { confirmAction, notify } from "../../utils/dialogs";
@@ -41,11 +52,15 @@ import { openTechnicaPopout } from "../../utils/popout";
 import { validateMapDocument } from "../../utils/mapValidation";
 import {
   createBlankMapDocument,
+  createDefaultVerticalLayerSystem,
+  createVerticalLayer,
   createDefaultTile,
+  getMapVerticalCell,
   normalizeRect,
   resizeMapDocument,
   terrainColorMap,
-  terrainPalette
+  terrainPalette,
+  upsertMapVerticalCell
 } from "./mapUtils";
 
 type MapTool = "paint" | "erase" | "select" | "move" | "object" | "zone" | "npc" | "enemy" | "pan";
@@ -104,6 +119,25 @@ const MAP_TOOL_SHORTCUTS: Partial<Record<string, MapTool>> = {
   l: "enemy",
   h: "pan"
 };
+
+const VERTICAL_EDGE_OPTIONS: Array<{ value: MapVerticalEdgeKind; label: string }> = [
+  { value: "open", label: "Open" },
+  { value: "ledge", label: "Ledge" },
+  { value: "rail", label: "Rail" },
+  { value: "wall", label: "Wall" }
+];
+
+const VERTICAL_CONNECTOR_OPTIONS: Array<{ value: MapVerticalConnectorKind; label: string }> = [
+  { value: "stairs", label: "Stairs" },
+  { value: "ramp", label: "Ramp" },
+  { value: "ladder", label: "Ladder" },
+  { value: "drop", label: "Drop" },
+  { value: "jump", label: "Jump" },
+  { value: "elevator", label: "Elevator" },
+  { value: "grapple", label: "Grapple" }
+];
+
+const VERTICAL_DIRECTIONS: MapVerticalDirection[] = ["north", "east", "south", "west"];
 
 const MAP_STORAGE_KEY = "technica.map.document";
 const MAP_VIEW_EXPANDED_STORAGE_KEY = "technica.map.view.expanded";
@@ -298,6 +332,14 @@ export function MapEditor() {
   const [selectedCell, setSelectedCell] = useState<{ x: number; y: number } | null>(null);
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
+  const [activeVerticalLayerId, setActiveVerticalLayerId] = useState("ground");
+  const [connectorDraft, setConnectorDraft] = useState({
+    kind: "stairs" as MapVerticalConnectorKind,
+    toLayerId: "ground",
+    toX: 0,
+    toY: 0,
+    bidirectional: true
+  });
   const [dimensionDraft, setDimensionDraft] = useState({ width: map.width, height: map.height });
   const [layerVisibility, setLayerVisibility] = useState({
     walkable: true,
@@ -305,7 +347,8 @@ export function MapEditor() {
     objects: true,
     zones: true,
     npcs: true,
-    enemies: true
+    enemies: true,
+    vertical: true
   });
   const [selectedNpcPlacementEntryKey, setSelectedNpcPlacementEntryKey] = useState("");
   const [selectedNpcMarkerEntryKey, setSelectedNpcMarkerEntryKey] = useState<string | null>(null);
@@ -338,6 +381,27 @@ export function MapEditor() {
   const selectedObject = map.objects.find((item) => item.id === selectedObjectId) ?? null;
   const selectedEnemyObject = selectedObject && isEnemyObject(selectedObject) ? selectedObject : null;
   const selectedZone = map.zones.find((item) => item.id === selectedZoneId) ?? null;
+  const verticalLayerSystem = map.vertical ?? null;
+  const verticalLayers = verticalLayerSystem?.layers ?? [];
+  const activeVerticalLayer =
+    verticalLayers.find((layer) => layer.id === activeVerticalLayerId) ?? verticalLayers[0] ?? null;
+  const activeVerticalCell =
+    selectedCell && activeVerticalLayer ? getMapVerticalCell(activeVerticalLayer, selectedCell.x, selectedCell.y) : null;
+  const selectedCellVerticalConnectors = useMemo(
+    () =>
+      selectedCell && verticalLayerSystem
+        ? verticalLayerSystem.connectors.filter(
+            (connector) =>
+              (connector.from.layerId === activeVerticalLayer?.id &&
+                connector.from.x === selectedCell.x &&
+                connector.from.y === selectedCell.y) ||
+              (connector.to.layerId === activeVerticalLayer?.id &&
+                connector.to.x === selectedCell.x &&
+                connector.to.y === selectedCell.y)
+          )
+        : [],
+    [activeVerticalLayer?.id, selectedCell, verticalLayerSystem]
+  );
   const mapEnemyObjects = useMemo(
     () => map.objects.filter((item) => isEnemyObject(item)),
     [map.objects]
@@ -523,6 +587,13 @@ export function MapEditor() {
 
     return entries;
   }, [map.tiles, visibleTileWindow.endColumn, visibleTileWindow.endRow, visibleTileWindow.startColumn, visibleTileWindow.startRow]);
+  const activeVerticalCellLookup = useMemo(() => {
+    const lookup = new Map<string, MapVerticalLayer["cells"][number]>();
+    activeVerticalLayer?.cells.forEach((cell) => {
+      lookup.set(`${cell.x},${cell.y}`, cell);
+    });
+    return lookup;
+  }, [activeVerticalLayer]);
   const zoneDragRect = useMemo(() => (zoneDrag ? normalizeRect(zoneDrag.start, zoneDrag.end) : null), [zoneDrag]);
   const minimapTileRects = useMemo(
     () =>
@@ -602,6 +673,51 @@ export function MapEditor() {
   useEffect(() => {
     setDimensionDraft({ width: map.width, height: map.height });
   }, [map.height, map.width]);
+
+  useEffect(() => {
+    if (!verticalLayerSystem) {
+      return;
+    }
+
+    if (!verticalLayerSystem.layers.some((layer) => layer.id === activeVerticalLayerId)) {
+      const nextLayerId = verticalLayerSystem.defaultLayerId || verticalLayerSystem.layers[0]?.id || "ground";
+      setActiveVerticalLayerId(nextLayerId);
+    }
+  }, [activeVerticalLayerId, verticalLayerSystem]);
+
+  useEffect(() => {
+    if (!selectedCell) {
+      return;
+    }
+
+    setConnectorDraft((current) => ({
+      ...current,
+      toX: selectedCell.x,
+      toY: selectedCell.y
+    }));
+  }, [selectedCell]);
+
+  useEffect(() => {
+    if (!verticalLayerSystem) {
+      return;
+    }
+
+    setConnectorDraft((current) => {
+      const layerExists = verticalLayerSystem.layers.some((layer) => layer.id === current.toLayerId);
+      if (layerExists) {
+        return current;
+      }
+
+      const fallbackLayer =
+        verticalLayerSystem.layers.find((layer) => layer.id !== activeVerticalLayer?.id) ??
+        activeVerticalLayer ??
+        verticalLayerSystem.layers[0];
+      return {
+        ...current,
+        toLayerId: fallbackLayer?.id ?? "ground"
+      };
+    });
+  }, [activeVerticalLayer, verticalLayerSystem]);
 
   useEffect(() => {
     if (!isFocusMode) {
@@ -869,6 +985,188 @@ export function MapEditor() {
 
   function patchMap(updater: (current: MapDocument) => MapDocument) {
     setMap((current) => touchMap(updater(current)));
+  }
+
+  function updateVerticalLayerSystem(updater: (current: MapVerticalLayerSystem) => MapVerticalLayerSystem) {
+    patchMap((current) => {
+      if (!current.vertical) {
+        return current;
+      }
+
+      return {
+        ...current,
+        vertical: updater(current.vertical)
+      };
+    });
+  }
+
+  function enableVerticalLayers() {
+    const nextVertical = createDefaultVerticalLayerSystem();
+    patchMap((current) => {
+      if (current.vertical) {
+        return current;
+      }
+
+      return {
+        ...current,
+        vertical: nextVertical
+      };
+    });
+    setActiveVerticalLayerId(nextVertical.defaultLayerId);
+  }
+
+  function disableVerticalLayers() {
+    if (!map.vertical || !confirmAction("Remove vertical layer data from this map draft?")) {
+      return;
+    }
+
+    patchMap((current) => {
+      const { vertical: _vertical, ...next } = current;
+      return next;
+    });
+    setActiveVerticalLayerId("ground");
+  }
+
+  function updateActiveVerticalLayer(updater: (layer: MapVerticalLayer) => MapVerticalLayer) {
+    if (!activeVerticalLayer) {
+      return;
+    }
+
+    updateVerticalLayerSystem((current) => ({
+      ...current,
+      layers: current.layers.map((layer) => (layer.id === activeVerticalLayer.id ? updater(layer) : layer))
+    }));
+  }
+
+  function updateActiveVerticalLayerId(nextId: string) {
+    if (!activeVerticalLayer) {
+      return;
+    }
+
+    const previousId = activeVerticalLayer.id;
+    setActiveVerticalLayerId(nextId);
+    updateVerticalLayerSystem((current) => ({
+      ...current,
+      defaultLayerId: current.defaultLayerId === previousId ? nextId : current.defaultLayerId,
+      layers: current.layers.map((layer) => (layer.id === previousId ? { ...layer, id: nextId } : layer)),
+      connectors: current.connectors.map((connector) => ({
+        ...connector,
+        from: connector.from.layerId === previousId ? { ...connector.from, layerId: nextId } : connector.from,
+        to: connector.to.layerId === previousId ? { ...connector.to, layerId: nextId } : connector.to
+      }))
+    }));
+  }
+
+  function addVerticalLayer() {
+    const vertical = map.vertical ?? createDefaultVerticalLayerSystem();
+    const existingIds = vertical.layers.map((layer) => layer.id);
+    const id = createSequentialId("layer", existingIds);
+    const nextElevation =
+      vertical.layers.length > 0 ? Math.max(...vertical.layers.map((layer) => layer.elevation)) + 1 : 1;
+    const layer = createVerticalLayer(id, `Layer ${vertical.layers.length + 1}`, nextElevation);
+
+    patchMap((current) => {
+      const currentVertical = current.vertical ?? createDefaultVerticalLayerSystem();
+      return {
+        ...current,
+        vertical: {
+          ...currentVertical,
+          layers: [...currentVertical.layers, layer]
+        }
+      };
+    });
+    setActiveVerticalLayerId(layer.id);
+  }
+
+  function removeActiveVerticalLayer() {
+    if (!verticalLayerSystem || !activeVerticalLayer || verticalLayerSystem.layers.length <= 1) {
+      notify("A vertical map needs at least one layer.");
+      return;
+    }
+
+    if (!confirmAction(`Remove vertical layer '${activeVerticalLayer.name || activeVerticalLayer.id}'?`)) {
+      return;
+    }
+
+    const remainingLayers = verticalLayerSystem.layers.filter((layer) => layer.id !== activeVerticalLayer.id);
+    const nextDefaultLayerId =
+      verticalLayerSystem.defaultLayerId === activeVerticalLayer.id
+        ? remainingLayers[0]?.id ?? "ground"
+        : verticalLayerSystem.defaultLayerId;
+    setActiveVerticalLayerId(nextDefaultLayerId);
+
+    updateVerticalLayerSystem((current) => ({
+      ...current,
+      defaultLayerId: nextDefaultLayerId,
+      layers: current.layers.filter((layer) => layer.id !== activeVerticalLayer.id),
+      connectors: current.connectors.filter(
+        (connector) => connector.from.layerId !== activeVerticalLayer.id && connector.to.layerId !== activeVerticalLayer.id
+      )
+    }));
+  }
+
+  function updateSelectedVerticalCell(updater: (cell: MapVerticalLayer["cells"][number]) => MapVerticalLayer["cells"][number] | null) {
+    if (!selectedCell || !activeVerticalLayer) {
+      return;
+    }
+
+    updateActiveVerticalLayer((layer) => upsertMapVerticalCell(layer, selectedCell.x, selectedCell.y, updater));
+  }
+
+  function setSelectedVerticalCellEdge(direction: MapVerticalDirection, edgeKind: MapVerticalEdgeKind) {
+    updateSelectedVerticalCell((cell) => {
+      const edges = { ...cell.edges };
+      if (edgeKind === "open") {
+        delete edges[direction];
+      } else {
+        edges[direction] = edgeKind;
+      }
+      return {
+        ...cell,
+        edges
+      };
+    });
+  }
+
+  function clearSelectedVerticalCell() {
+    updateSelectedVerticalCell(() => null);
+  }
+
+  function addVerticalConnector() {
+    if (!selectedCell || !activeVerticalLayer || !verticalLayerSystem) {
+      notify("Select a tile and enable vertical layers before adding a connector.");
+      return;
+    }
+
+    const targetLayerId = connectorDraft.toLayerId || activeVerticalLayer.id;
+    const connector: MapVerticalConnector = {
+      id: createSequentialId("connector", verticalLayerSystem.connectors.map((item) => item.id)),
+      kind: connectorDraft.kind,
+      from: {
+        layerId: activeVerticalLayer.id,
+        x: selectedCell.x,
+        y: selectedCell.y
+      },
+      to: {
+        layerId: targetLayerId,
+        x: Math.max(0, Math.min(map.width - 1, Number(connectorDraft.toX || 0))),
+        y: Math.max(0, Math.min(map.height - 1, Number(connectorDraft.toY || 0)))
+      },
+      bidirectional: connectorDraft.bidirectional,
+      metadata: {}
+    };
+
+    updateVerticalLayerSystem((current) => ({
+      ...current,
+      connectors: [...current.connectors, connector]
+    }));
+  }
+
+  function removeVerticalConnector(connectorId: string) {
+    updateVerticalLayerSystem((current) => ({
+      ...current,
+      connectors: current.connectors.filter((connector) => connector.id !== connectorId)
+    }));
   }
 
   function clearSelection() {
@@ -1376,6 +1674,13 @@ export function MapEditor() {
     };
   }
 
+  function getConnectorPoint(point: { x: number; y: number }) {
+    return {
+      x: point.x * cellStride + cellSize / 2,
+      y: point.y * cellStride + cellSize / 2
+    };
+  }
+
   async function handleImportFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) {
@@ -1566,6 +1871,197 @@ export function MapEditor() {
                   }
                 />
               </label>
+              {verticalLayerSystem && activeVerticalLayer ? (
+                <>
+                  <div className="field full">
+                    <span>Vertical layer</span>
+                    <div className="chip-row">
+                      <span className="pill accent">{activeVerticalLayer.name || activeVerticalLayer.id}</span>
+                      <span className="pill">
+                        Elevation {activeVerticalLayer.elevation + (activeVerticalCell?.heightOffset ?? 0)}
+                      </span>
+                      <span className="pill">{activeVerticalCell ? "Annotated" : "Base tile"}</span>
+                    </div>
+                  </div>
+                  <label className="field">
+                    <span>Height offset</span>
+                    <input
+                      type="number"
+                      step={0.25}
+                      value={activeVerticalCell?.heightOffset ?? 0}
+                      onChange={(event) =>
+                        updateSelectedVerticalCell((cell) => ({
+                          ...cell,
+                          heightOffset: Number(event.target.value || 0)
+                        }))
+                      }
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Layer walkability</span>
+                    <select
+                      value={
+                        activeVerticalCell?.walkable === undefined
+                          ? "inherit"
+                          : activeVerticalCell.walkable
+                            ? "walkable"
+                            : "blocked"
+                      }
+                      onChange={(event) =>
+                        updateSelectedVerticalCell((cell) => ({
+                          ...cell,
+                          walkable:
+                            event.target.value === "inherit" ? undefined : event.target.value === "walkable"
+                        }))
+                      }
+                    >
+                      <option value="inherit">Inherit base tile</option>
+                      <option value="walkable">Walkable on layer</option>
+                      <option value="blocked">Blocked on layer</option>
+                    </select>
+                  </label>
+                  {VERTICAL_DIRECTIONS.map((direction) => (
+                    <label className="field" key={direction}>
+                      <span>{direction[0].toUpperCase() + direction.slice(1)} edge</span>
+                      <select
+                        value={activeVerticalCell?.edges?.[direction] ?? "open"}
+                        onChange={(event) =>
+                          setSelectedVerticalCellEdge(direction, event.target.value as MapVerticalEdgeKind)
+                        }
+                      >
+                        {VERTICAL_EDGE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ))}
+                  <label className="field full">
+                    <span>Vertical cell metadata</span>
+                    <textarea
+                      rows={3}
+                      value={serializeKeyValueLines(activeVerticalCell?.metadata ?? {})}
+                      onChange={(event) =>
+                        updateSelectedVerticalCell((cell) => ({
+                          ...cell,
+                          metadata: parseKeyValueLines(event.target.value)
+                        }))
+                      }
+                    />
+                  </label>
+                  <div className="field full">
+                    <span>Connector</span>
+                    <div className="form-grid compact">
+                      <label className="field">
+                        <span>Kind</span>
+                        <select
+                          value={connectorDraft.kind}
+                          onChange={(event) =>
+                            setConnectorDraft((current) => ({
+                              ...current,
+                              kind: event.target.value as MapVerticalConnectorKind
+                            }))
+                          }
+                        >
+                          {VERTICAL_CONNECTOR_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="field">
+                        <span>To layer</span>
+                        <select
+                          value={connectorDraft.toLayerId}
+                          onChange={(event) =>
+                            setConnectorDraft((current) => ({ ...current, toLayerId: event.target.value }))
+                          }
+                        >
+                          {verticalLayers.map((layer) => (
+                            <option key={layer.id} value={layer.id}>
+                              {layer.name || layer.id}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="field">
+                        <span>To X</span>
+                        <input
+                          type="number"
+                          min={0}
+                          max={Math.max(0, map.width - 1)}
+                          value={connectorDraft.toX}
+                          onChange={(event) =>
+                            setConnectorDraft((current) => ({
+                              ...current,
+                              toX: Number(event.target.value || 0)
+                            }))
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span>To Y</span>
+                        <input
+                          type="number"
+                          min={0}
+                          max={Math.max(0, map.height - 1)}
+                          value={connectorDraft.toY}
+                          onChange={(event) =>
+                            setConnectorDraft((current) => ({
+                              ...current,
+                              toY: Number(event.target.value || 0)
+                            }))
+                          }
+                        />
+                      </label>
+                      <label className="field field-inline">
+                        <span>Two-way</span>
+                        <input
+                          type="checkbox"
+                          checked={connectorDraft.bidirectional}
+                          onChange={(event) =>
+                            setConnectorDraft((current) => ({ ...current, bidirectional: event.target.checked }))
+                          }
+                        />
+                      </label>
+                    </div>
+                    <div className="toolbar">
+                      <button type="button" className="ghost-button" onClick={addVerticalConnector}>
+                        Add connector
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        onClick={clearSelectedVerticalCell}
+                        disabled={!activeVerticalCell}
+                      >
+                        Clear vertical cell
+                      </button>
+                    </div>
+                    {selectedCellVerticalConnectors.length > 0 ? (
+                      <div className="database-list compact">
+                        {selectedCellVerticalConnectors.map((connector) => (
+                          <button
+                            key={connector.id}
+                            type="button"
+                            className="database-entry"
+                            onClick={() => removeVerticalConnector(connector.id)}
+                          >
+                            <strong>{connector.kind}</strong>
+                            <span>
+                              {connector.from.layerId} {connector.from.x},{connector.from.y} to {connector.to.layerId}{" "}
+                              {connector.to.x},{connector.to.y}
+                            </span>
+                            <small>Click to remove</small>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                </>
+              ) : null}
             </div>
           </article>
         </div>
@@ -1968,6 +2464,11 @@ export function MapEditor() {
         <span className="pill">{mapEnemyObjects.length} enemies</span>
         <span className="pill">{map.zones.length} zones</span>
         <span className="pill">{mapNpcMarkers.length} NPCs</span>
+        {verticalLayerSystem ? (
+          <span className="pill accent">{verticalLayers.length} vertical layers</span>
+        ) : (
+          <span className="pill">2D runtime map</span>
+        )}
         <span className="pill">Zoom {Math.round(zoom * 100)}%</span>
         {isFocusMode ? <span className="pill accent">Focus mode</span> : null}
       </div>
@@ -2018,6 +2519,136 @@ export function MapEditor() {
             Copy selected tile to brush
           </button>
         </div>
+      </div>
+
+      <div className="subsection">
+        <h4>Vertical Layers</h4>
+        {!verticalLayerSystem ? (
+          <div className="toolbar">
+            <button type="button" className="ghost-button" onClick={enableVerticalLayers}>
+              Enable vertical layers
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="chip-row">
+              <span className="pill accent">{activeVerticalLayer?.name || activeVerticalLayer?.id}</span>
+              <span className="pill">{verticalLayerSystem.connectors.length} connectors</span>
+              <span className="pill">Step {verticalLayerSystem.elevationStep}</span>
+            </div>
+            <div className="form-grid">
+              <label className="field">
+                <span>Active layer</span>
+                <select value={activeVerticalLayer?.id ?? ""} onChange={(event) => setActiveVerticalLayerId(event.target.value)}>
+                  {verticalLayers.map((layer) => (
+                    <option key={layer.id} value={layer.id}>
+                      {layer.name || layer.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Layer id</span>
+                <input
+                  value={activeVerticalLayer?.id ?? ""}
+                  onChange={(event) => updateActiveVerticalLayerId(event.target.value)}
+                  disabled={!activeVerticalLayer}
+                />
+              </label>
+              <label className="field">
+                <span>Layer name</span>
+                <input
+                  value={activeVerticalLayer?.name ?? ""}
+                  onChange={(event) => updateActiveVerticalLayer((layer) => ({ ...layer, name: event.target.value }))}
+                  disabled={!activeVerticalLayer}
+                />
+              </label>
+              <label className="field">
+                <span>Layer elevation</span>
+                <input
+                  type="number"
+                  step={0.25}
+                  value={activeVerticalLayer?.elevation ?? 0}
+                  onChange={(event) =>
+                    updateActiveVerticalLayer((layer) => ({ ...layer, elevation: Number(event.target.value || 0) }))
+                  }
+                  disabled={!activeVerticalLayer}
+                />
+              </label>
+              <label className="field">
+                <span>Elevation step</span>
+                <input
+                  type="number"
+                  min={0.1}
+                  step={0.1}
+                  value={verticalLayerSystem.elevationStep}
+                  onChange={(event) =>
+                    updateVerticalLayerSystem((current) => ({
+                      ...current,
+                      elevationStep: Math.max(0.1, Number(event.target.value || 1))
+                    }))
+                  }
+                />
+              </label>
+              <label className="field field-inline">
+                <span>Visible in 2D</span>
+                <input
+                  type="checkbox"
+                  checked={activeVerticalLayer?.visibleIn2d ?? false}
+                  onChange={(event) =>
+                    updateActiveVerticalLayer((layer) => ({ ...layer, visibleIn2d: event.target.checked }))
+                  }
+                  disabled={!activeVerticalLayer}
+                />
+              </label>
+              <label className="field full">
+                <span>Layer metadata</span>
+                <textarea
+                  rows={3}
+                  value={serializeKeyValueLines(activeVerticalLayer?.metadata ?? {})}
+                  onChange={(event) =>
+                    updateActiveVerticalLayer((layer) => ({
+                      ...layer,
+                      metadata: parseKeyValueLines(event.target.value)
+                    }))
+                  }
+                  disabled={!activeVerticalLayer}
+                />
+              </label>
+              <label className="field full">
+                <span>Vertical metadata</span>
+                <textarea
+                  rows={3}
+                  value={serializeKeyValueLines(verticalLayerSystem.metadata)}
+                  onChange={(event) =>
+                    updateVerticalLayerSystem((current) => ({
+                      ...current,
+                      metadata: parseKeyValueLines(event.target.value)
+                    }))
+                  }
+                />
+              </label>
+            </div>
+            <div className="toolbar split">
+              <div className="toolbar">
+                <button type="button" className="ghost-button" onClick={addVerticalLayer}>
+                  Add layer
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button danger"
+                  onClick={removeActiveVerticalLayer}
+                  disabled={verticalLayers.length <= 1}
+                >
+                  Remove layer
+                </button>
+              </div>
+              <button type="button" className="ghost-button danger" onClick={disableVerticalLayers}>
+                Disable vertical data
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
       <div className="form-grid">
@@ -2159,6 +2790,15 @@ export function MapEditor() {
               onChange={(event) => setLayerVisibility((current) => ({ ...current, npcs: event.target.checked }))}
             />
             NPCs
+          </label>
+          <label className="inline-toggle">
+            <input
+              type="checkbox"
+              checked={layerVisibility.vertical}
+              onChange={(event) => setLayerVisibility((current) => ({ ...current, vertical: event.target.checked }))}
+              disabled={!verticalLayerSystem}
+            />
+            Vertical
           </label>
         </div>
       </div>
@@ -2406,6 +3046,11 @@ export function MapEditor() {
             <span className="pill accent">{activeTool.label}</span>
             <span className="pill">{activeTool.shortcut}</span>
             <span className="pill">Zoom {Math.round(zoom * 100)}%</span>
+            {activeVerticalLayer ? (
+              <span className="pill">
+                {activeVerticalLayer.name || activeVerticalLayer.id} z{activeVerticalLayer.elevation}
+              </span>
+            ) : null}
             {hoverCell ? <span className="pill">Hover {hoverCell.x}, {hoverCell.y}</span> : null}
             {selectedCell ? <span className="pill">Tile {selectedCell.x}, {selectedCell.y}</span> : null}
             {selectedObject ? <span className="pill">Object {selectedObject.id}</span> : null}
@@ -2450,6 +3095,7 @@ export function MapEditor() {
             <span className="map-legend-chip enemy">Enemy</span>
             <span className="map-legend-chip zone">Zone</span>
             <span className="map-legend-chip npc">NPC</span>
+            <span className="map-legend-chip vertical">Vertical</span>
           </div>
         </div>
 
@@ -2496,6 +3142,14 @@ export function MapEditor() {
               onClick={() => setLayerVisibility((current) => ({ ...current, npcs: !current.npcs }))}
             >
               NPCs
+            </button>
+            <button
+              type="button"
+              className={layerVisibility.vertical ? "map-layer-toggle active" : "map-layer-toggle"}
+              onClick={() => setLayerVisibility((current) => ({ ...current, vertical: !current.vertical }))}
+              disabled={!verticalLayerSystem}
+            >
+              Vertical
             </button>
           </div>
           <div className="map-scene-filter-actions">
@@ -2598,11 +3252,22 @@ export function MapEditor() {
                   showCanvasCoordinates &&
                   columnIndex % coordinateInterval === 0 &&
                   rowIndex % coordinateInterval === 0;
+                const verticalCell =
+                  layerVisibility.vertical && activeVerticalLayer
+                    ? activeVerticalCellLookup.get(`${columnIndex},${rowIndex}`) ?? null
+                    : null;
+                const verticalEdgeEntries = verticalCell ? Object.entries(verticalCell.edges) : [];
                 return (
                   <button
                     key={`cell-${columnIndex}-${rowIndex}`}
                     type="button"
-                    className={isSelected ? "map-cell selected" : "map-cell"}
+                    className={[
+                      "map-cell",
+                      isSelected ? "selected" : "",
+                      verticalCell ? "has-vertical-cell" : ""
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
                     style={terrainSceneStyleMap[tile.terrain] ?? terrainSceneStyles(terrainColorMap[tile.terrain])}
                     data-terrain={tile.terrain}
                     onPointerDown={(event) => handleCellPointerDown(columnIndex, rowIndex, event)}
@@ -2612,6 +3277,22 @@ export function MapEditor() {
                     <span className="map-cell-surface" />
                     <span className="map-cell-shade" />
                     {showCoords ? <span className="map-cell-coordinate">{columnIndex},{rowIndex}</span> : null}
+                    {verticalCell ? (
+                      <span className="map-cell-height-badge">
+                        z{activeVerticalLayer.elevation + verticalCell.heightOffset}
+                      </span>
+                    ) : null}
+                    {verticalEdgeEntries.length > 0 ? (
+                      <span className="map-cell-edge-stack">
+                        {verticalEdgeEntries.map(([direction, edgeKind]) => (
+                          <span
+                            key={`${columnIndex}-${rowIndex}-${direction}-${edgeKind}`}
+                            className={`map-cell-edge map-cell-edge-${direction}`}
+                            title={`${direction} ${edgeKind}`}
+                          />
+                        ))}
+                      </span>
+                    ) : null}
                     {layerVisibility.walls && tile.wall ? <span className="cell-wall" /> : null}
                     {layerVisibility.walkable && !tile.walkable ? <span className="cell-blocked" /> : null}
                     {!tile.floor ? <span className="cell-no-floor" /> : null}
@@ -2619,6 +3300,39 @@ export function MapEditor() {
                 );
               })}
             </div>
+
+            {layerVisibility.vertical && verticalLayerSystem && activeVerticalLayer ? (
+              <svg
+                className="map-vertical-connector-layer"
+                width={mapCanvasWidth}
+                height={mapCanvasHeight}
+                viewBox={`0 0 ${mapCanvasWidth} ${mapCanvasHeight}`}
+                aria-hidden="true"
+              >
+                {verticalLayerSystem.connectors
+                  .filter(
+                    (connector) =>
+                      connector.from.layerId === activeVerticalLayer.id || connector.to.layerId === activeVerticalLayer.id
+                  )
+                  .map((connector) => {
+                    const from = getConnectorPoint(connector.from);
+                    const to = getConnectorPoint(connector.to);
+                    return (
+                      <g key={`vertical-connector-${connector.id}`}>
+                        <line
+                          x1={from.x}
+                          y1={from.y}
+                          x2={to.x}
+                          y2={to.y}
+                          className="map-vertical-connector-line"
+                        />
+                        <circle cx={from.x} cy={from.y} r={Math.max(3, cellSize * 0.12)} className="map-vertical-connector-dot" />
+                        <circle cx={to.x} cy={to.y} r={Math.max(3, cellSize * 0.12)} className="map-vertical-connector-dot target" />
+                      </g>
+                    );
+                  })}
+              </svg>
+            ) : null}
 
             <div className="map-overlay-layer">
               {layerVisibility.objects

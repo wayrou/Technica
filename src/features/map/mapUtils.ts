@@ -1,7 +1,10 @@
 import { TECHNICA_SCHEMA_VERSION, TECHNICA_SOURCE_APP } from "../../types/common";
-import type { MapDocument, MapTile, TerrainType } from "../../types/map";
+import type { MapDocument, MapTile, MapVerticalCell, MapVerticalLayer, MapVerticalLayerSystem, TerrainType } from "../../types/map";
 import { isoNow } from "../../utils/date";
 import { slugify } from "../../utils/id";
+
+export const MAP_VERTICAL_SCHEMA_VERSION = "technica-map-vertical.v1" as const;
+export const DEFAULT_VERTICAL_LAYER_ID = "ground";
 
 export const terrainPalette: Array<{ value: TerrainType; label: string; color: string }> = [
   { value: "grass", label: "Grass", color: "#4f8a57" },
@@ -54,7 +57,8 @@ export function resizeMapDocument(document: MapDocument, width: number, height: 
     height,
     tiles: Array.from({ length: height }, (_, rowIndex) =>
       Array.from({ length: width }, (_, columnIndex) => document.tiles[rowIndex]?.[columnIndex] ?? createDefaultTile())
-    )
+    ),
+    vertical: document.vertical ? resizeVerticalLayerSystem(document.vertical, width, height) : undefined
   };
 }
 
@@ -65,4 +69,88 @@ export function normalizeRect(start: { x: number; y: number }, end: { x: number;
   const height = Math.abs(end.y - start.y) + 1;
 
   return { x, y, width, height };
+}
+
+export function createVerticalLayer(id: string, name: string, elevation: number): MapVerticalLayer {
+  return {
+    id,
+    name,
+    elevation,
+    visibleIn2d: elevation === 0,
+    cells: [],
+    metadata: {}
+  };
+}
+
+export function createDefaultVerticalLayerSystem(): MapVerticalLayerSystem {
+  return {
+    schemaVersion: MAP_VERTICAL_SCHEMA_VERSION,
+    defaultLayerId: DEFAULT_VERTICAL_LAYER_ID,
+    elevationStep: 1,
+    layers: [createVerticalLayer(DEFAULT_VERTICAL_LAYER_ID, "Ground", 0)],
+    connectors: [],
+    metadata: {}
+  };
+}
+
+export function createDefaultVerticalCell(x: number, y: number): MapVerticalCell {
+  return {
+    x,
+    y,
+    heightOffset: 0,
+    edges: {},
+    metadata: {}
+  };
+}
+
+export function getMapVerticalCell(layer: MapVerticalLayer | null | undefined, x: number, y: number) {
+  return layer?.cells.find((cell) => cell.x === x && cell.y === y) ?? null;
+}
+
+export function upsertMapVerticalCell(
+  layer: MapVerticalLayer,
+  x: number,
+  y: number,
+  updater: (cell: MapVerticalCell) => MapVerticalCell | null
+): MapVerticalLayer {
+  const existing = getMapVerticalCell(layer, x, y);
+  const nextCell = updater(existing ? { ...existing, edges: { ...existing.edges }, metadata: { ...existing.metadata } } : createDefaultVerticalCell(x, y));
+  const cells = layer.cells.filter((cell) => cell.x !== x || cell.y !== y);
+
+  if (!nextCell) {
+    return {
+      ...layer,
+      cells
+    };
+  }
+
+  return {
+    ...layer,
+    cells: [...cells, nextCell].sort((left, right) => left.y - right.y || left.x - right.x)
+  };
+}
+
+export function resizeVerticalLayerSystem(
+  vertical: MapVerticalLayerSystem,
+  width: number,
+  height: number
+): MapVerticalLayerSystem {
+  return {
+    ...vertical,
+    layers: vertical.layers.map((layer) => ({
+      ...layer,
+      cells: layer.cells.filter((cell) => cell.x >= 0 && cell.y >= 0 && cell.x < width && cell.y < height)
+    })),
+    connectors: vertical.connectors.filter(
+      (connector) =>
+        connector.from.x >= 0 &&
+        connector.from.y >= 0 &&
+        connector.from.x < width &&
+        connector.from.y < height &&
+        connector.to.x >= 0 &&
+        connector.to.y >= 0 &&
+        connector.to.x < width &&
+        connector.to.y < height
+    )
+  };
 }

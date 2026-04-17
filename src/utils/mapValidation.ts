@@ -111,5 +111,144 @@ export function validateMapDocument(document: MapDocument) {
     }
   });
 
+  if (document.vertical) {
+    if (document.vertical.elevationStep <= 0 || !Number.isFinite(document.vertical.elevationStep)) {
+      issues.push({
+        severity: "error",
+        field: "vertical.elevationStep",
+        message: "Vertical layer elevation step must be greater than 0."
+      });
+    }
+
+    if (document.vertical.layers.length === 0) {
+      issues.push({
+        severity: "error",
+        field: "vertical.layers",
+        message: "Vertical layer mode needs at least one layer."
+      });
+    }
+
+    const layerIds = new Set<string>();
+    document.vertical.layers.forEach((layer) => {
+      if (!layer.id.trim()) {
+        issues.push({
+          severity: "error",
+          field: "vertical.layers",
+          message: "Every vertical layer needs an id."
+        });
+      }
+
+      if (layerIds.has(layer.id)) {
+        issues.push({
+          severity: "error",
+          field: "vertical.layers",
+          message: `Vertical layer id '${layer.id}' is duplicated.`
+        });
+      }
+      layerIds.add(layer.id);
+
+      if (!Number.isFinite(layer.elevation)) {
+        issues.push({
+          severity: "error",
+          field: "vertical.layers",
+          message: `Vertical layer '${layer.id}' has an invalid elevation.`
+        });
+      }
+
+      const cellKeys = new Set<string>();
+      layer.cells.forEach((cell) => {
+        const key = `${cell.x},${cell.y}`;
+        if (cellKeys.has(key)) {
+          issues.push({
+            severity: "error",
+            field: "vertical.layers.cells",
+            message: `Vertical layer '${layer.id}' has duplicate cell data at ${key}.`
+          });
+        }
+        cellKeys.add(key);
+
+        if (!isWithinBounds(cell.x, cell.y, document.width, document.height)) {
+          issues.push({
+            severity: "error",
+            field: "vertical.layers.cells",
+            message: `Vertical layer '${layer.id}' has a cell outside the map bounds at ${key}.`
+          });
+        }
+
+        if (!Number.isFinite(cell.heightOffset)) {
+          issues.push({
+            severity: "error",
+            field: "vertical.layers.cells",
+            message: `Vertical layer '${layer.id}' has an invalid height offset at ${key}.`
+          });
+        }
+      });
+    });
+
+    if (!layerIds.has(document.vertical.defaultLayerId)) {
+      issues.push({
+        severity: "error",
+        field: "vertical.defaultLayerId",
+        message: `Default vertical layer '${document.vertical.defaultLayerId}' does not exist.`
+      });
+    }
+
+    const connectorIds = new Set<string>();
+    document.vertical.connectors.forEach((connector) => {
+      if (connectorIds.has(connector.id)) {
+        issues.push({
+          severity: "error",
+          field: "vertical.connectors",
+          message: `Vertical connector id '${connector.id}' is duplicated.`
+        });
+      }
+      connectorIds.add(connector.id);
+
+      if (!layerIds.has(connector.from.layerId)) {
+        issues.push({
+          severity: "error",
+          field: "vertical.connectors",
+          message: `Vertical connector '${connector.id}' references missing source layer '${connector.from.layerId}'.`
+        });
+      }
+
+      if (!layerIds.has(connector.to.layerId)) {
+        issues.push({
+          severity: "error",
+          field: "vertical.connectors",
+          message: `Vertical connector '${connector.id}' references missing target layer '${connector.to.layerId}'.`
+        });
+      }
+
+      if (!isWithinBounds(connector.from.x, connector.from.y, document.width, document.height)) {
+        issues.push({
+          severity: "error",
+          field: "vertical.connectors",
+          message: `Vertical connector '${connector.id}' starts outside the map bounds.`
+        });
+      }
+
+      if (!isWithinBounds(connector.to.x, connector.to.y, document.width, document.height)) {
+        issues.push({
+          severity: "error",
+          field: "vertical.connectors",
+          message: `Vertical connector '${connector.id}' ends outside the map bounds.`
+        });
+      }
+
+      if (
+        connector.from.layerId === connector.to.layerId &&
+        connector.from.x === connector.to.x &&
+        connector.from.y === connector.to.y
+      ) {
+        issues.push({
+          severity: "warning",
+          field: "vertical.connectors",
+          message: `Vertical connector '${connector.id}' links a tile to itself.`
+        });
+      }
+    });
+  }
+
   return issues;
 }
