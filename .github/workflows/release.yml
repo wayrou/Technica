@@ -3,6 +3,8 @@ name: release
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
     tags:
       - "v*.*.*"
 
@@ -40,13 +42,58 @@ jobs:
       - name: install frontend dependencies
         run: npm ci
 
+      - name: prepare release version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -like "refs/tags/*") {
+            $version = $env:GITHUB_REF_NAME -replace "^v", ""
+          } else {
+            $version = "1.2.$env:GITHUB_RUN_NUMBER"
+          }
+
+          npm version $version --no-git-tag-version
+
+          $tauriConfigPath = "src-tauri/tauri.conf.json"
+          $tauriConfig = Get-Content -Raw -LiteralPath $tauriConfigPath | ConvertFrom-Json
+          $tauriConfig.version = $version
+          $tauriConfig | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $tauriConfigPath
+
+          $cargoTomlPath = "src-tauri/Cargo.toml"
+          $cargoLines = [System.Collections.Generic.List[string]](Get-Content -LiteralPath $cargoTomlPath)
+          for ($i = 0; $i -lt $cargoLines.Count; $i++) {
+            if ($cargoLines[$i] -match '^version = "') {
+              $cargoLines[$i] = "version = `"$version`""
+              break
+            }
+          }
+          Set-Content -LiteralPath $cargoTomlPath -Value $cargoLines
+
+          "TECHNICA_RELEASE_VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: verify updater signing key
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) {
+            throw "Missing TAURI_SIGNING_PRIVATE_KEY repository secret. Store the updater private key file contents as a GitHub Actions secret."
+          }
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD)) {
+            throw "Missing TAURI_SIGNING_PRIVATE_KEY_PASSWORD repository secret. Store the password for the updater signing key as a GitHub Actions secret."
+          }
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: v__VERSION__
-          releaseName: "Technica v__VERSION__"
+          tagName: v${{ env.TECHNICA_RELEASE_VERSION }}
+          releaseName: "Technica v${{ env.TECHNICA_RELEASE_VERSION }}"
           releaseBody: "Official Technica release."
           releaseDraft: false
           prerelease: false
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true
           args: ${{ matrix.args }}

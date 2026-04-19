@@ -3,5 +3,10 @@
   "identifier": "default",
   "description": "Main app permissions",
   "windows": ["main", "technica-*"],
-  "permissions": ["core:default", "core:webview:allow-create-webview-window"]
+  "permissions": [
+    "core:default",
+    "core:webview:allow-create-webview-window",
+    "process:default",
+    "updater:default"
+  ]
 }

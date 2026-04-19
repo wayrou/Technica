@@ -1,7 +1,7 @@
 {
   "name": "technica",
   "private": true,
-  "version": "1.2.1",
+  "version": "1.2.2",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 1430 --strictPort",
@@ -17,6 +17,8 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.10.1",
     "jszip": "^3.10.1",
     "qrcode": "^1.5.4",
     "react": "^18.3.1",

@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import technicaLogo from "./assets/technica-logo.png";
 import { EditorErrorBoundary } from "./components/EditorErrorBoundary";
 import { Panel } from "./components/Panel";
+import { TechnicaUpdateButton } from "./components/TechnicaUpdateButton";
 import { useMobileSession } from "./hooks/useMobileSession";
 import { usePersistentState } from "./hooks/usePersistentState";
 import { useTechnicaRuntime } from "./hooks/useTechnicaRuntime";
@@ -584,6 +585,7 @@ export default function App() {
         </div>
         {runtime.isDesktop && !requestedPopoutTab ? (
           <div className="app-header-actions" ref={mobileSessionPopoverRef}>
+            <TechnicaUpdateButton />
             <button
               type="button"
               className={isMobileSessionOpen ? "header-utility-button active" : "header-utility-button"}

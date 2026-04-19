@@ -849,6 +849,13 @@ fn reject_mobile_inbox_entry(
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_process::init())
+        .setup(|app| {
+            #[cfg(desktop)]
+            app.handle()
+                .plugin(tauri_plugin_updater::Builder::new().build())?;
+            Ok(())
+        })
         .manage(MobileSessionStore::default())
         .invoke_handler(tauri::generate_handler![
             discover_chaos_core_repo,
