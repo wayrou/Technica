@@ -94,6 +94,6 @@ jobs:
           releaseBody: "Official Technica release."
           releaseDraft: false
           prerelease: false
-          uploadUpdaterJson: true
+          includeUpdaterJson: true
           updaterJsonPreferNsis: true
           args: ${{ matrix.args }}
