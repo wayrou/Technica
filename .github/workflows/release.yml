@@ -51,7 +51,7 @@ jobs:
             $version = "1.2.$env:GITHUB_RUN_NUMBER"
           }
 
-          npm version $version --no-git-tag-version
+          npm version $version --no-git-tag-version --allow-same-version
 
           $tauriConfigPath = "src-tauri/tauri.conf.json"
           $tauriConfig = Get-Content -Raw -LiteralPath $tauriConfigPath | ConvertFrom-Json
