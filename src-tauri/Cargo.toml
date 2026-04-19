@@ -1,6 +1,6 @@
 [package]
 name = "technica"
-version = "1.2.3"
+version = "1.2.4"
 description = "Technica content authoring app"
 authors = ["OpenAI Codex"]
 edition = "2021"
