@@ -82,6 +82,25 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD)) {
             throw "Missing TAURI_SIGNING_PRIVATE_KEY_PASSWORD repository secret. Store the password for the updater signing key as a GitHub Actions secret."
           }
+          if (-not $env:TAURI_SIGNING_PRIVATE_KEY.Trim().StartsWith("dW50cnVzdGVk")) {
+            throw "TAURI_SIGNING_PRIVATE_KEY should be the private key file contents, not the file path. Copy the contents of %USERPROFILE%\\.tauri\\technica-updater-v2.key into the repository secret."
+          }
+
+      - name: verify desktop updater build
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          $output = npm run tauri build -- --bundles nsis 2>&1
+          $exitCode = $LASTEXITCODE
+          $output | Select-Object -Last 160 | ForEach-Object { Write-Host $_ }
+
+          if ($exitCode -ne 0) {
+            $tail = (($output | Select-Object -Last 40) -join "%0A")
+            Write-Host "::error title=Tauri desktop build failed::$tail"
+            exit $exitCode
+          }
 
       - uses: tauri-apps/tauri-action@v0
         env:
