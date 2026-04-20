@@ -1,4 +1,5 @@
 import { Panel } from "../../components/Panel";
+import { MerchantListingFields } from "../../components/MerchantListingFields";
 import { createBlankCraftingRecipe, createSampleCraftingRecipe } from "../../data/sampleCrafting";
 import { StructuredDocumentStudio } from "../content/StructuredDocumentStudio";
 import {
@@ -7,6 +8,7 @@ import {
   type CraftingDocument,
   type RecipeAcquisitionMethod
 } from "../../types/crafting";
+import { normalizeMerchantListingDocument } from "../../types/merchant";
 import { resourceKeys, resourceLabels } from "../../types/resources";
 import { isoNow } from "../../utils/date";
 import { buildCraftingBundleForTarget } from "../../utils/exporters";
@@ -20,6 +22,7 @@ function normalizeCraftingRecipe(document: Partial<CraftingDocument> | null | un
   return {
     ...fallback,
     ...candidate,
+    merchant: normalizeMerchantListingDocument(candidate.merchant, fallback.merchant),
     requiredQuestIds: Array.from(new Set((candidate.requiredQuestIds ?? []).map(String).map((entry) => entry.trim()).filter(Boolean)))
   };
 }
@@ -311,6 +314,10 @@ export function CraftingEditor() {
                 />
               </label>
             </div>
+            <MerchantListingFields
+              value={normalizedDocument.merchant}
+              onChange={(merchant) => patchDocument((current) => ({ ...normalizeCraftingRecipe(current), merchant }))}
+            />
           </div>
 
           <div className="toolbar split">

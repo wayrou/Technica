@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![recursion_limit = "256"]
 
 mod database_daemon;
 mod mobile_server;
@@ -845,6 +846,248 @@ fn reject_mobile_inbox_entry(
     entry_id: String,
 ) -> Result<MobileInboxEntry, String> {
     mobile_session::reject_inbox_entry(&session_store, &entry_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TempRepo {
+        path: PathBuf,
+    }
+
+    impl TempRepo {
+        fn new() -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("test clock should resolve")
+                .as_nanos();
+            let path = env::temp_dir().join(format!(
+                "technica-publish-smoke-{}-{}",
+                std::process::id(),
+                unique
+            ));
+            fs::create_dir_all(&path).expect("temp repo root should be created");
+            Self { path }
+        }
+    }
+
+    impl Drop for TempRepo {
+        fn drop(&mut self) {
+            let Ok(repo_path) = self.path.canonicalize() else {
+                return;
+            };
+            let Ok(temp_root) = env::temp_dir().canonicalize() else {
+                return;
+            };
+            let Some(folder_name) = repo_path.file_name().and_then(|value| value.to_str()) else {
+                return;
+            };
+
+            if repo_path.starts_with(temp_root) && folder_name.starts_with("technica-publish-smoke-") {
+                let _ = fs::remove_dir_all(repo_path);
+            }
+        }
+    }
+
+    fn bundle_file(name: &str, content: String) -> PublishBundleFile {
+        PublishBundleFile {
+            name: name.to_string(),
+            content,
+            encoding: None,
+        }
+    }
+
+    #[test]
+    fn publish_chaos_core_bundle_writes_routeable_simple_3d_map() {
+        let temp_repo = TempRepo::new();
+        let content_id = "technica_publish_smoke_simple_3d";
+        let entry_file = format!("{}.fieldmap.json", content_id);
+        let source_file = format!("{}.source.json", content_id);
+        let runtime_map = serde_json::json!({
+            "id": content_id,
+            "name": "Technica Publish Smoke Simple 3D",
+            "width": 3,
+            "height": 3,
+            "tiles": [
+                [
+                    { "x": 0, "y": 0, "walkable": false, "type": "wall" },
+                    { "x": 1, "y": 0, "walkable": false, "type": "wall" },
+                    { "x": 2, "y": 0, "walkable": false, "type": "wall" }
+                ],
+                [
+                    { "x": 0, "y": 1, "walkable": false, "type": "wall" },
+                    { "x": 1, "y": 1, "walkable": true, "type": "floor" },
+                    { "x": 2, "y": 1, "walkable": false, "type": "wall" }
+                ],
+                [
+                    { "x": 0, "y": 2, "walkable": false, "type": "wall" },
+                    { "x": 1, "y": 2, "walkable": false, "type": "wall" },
+                    { "x": 2, "y": 2, "walkable": false, "type": "wall" }
+                ]
+            ],
+            "objects": [],
+            "interactionZones": [],
+            "renderMode": "simple_3d",
+            "mapTags": ["technica_smoke", "simple_3d"],
+            "regionTags": ["smoke_region"],
+            "entryRules": [
+                {
+                    "id": "smoke_theater_entry",
+                    "source": "atlas_theater",
+                    "floorOrdinal": 42,
+                    "theaterScreenId": "technica_smoke_theater_room",
+                    "label": "Technica Smoke Theater Entry",
+                    "entryPointId": "player_start"
+                }
+            ],
+            "spawnAnchors": [
+                {
+                    "id": "player_start",
+                    "kind": "player",
+                    "x": 1,
+                    "y": 1,
+                    "label": "Player Start",
+                    "tags": ["default"]
+                }
+            ],
+            "settings3d": {
+                "renderMode": "simple_3d",
+                "wallHeight": 1.25,
+                "floorThickness": 0.2,
+                "previewCamera": "isometric",
+                "defaultSurface": "field",
+                "metadata": {}
+            },
+            "adapter3d": {
+                "schemaVersion": "technica-map-3d-adapter.v1",
+                "mapId": content_id,
+                "name": "Technica Publish Smoke Simple 3D",
+                "renderMode": "simple_3d",
+                "width": 3,
+                "height": 3,
+                "tileSize": 48,
+                "defaultSurface": "field",
+                "previewCamera": "isometric",
+                "tiles": [
+                    { "x": 0, "y": 0, "elevation": 0, "surface": "stone", "walkable": false, "wall": true, "floor": true, "wallHeight": 1.25, "floorThickness": 0.2, "layerId": "ground", "metadata": {} },
+                    { "x": 1, "y": 0, "elevation": 0, "surface": "stone", "walkable": false, "wall": true, "floor": true, "wallHeight": 1.25, "floorThickness": 0.2, "layerId": "ground", "metadata": {} },
+                    { "x": 2, "y": 0, "elevation": 0, "surface": "stone", "walkable": false, "wall": true, "floor": true, "wallHeight": 1.25, "floorThickness": 0.2, "layerId": "ground", "metadata": {} },
+                    { "x": 0, "y": 1, "elevation": 0, "surface": "stone", "walkable": false, "wall": true, "floor": true, "wallHeight": 1.25, "floorThickness": 0.2, "layerId": "ground", "metadata": {} },
+                    { "x": 1, "y": 1, "elevation": 0, "surface": "field", "walkable": true, "wall": false, "floor": true, "wallHeight": 0, "floorThickness": 0.2, "layerId": "ground", "metadata": {} },
+                    { "x": 2, "y": 1, "elevation": 0, "surface": "stone", "walkable": false, "wall": true, "floor": true, "wallHeight": 1.25, "floorThickness": 0.2, "layerId": "ground", "metadata": {} },
+                    { "x": 0, "y": 2, "elevation": 0, "surface": "stone", "walkable": false, "wall": true, "floor": true, "wallHeight": 1.25, "floorThickness": 0.2, "layerId": "ground", "metadata": {} },
+                    { "x": 1, "y": 2, "elevation": 0, "surface": "stone", "walkable": false, "wall": true, "floor": true, "wallHeight": 1.25, "floorThickness": 0.2, "layerId": "ground", "metadata": {} },
+                    { "x": 2, "y": 2, "elevation": 0, "surface": "stone", "walkable": false, "wall": true, "floor": true, "wallHeight": 1.25, "floorThickness": 0.2, "layerId": "ground", "metadata": {} }
+                ],
+                "traversalLinks": [],
+                "spawnAnchors": [
+                    { "id": "player_start", "kind": "player", "x": 1, "y": 1, "label": "Player Start", "tags": ["default"] }
+                ],
+                "entryRules": [
+                    { "id": "smoke_theater_entry", "source": "atlas_theater", "floorOrdinal": 42, "theaterScreenId": "technica_smoke_theater_room", "label": "Technica Smoke Theater Entry", "entryPointId": "player_start" }
+                ],
+                "metadata": {}
+            },
+            "metadata": {
+                "smokeTest": "technica-map-publish-handshake"
+            }
+        });
+        let manifest = serde_json::json!({
+            "schemaVersion": "1.0.0",
+            "sourceApp": "Technica",
+            "sourceAppVersion": "smoke-test",
+            "exportType": "map",
+            "contentType": "map",
+            "targetGame": "chaos-core",
+            "targetSchemaVersion": "field-map.v1",
+            "exportedAt": "2026-04-19T00:00:00.000Z",
+            "contentId": content_id,
+            "title": "Technica Publish Smoke Simple 3D",
+            "description": "Runtime smoke fixture for Technica simple-3D map publishing.",
+            "entryFile": entry_file,
+            "dependencies": [],
+            "files": ["manifest.json", entry_file, source_file, "README.md"]
+        });
+        let source_document = serde_json::json!({
+            "schemaVersion": "1.0.0",
+            "sourceApp": "Technica",
+            "id": content_id,
+            "name": "Technica Publish Smoke Simple 3D",
+            "renderMode": "simple_3d"
+        });
+
+        let result = publish_chaos_core_bundle(PublishBundleRequest {
+            repo_path: temp_repo.path.to_string_lossy().to_string(),
+            content_type: "map".to_string(),
+            target_entry_key: None,
+            target_source_file: None,
+            manifest,
+            files: vec![
+                bundle_file("manifest.json", "{}".to_string()),
+                bundle_file(&entry_file, serde_json::to_string_pretty(&runtime_map).unwrap()),
+                bundle_file(&source_file, serde_json::to_string_pretty(&source_document).unwrap()),
+                bundle_file("README.md", "# Technica Publish Smoke Simple 3D\n".to_string()),
+            ],
+        })
+        .expect("simple-3D map bundle should publish");
+
+        assert_eq!(result.entry_key, format!("technica:{}", content_id));
+        assert_eq!(result.content_id, content_id);
+        assert_eq!(result.runtime_file, entry_file);
+
+        let runtime_path = temp_repo
+            .path
+            .join("src")
+            .join("content")
+            .join("technica")
+            .join("generated")
+            .join("map")
+            .join(&entry_file);
+        let runtime_text = fs::read_to_string(&runtime_path).expect("runtime map should be written");
+        let runtime_json: Value = serde_json::from_str(&runtime_text).expect("runtime map should be valid JSON");
+
+        assert_eq!(runtime_json["id"], content_id);
+        assert_eq!(runtime_json["renderMode"], "simple_3d");
+        assert_eq!(runtime_json["entryRules"][0]["source"], "atlas_theater");
+        assert_eq!(runtime_json["entryRules"][0]["theaterScreenId"], "technica_smoke_theater_room");
+        assert_eq!(runtime_json["spawnAnchors"][0]["id"], "player_start");
+        assert_eq!(
+            runtime_json["adapter3d"]["tiles"].as_array().map(Vec::len),
+            Some(9)
+        );
+
+        let manifest_path = temp_repo
+            .path
+            .join("src")
+            .join("content")
+            .join("technica")
+            .join("manifests")
+            .join("map")
+            .join(format!("{}.manifest.json", content_id));
+        assert!(manifest_path.exists(), "manifest should be written");
+
+        let source_path = temp_repo
+            .path
+            .join("src")
+            .join("content")
+            .join("technica")
+            .join("source")
+            .join("map")
+            .join(&source_file);
+        assert!(source_path.exists(), "Technica source document should be written");
+
+        let registry_path = generated_registry_path(&temp_repo.path);
+        let registry_text = fs::read_to_string(registry_path).expect("registry should be written");
+        let registry_json: Value = serde_json::from_str(&registry_text).expect("registry should be valid JSON");
+        assert_eq!(registry_json["entriesByType"]["map"][0], content_id);
+
+        let version_text = fs::read_to_string(generated_version_path(&temp_repo.path))
+            .expect("version marker should be written");
+        let version_json: Value = serde_json::from_str(&version_text).expect("version should be valid JSON");
+        assert_eq!(version_json["contentType"], "map");
+        assert_eq!(version_json["contentId"], content_id);
+    }
 }
 
 fn main() {

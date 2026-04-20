@@ -72,6 +72,14 @@ function toPartialResourceWallet(wallet: Record<string, number>) {
   return toPartialResourceWalletDocument(wallet);
 }
 
+function toRuntimeMerchantListing(merchant: { soldAtMerchant?: boolean; merchantFloor?: number } | undefined) {
+  return merchant?.soldAtMerchant
+    ? {
+        floorOrdinal: merchant.merchantFloor,
+      }
+    : undefined;
+}
+
 function coercePrimitive(value: string) {
   const trimmed = value.trim();
   if (trimmed === "true") {
@@ -223,6 +231,7 @@ export function buildChaosCoreGearBundle(
             notes: normalizedDocument.acquisition.shop.notes
           }
         : undefined,
+      merchant: toRuntimeMerchantListing(normalizedDocument.merchant),
       enemyDrop: normalizedDocument.acquisition.enemyDrop.enabled
         ? {
             enemyUnitIds: normalizedDocument.acquisition.enemyDrop.enemyUnitIds.map((enemyUnitId) => runtimeId(enemyUnitId)),
@@ -309,6 +318,7 @@ export function buildChaosCoreItemBundle(
                 notes: document.acquisition.havenShop.notes
               }
             : undefined,
+          merchant: toRuntimeMerchantListing(document.merchant),
           fieldMapResource: document.acquisition.fieldMapResource.enabled
             ? {
                 mapId: runtimeId(document.acquisition.fieldMapResource.mapId),
@@ -508,6 +518,7 @@ export function buildChaosCoreChassisBundle(
     havenShopUnlockAfterFloor: document.availableInHavenShop
       ? document.havenShopUnlockAfterFloor
       : undefined,
+    merchant: toRuntimeMerchantListing(document.merchant),
     requiredQuestIds: document.requiredQuestIds.map((questId) => runtimeId(questId))
   });
 
@@ -578,6 +589,7 @@ export function buildChaosCoreDoctrineBundle(
     doctrineRules: document.doctrineRules,
     description: document.description,
     unlockAfterFloor: document.unlockAfterFloor,
+    merchant: toRuntimeMerchantListing(document.merchant),
     requiredQuestIds: document.requiredQuestIds.map((questId) => runtimeId(questId))
   });
 
@@ -686,6 +698,7 @@ export function buildChaosCoreCraftingBundle(document: CraftingDocument): Export
       purchaseVendor: document.purchaseVendor || undefined,
       purchaseCostWad: document.acquisitionMethod === "purchased" ? document.purchaseCostWad : undefined,
       unlockFloor: document.acquisitionMethod === "unlock_floor" ? document.unlockFloor : undefined,
+      merchant: toRuntimeMerchantListing(document.merchant),
       requiredQuestIds: document.requiredQuestIds.map((questId) => runtimeId(questId)),
       notes: document.notes || undefined
     },
@@ -736,6 +749,7 @@ export function buildChaosCoreDishBundle(document: DishDocument): ExportBundle {
     name: document.name,
     cost: document.cost,
     unlockAfterOperationFloor: document.unlockAfterOperationFloor,
+    merchant: toRuntimeMerchantListing(document.merchant),
     requiredQuestIds: document.requiredQuestIds.map((questId) => runtimeId(questId)),
     effect: document.effect,
     description: document.description
@@ -795,6 +809,7 @@ export function buildChaosCoreFieldModBundle(document: FieldModDocument): Export
     cost: document.cost,
     rarity: document.rarity,
     unlockAfterOperationFloor: document.unlockAfterOperationFloor,
+    merchant: toRuntimeMerchantListing(document.merchant),
     requiredQuestIds: document.requiredQuestIds.map((questId) => runtimeId(questId))
   });
 
@@ -1154,6 +1169,19 @@ export function buildChaosCoreFieldEnemyBundle(document: FieldEnemyDocument): Ex
     kind: document.kind,
     spriteKey: document.spriteKey || undefined,
     spritePath: spriteAsset?.runtimePath ?? preservedSpritePath,
+    presentation: document.presentation
+      ? pruneEmpty({
+          mode: document.presentation.mode,
+          modelKey: document.presentation.modelKey || undefined,
+          modelAssetPath: document.presentation.modelAssetPath || undefined,
+          materialKey: document.presentation.materialKey || undefined,
+          scale: document.presentation.scale,
+          heightOffset: document.presentation.heightOffset,
+          facingMode: document.presentation.facingMode,
+          previewPose: document.presentation.previewPose || undefined,
+          metadata: coerceRecord(document.presentation.metadata)
+        })
+      : undefined,
     stats: {
       maxHp: document.stats.maxHp,
       speed: document.stats.speed,
@@ -1164,7 +1192,14 @@ export function buildChaosCoreFieldEnemyBundle(document: FieldEnemyDocument): Ex
     spawn: {
       mapIds: document.spawn.mapIds.map((mapId) => runtimeId(mapId)),
       floorOrdinals: document.spawn.floorOrdinals,
-      count: document.spawn.spawnCount
+      count: document.spawn.spawnCount,
+      spawnCount: document.spawn.spawnCount,
+      regionIds: document.spawn.regionIds?.map((regionId) => runtimeId(regionId)),
+      mapTags: document.spawn.mapTags,
+      spawnAnchorTags: document.spawn.spawnAnchorTags,
+      allowGeneratedAprons: document.spawn.allowGeneratedAprons,
+      avoidSafeZones: document.spawn.avoidSafeZones,
+      minDistanceFromPlayerSpawn: document.spawn.minDistanceFromPlayerSpawn
     },
     drops: {
       wad: document.drops.wad,
@@ -1427,6 +1462,14 @@ function buildOperationDependencies(document: OperationDocument): ExportDependen
           relation: `shop-inventory:${runtimeId(room.id)}`
         });
       });
+
+      if (room.fieldMapId) {
+        dependencies.push({
+          contentType: "map",
+          id: runtimeId(room.fieldMapId),
+          relation: `field-map-route:${runtimeId(room.id)}`
+        });
+      }
     });
   });
 
@@ -1440,7 +1483,9 @@ export function buildChaosCoreOperationBundle(
   const normalizedDocument = normalizeOperationDocument(document);
 
   buildOperationDependencies(normalizedDocument).forEach((dependency) => {
-    assertKnownReference(dependency.id, references.gearIds, "Operation export", "gear id");
+    if (dependency.contentType === "gear") {
+      assertKnownReference(dependency.id, references.gearIds, "Operation export", "gear id");
+    }
   });
 
   const contentId = runtimeId(normalizedDocument.id || normalizedDocument.codename, "operation");
@@ -1486,13 +1531,28 @@ export function buildChaosCoreOperationBundle(
           battleTemplate: room.battleTemplate,
           eventTemplate: room.eventTemplate,
           tacticalEncounter: room.tacticalEncounter,
+          fieldMapId: room.fieldMapId ? runtimeId(room.fieldMapId) : undefined,
+          fieldMapEntryPointId: room.fieldMapEntryPointId ? runtimeId(room.fieldMapEntryPointId, "spawn") : undefined,
+          fieldMapRouteSource: room.fieldMapId ? room.fieldMapRouteSource : undefined,
+          fieldMapDoorId: room.fieldMapDoorId ? runtimeId(room.fieldMapDoorId) : undefined,
+          fieldMapPortalId: room.fieldMapPortalId ? runtimeId(room.fieldMapPortalId) : undefined,
+          fieldMapLabel: room.fieldMapLabel,
           shopInventory: room.shopInventory.map((gearId) => runtimeId(gearId)),
           coreSlotCapacity: room.coreSlotCapacity,
           fortificationCapacity: room.fortificationCapacity,
           requiredKeyType: room.requiredKeyType || undefined,
           grantsKeyType: room.grantsKeyType || undefined,
           isPowerSource: room.isPowerSource,
-          metadata: coerceRecord(room.metadata)
+          metadata: pruneEmpty({
+            ...coerceRecord(room.metadata),
+            fieldMapId: room.fieldMapId ? runtimeId(room.fieldMapId) : undefined,
+            fieldMapEntryPointId: room.fieldMapEntryPointId ? runtimeId(room.fieldMapEntryPointId, "spawn") : undefined,
+            fieldMapRouteSource: room.fieldMapId ? room.fieldMapRouteSource : undefined,
+            fieldMapDoorId: room.fieldMapDoorId ? runtimeId(room.fieldMapDoorId) : undefined,
+            fieldMapPortalId: room.fieldMapPortalId ? runtimeId(room.fieldMapPortalId) : undefined,
+            fieldMapLabel: room.fieldMapLabel,
+            technicaFieldRouteRoomId: room.fieldMapId ? runtimeId(room.id) : undefined
+          })
         })
       )
     })),
@@ -1518,7 +1578,7 @@ Content id: \`${contentId}\`
 Importer notes:
 - Imported operations still appear in Chaos Core's operation select screen as direct-run missions.
 - Theater briefing fields, floor sector metadata, and room-role authoring are exported alongside the compatible floor graph.
-- Room coordinates, connections, and optional shop inventory are exported explicitly.
+- Room coordinates, connections, optional shop inventory, and explicit Technica field-map entrances are exported explicitly.
 - \`${sourceFile}\` preserves the authoring document.
 `;
 

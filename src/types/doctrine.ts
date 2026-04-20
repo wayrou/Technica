@@ -1,4 +1,5 @@
 import type { ResourceWalletDocument } from "./resources";
+import type { MerchantListingDocument } from "./merchant";
 import { runtimeId } from "../utils/id";
 
 export const doctrineIntentTags = [
@@ -26,6 +27,7 @@ export interface DoctrineDocument {
   doctrineRules: string;
   description: string;
   unlockAfterFloor: number;
+  merchant: MerchantListingDocument;
   requiredQuestIds: string[];
   createdAt: string;
   updatedAt: string;

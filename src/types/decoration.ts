@@ -1,4 +1,5 @@
 import type { ImageAsset } from "./common";
+import type { MerchantListingDocument } from "./merchant";
 
 export interface DecorationDocument {
   schemaVersion: string;
@@ -7,6 +8,7 @@ export interface DecorationDocument {
   name: string;
   description: string;
   tileSize: number;
+  merchant: MerchantListingDocument;
   spriteAsset?: ImageAsset;
   requiredQuestIds: string[];
   createdAt: string;

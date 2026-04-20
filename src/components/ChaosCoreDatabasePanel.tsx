@@ -20,6 +20,31 @@ interface ChaosCoreDatabasePanelProps<TDocument> {
   subtitle: string;
   preferredPublishTargetEntryKey?: string;
   preferredPublishTargetSourceFile?: string;
+  describePublishReceipt?: (context: {
+    document: TDocument;
+    bundle: ExportBundle;
+    result: PublishResult;
+    loadedEntry: LoadedChaosCoreDatabaseEntry | null;
+  }) => string[];
+}
+
+type PublishResult = {
+  entryKey: string;
+  contentId: string;
+  runtimeFile: string;
+};
+
+interface PublishReceipt {
+  publishedAt: string;
+  contentId: string;
+  entryKey: string;
+  runtimeFile: string;
+  entryFile: string;
+  files: string[];
+  verified: boolean;
+  verificationError?: string;
+  loadedRuntimeFile?: string;
+  details: string[];
 }
 
 export function ChaosCoreDatabasePanel<TDocument>({
@@ -29,7 +54,8 @@ export function ChaosCoreDatabasePanel<TDocument>({
   onLoadEntry,
   subtitle,
   preferredPublishTargetEntryKey,
-  preferredPublishTargetSourceFile
+  preferredPublishTargetSourceFile,
+  describePublishReceipt
 }: ChaosCoreDatabasePanelProps<TDocument>) {
   const {
     databaseEnabled,
@@ -49,6 +75,7 @@ export function ChaosCoreDatabasePanel<TDocument>({
   const [isLoadingEntry, setIsLoadingEntry] = useState(false);
   const [isRemovingEntry, setIsRemovingEntry] = useState(false);
   const [armedRemoveEntryKey, setArmedRemoveEntryKey] = useState("");
+  const [publishReceipt, setPublishReceipt] = useState<PublishReceipt | null>(null);
   const effectiveRepoPath = repoPath.trim() || repoPathDraft.trim();
   const summaryState = summaryStates[contentType];
   const entries = summaryState.entries;
@@ -236,10 +263,33 @@ export function ChaosCoreDatabasePanel<TDocument>({
             : undefined
       );
       const nextEntries = await refreshEntries(true);
+      let loadedEntry: LoadedChaosCoreDatabaseEntry | null = null;
+      let verificationError: string | undefined;
+      try {
+        loadedEntry = await loadEntry(contentType, result.entryKey, { force: true });
+      } catch (error) {
+        verificationError = resolveChaosCoreErrorMessage(error, "Could not read the published entry back from the Chaos Core repo.");
+      }
+
+      const receiptDetails = describePublishReceipt
+        ? describePublishReceipt({ document: currentDocument, bundle, result, loadedEntry })
+        : [];
       emitChaosCoreDatabaseUpdate(contentType);
       setSelectedEntryKey(
         nextEntries.find((entry) => entry.entryKey === result.entryKey)?.entryKey ?? result.entryKey
       );
+      setPublishReceipt({
+        publishedAt: new Date().toLocaleString(),
+        contentId: result.contentId,
+        entryKey: result.entryKey,
+        runtimeFile: result.runtimeFile,
+        entryFile: bundle.manifest.entryFile,
+        files: bundle.files.map((file) => file.name),
+        verified: Boolean(loadedEntry),
+        verificationError,
+        loadedRuntimeFile: loadedEntry?.runtimeFile,
+        details: receiptDetails
+      });
       notify(
         result.entryKey.startsWith("game:")
           ? `Updated built-in '${result.contentId}' in the Chaos Core source tables.`
@@ -369,6 +419,41 @@ export function ChaosCoreDatabasePanel<TDocument>({
               </button>
             </div>
           </div>
+
+          {publishReceipt ? (
+            <div className={publishReceipt.verified ? "publish-receipt verified" : "publish-receipt warning"}>
+              <div className="publish-receipt-header">
+                <strong>{publishReceipt.verified ? "Publish verified" : "Publish wrote files, read-back needs attention"}</strong>
+                <span>{publishReceipt.publishedAt}</span>
+              </div>
+              <div className="chip-row">
+                <span className="pill accent">{publishReceipt.contentId}</span>
+                <span className="pill">{publishReceipt.entryKey}</span>
+                <span className="pill">{publishReceipt.runtimeFile}</span>
+                {publishReceipt.loadedRuntimeFile ? <span className="pill">Read back {publishReceipt.loadedRuntimeFile}</span> : null}
+              </div>
+              <div className="publish-receipt-grid">
+                <div>
+                  <span>Exported files</span>
+                  <code>{publishReceipt.files.join(", ")}</code>
+                </div>
+                <div>
+                  <span>Runtime entry</span>
+                  <code>{publishReceipt.entryFile}</code>
+                </div>
+              </div>
+              {publishReceipt.details.length > 0 ? (
+                <div className="publish-receipt-details">
+                  {publishReceipt.details.map((detail) => (
+                    <span key={detail}>{detail}</span>
+                  ))}
+                </div>
+              ) : null}
+              {publishReceipt.verificationError ? (
+                <small className="publish-receipt-error">{publishReceipt.verificationError}</small>
+              ) : null}
+            </div>
+          ) : null}
 
           {contentType === "card" ? (
             <ChaosCoreCardGallery

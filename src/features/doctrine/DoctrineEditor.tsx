@@ -1,9 +1,11 @@
 import { ChaosCoreDatabasePanel } from "../../components/ChaosCoreDatabasePanel";
+import { MerchantListingFields } from "../../components/MerchantListingFields";
 import { Panel } from "../../components/Panel";
 import { createBlankDoctrine, createSampleDoctrine } from "../../data/sampleDoctrine";
 import { StructuredDocumentStudio } from "../content/StructuredDocumentStudio";
 import type { DoctrineDocument } from "../../types/doctrine";
 import { createDoctrineId, doctrineIntentTags } from "../../types/doctrine";
+import { normalizeMerchantListingDocument } from "../../types/merchant";
 import { createResourceWalletDocument, resourceKeys, resourceLabels } from "../../types/resources";
 import { validateDoctrineDocument } from "../../utils/contentValidation";
 import { isoNow } from "../../utils/date";
@@ -81,6 +83,7 @@ function normalizeDoctrineDocument(value: unknown): DoctrineDocument {
     doctrineRules: readString(record.doctrineRules, fallback.doctrineRules),
     description: readString(record.description, fallback.description),
     unlockAfterFloor: readNumber(record.unlockAfterFloor, fallback.unlockAfterFloor),
+    merchant: normalizeMerchantListingDocument(record.merchant, fallback.merchant),
     requiredQuestIds: normalizeStringList(record.requiredQuestIds),
     createdAt: readString(record.createdAt, fallback.createdAt),
     updatedAt: readString(record.updatedAt, fallback.updatedAt)
@@ -344,6 +347,11 @@ export function DoctrineEditor() {
                   </label>
                 </div>
               </div>
+
+              <MerchantListingFields
+                value={doctrine.merchant}
+                onChange={(merchant) => patchDoctrine((current) => ({ ...current, merchant }))}
+              />
 
               <div className="toolbar split">
                 <div className="chip-row">

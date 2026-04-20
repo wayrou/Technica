@@ -1,6 +1,7 @@
 import { ChaosCoreDatabasePanel } from "../../components/ChaosCoreDatabasePanel";
 import { ImageAssetField } from "../../components/ImageAssetField";
 import { IssueList } from "../../components/IssueList";
+import { MerchantListingFields } from "../../components/MerchantListingFields";
 import { Panel } from "../../components/Panel";
 import { createBlankGear, createSampleGear } from "../../data/sampleGear";
 import { StructuredDocumentStudio } from "../content/StructuredDocumentStudio";
@@ -55,6 +56,9 @@ function countEnabledSources(document: GearDocument) {
     count += 1;
   }
   if (document.acquisition.shop.enabled) {
+    count += 1;
+  }
+  if (document.merchant.soldAtMerchant) {
     count += 1;
   }
   if (document.acquisition.enemyDrop.enabled) {
@@ -593,6 +597,11 @@ export function GearEditor() {
                     </label>
                   </div>
                 </div>
+
+                <MerchantListingFields
+                  value={gear.merchant}
+                  onChange={(merchant) => patchGearDocument((current) => ({ ...current, merchant }))}
+                />
 
                 <div className="nested-card">
                   <div className="form-grid">

@@ -1,4 +1,5 @@
 import type { DishDocument } from "../types/dish";
+import { createMerchantListingDocument } from "../types/merchant";
 import { isoNow } from "../utils/date";
 
 export function createBlankDish(): DishDocument {
@@ -11,6 +12,7 @@ export function createBlankDish(): DishDocument {
     name: "Untitled Dish",
     cost: 30,
     unlockAfterOperationFloor: 0,
+    merchant: createMerchantListingDocument(),
     requiredQuestIds: [],
     effect: "",
     description: "",
@@ -29,6 +31,7 @@ export function createSampleDish(): DishDocument {
     name: "Scorched Pepper Stew",
     cost: 35,
     unlockAfterOperationFloor: 3,
+    merchant: createMerchantListingDocument({ soldAtMerchant: true, merchantFloor: 3 }),
     requiredQuestIds: [],
     effect: "+1 ATK next run.",
     description: "A smoky pepper stew that leaves squads fired up for the next deployment.",

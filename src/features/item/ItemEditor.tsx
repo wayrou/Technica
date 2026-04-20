@@ -1,9 +1,11 @@
 import { ChaosCoreDatabasePanel } from "../../components/ChaosCoreDatabasePanel";
 import { ImageAssetField } from "../../components/ImageAssetField";
+import { MerchantListingFields } from "../../components/MerchantListingFields";
 import { Panel } from "../../components/Panel";
 import { createBlankItem, createSampleItem } from "../../data/sampleItem";
 import { StructuredDocumentStudio } from "../content/StructuredDocumentStudio";
 import { itemArchetypes, itemKinds, type ItemArchetype, type ItemDocument, type ItemKind } from "../../types/item";
+import { normalizeMerchantListingDocument } from "../../types/merchant";
 import { isoNow } from "../../utils/date";
 import { notify } from "../../utils/dialogs";
 import { buildItemBundleForTarget } from "../../utils/exporters";
@@ -96,6 +98,7 @@ function normalizeItemDocument(value: unknown): ItemDocument {
       },
       otherSourcesNotes: readString(acquisition?.otherSourcesNotes, fallback.acquisition.otherSourcesNotes)
     },
+    merchant: normalizeMerchantListingDocument(record.merchant, fallback.merchant),
     weaponChassis: {
       stability: readNumber(weaponChassis?.stability, fallback.weaponChassis.stability),
       cardSlots: readNumber(weaponChassis?.cardSlots, fallback.weaponChassis.cardSlots)
@@ -136,6 +139,9 @@ function countEnabledSources(document: ItemDocument) {
     count += 1;
   }
   if (document.acquisition.havenShop.enabled) {
+    count += 1;
+  }
+  if (document.merchant.soldAtMerchant) {
     count += 1;
   }
   if (document.acquisition.fieldMapResource.enabled) {
@@ -475,6 +481,12 @@ export function ItemEditor() {
                       </label>
                     </div>
                   </div>
+
+                  <MerchantListingFields
+                    value={item.merchant}
+                    disabled={isWeaponChassis}
+                    onChange={(merchant) => patchItem((current) => ({ ...current, merchant }))}
+                  />
 
                   <div className="nested-card">
                     <div className="form-grid">

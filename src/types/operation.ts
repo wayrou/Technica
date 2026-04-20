@@ -82,6 +82,15 @@ export type OperationTheaterClearMode = "battle" | "field" | "empty";
 
 export const operationTheaterClearModes: OperationTheaterClearMode[] = ["battle", "field", "empty"];
 
+export type OperationFieldMapRouteSource = "atlas_theater" | "floor_region" | "door" | "portal";
+
+export const operationFieldMapRouteSources: OperationFieldMapRouteSource[] = [
+  "atlas_theater",
+  "floor_region",
+  "door",
+  "portal"
+];
+
 export type OperationTheaterRoomClass = "standard" | "mega";
 
 export const operationTheaterRoomClasses: OperationTheaterRoomClass[] = ["standard", "mega"];
@@ -107,6 +116,12 @@ export interface OperationRoomDocument {
   battleTemplate?: string;
   eventTemplate?: string;
   tacticalEncounter?: string;
+  fieldMapId?: string;
+  fieldMapEntryPointId?: string;
+  fieldMapRouteSource: OperationFieldMapRouteSource;
+  fieldMapDoorId?: string;
+  fieldMapPortalId?: string;
+  fieldMapLabel?: string;
   shopInventory: string[];
   coreSlotCapacity: number;
   fortificationCapacity: number;
@@ -153,6 +168,7 @@ const KNOWN_LAYOUT_STYLES = new Set<OperationTheaterLayoutStyle>(operationTheate
 const KNOWN_SPRAWL_DIRECTIONS = new Set<OperationSprawlDirection>(operationSprawlDirections);
 const KNOWN_ROOM_ROLES = new Set<OperationTheaterRoomRole>(operationTheaterRoomRoles);
 const KNOWN_CLEAR_MODES = new Set<OperationTheaterClearMode>(operationTheaterClearModes);
+const KNOWN_FIELD_MAP_ROUTE_SOURCES = new Set<OperationFieldMapRouteSource>(operationFieldMapRouteSources);
 const KNOWN_ROOM_CLASSES = new Set<OperationTheaterRoomClass>(operationTheaterRoomClasses);
 const KNOWN_KEY_TYPES = new Set<OperationTheaterKeyType>(operationTheaterKeyTypes);
 
@@ -219,6 +235,15 @@ function normalizeRoomRole(value: unknown, fallback: OperationTheaterRoomRole): 
 function normalizeClearMode(value: unknown, fallback: OperationTheaterClearMode): OperationTheaterClearMode {
   return KNOWN_CLEAR_MODES.has(value as OperationTheaterClearMode)
     ? (value as OperationTheaterClearMode)
+    : fallback;
+}
+
+function normalizeFieldMapRouteSource(
+  value: unknown,
+  fallback: OperationFieldMapRouteSource
+): OperationFieldMapRouteSource {
+  return KNOWN_FIELD_MAP_ROUTE_SOURCES.has(value as OperationFieldMapRouteSource)
+    ? (value as OperationFieldMapRouteSource)
     : fallback;
 }
 
@@ -396,6 +421,7 @@ export function createOperationRoomDocument(seed: Partial<OperationRoomDocument>
   const fallbackTags = getDefaultOperationRoomTags(role);
   const resolvedTags = normalizedTags.length > 0 ? normalizedTags : fallbackTags;
   const fallbackId = seed.id?.trim() || `room_${index + 1}`;
+  const normalizedMetadata = normalizeKeyValueRecord(seed.metadata);
 
   return {
     id: fallbackId,
@@ -414,6 +440,21 @@ export function createOperationRoomDocument(seed: Partial<OperationRoomDocument>
     battleTemplate: normalizeText(seed.battleTemplate),
     eventTemplate: normalizeText(seed.eventTemplate),
     tacticalEncounter: normalizeText(seed.tacticalEncounter),
+    fieldMapId: normalizeText(seed.fieldMapId, normalizedMetadata.fieldMapId || normalizedMetadata.targetMap),
+    fieldMapEntryPointId: normalizeText(
+      seed.fieldMapEntryPointId,
+      normalizedMetadata.fieldMapEntryPointId || normalizedMetadata.entryPointId
+    ),
+    fieldMapRouteSource: normalizeFieldMapRouteSource(
+      seed.fieldMapRouteSource || normalizedMetadata.fieldMapRouteSource,
+      "atlas_theater"
+    ),
+    fieldMapDoorId: normalizeText(seed.fieldMapDoorId, normalizedMetadata.fieldMapDoorId || normalizedMetadata.doorId),
+    fieldMapPortalId: normalizeText(
+      seed.fieldMapPortalId,
+      normalizedMetadata.fieldMapPortalId || normalizedMetadata.portalId
+    ),
+    fieldMapLabel: normalizeText(seed.fieldMapLabel, normalizedMetadata.fieldMapLabel),
     shopInventory: normalizeStringList(seed.shopInventory),
     coreSlotCapacity: normalizePositiveInteger(
       seed.coreSlotCapacity,
@@ -429,7 +470,7 @@ export function createOperationRoomDocument(seed: Partial<OperationRoomDocument>
     grantsKeyType: normalizeKeyType(seed.grantsKeyType),
     isPowerSource:
       typeof seed.isPowerSource === "boolean" ? seed.isPowerSource : getDefaultOperationPowerSource(role),
-    metadata: normalizeKeyValueRecord(seed.metadata)
+    metadata: normalizedMetadata
   };
 }
 

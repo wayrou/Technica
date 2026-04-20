@@ -1,4 +1,5 @@
 import type { KeyValueRecord } from "./common";
+import type { MerchantListingDocument } from "./merchant";
 import type { ResourceWalletDocument } from "./resources";
 
 export type CraftingCategory = "armor" | "consumable" | "upgrade";
@@ -34,6 +35,7 @@ export interface CraftingDocument {
   purchaseVendor: string;
   purchaseCostWad: number;
   unlockFloor: number;
+  merchant: MerchantListingDocument;
   requiredQuestIds: string[];
   notes: string;
   metadata: KeyValueRecord;

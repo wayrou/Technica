@@ -1,4 +1,5 @@
 import type { CraftingDocument } from "../types/crafting";
+import { createMerchantListingDocument } from "../types/merchant";
 import { createResourceWalletDocument } from "../types/resources";
 import { isoNow } from "../utils/date";
 
@@ -24,6 +25,7 @@ export function createBlankCraftingRecipe(): CraftingDocument {
     purchaseVendor: "haven_shop",
     purchaseCostWad: 0,
     unlockFloor: 0,
+    merchant: createMerchantListingDocument(),
     requiredQuestIds: [],
     notes: "",
     metadata: {},
@@ -57,6 +59,7 @@ export function createSampleCraftingRecipe(): CraftingDocument {
     purchaseVendor: "haven_shop",
     purchaseCostWad: 0,
     unlockFloor: 3,
+    merchant: createMerchantListingDocument({ soldAtMerchant: true, merchantFloor: 3 }),
     requiredQuestIds: [],
     notes: "Quartermaster training packet becomes available after clearing floor 3.",
     metadata: {},

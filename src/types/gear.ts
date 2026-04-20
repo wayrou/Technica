@@ -1,4 +1,5 @@
 import type { ImageAsset, KeyValueRecord } from "./common";
+import type { MerchantListingDocument } from "./merchant";
 
 export type SupportedWeaponType =
   | "sword"
@@ -100,6 +101,7 @@ export interface GearDocument {
   wear: number;
   inventory: GearInventoryProfile;
   acquisition: GearAcquisitionDocument;
+  merchant: MerchantListingDocument;
   iconAsset?: ImageAsset;
   metadata: KeyValueRecord;
   createdAt: string;

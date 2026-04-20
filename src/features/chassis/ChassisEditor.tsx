@@ -1,9 +1,11 @@
 import { ChaosCoreDatabasePanel } from "../../components/ChaosCoreDatabasePanel";
+import { MerchantListingFields } from "../../components/MerchantListingFields";
 import { Panel } from "../../components/Panel";
 import { createBlankChassis, createSampleChassis } from "../../data/sampleChassis";
 import { StructuredDocumentStudio } from "../content/StructuredDocumentStudio";
 import type { ChassisDocument } from "../../types/chassis";
 import { chassisSlotTypes, createChassisId } from "../../types/chassis";
+import { normalizeMerchantListingDocument } from "../../types/merchant";
 import { resourceKeys, resourceLabels, createResourceWalletDocument } from "../../types/resources";
 import { validateChassisDocument } from "../../utils/contentValidation";
 import { isoNow } from "../../utils/date";
@@ -76,6 +78,7 @@ function normalizeChassisDocument(value: unknown): ChassisDocument {
         ? record.unlockAfterFloor
         : fallback.havenShopUnlockAfterFloor
     ),
+    merchant: normalizeMerchantListingDocument(record.merchant, fallback.merchant),
     requiredQuestIds: normalizeStringList(record.requiredQuestIds),
     allowedCardTags: normalizeStringList(record.allowedCardTags),
     allowedCardFamilies: normalizeStringList(record.allowedCardFamilies),
@@ -320,6 +323,11 @@ export function ChassisEditor() {
                   </label>
                 </div>
               </div>
+
+              <MerchantListingFields
+                value={chassis.merchant}
+                onChange={(merchant) => patchChassis((current) => ({ ...current, merchant }))}
+              />
 
               <div className="subsection">
                 <h4>Restrictions And Unlocks</h4>

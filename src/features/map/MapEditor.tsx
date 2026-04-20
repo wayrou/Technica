@@ -17,16 +17,24 @@ import { createSampleMap } from "../../data/sampleMap";
 import { useChaosCoreDatabase } from "../../hooks/useChaosCoreDatabase";
 import { useTechnicaRuntime } from "../../hooks/useTechnicaRuntime";
 import { usePersistentState } from "../../hooks/usePersistentState";
+import type { ValidationIssue } from "../../types/common";
 import type {
   MapBrushState,
+  Map3DSettings,
   MapDocument,
+  MapEntryRule,
+  MapEntrySource,
   MapObject,
+  MapRenderMode,
+  MapSpawnAnchor,
+  MapSpawnAnchorKind,
   MapVerticalConnector,
   MapVerticalConnectorKind,
   MapVerticalDirection,
   MapVerticalEdgeKind,
   MapVerticalLayer,
   MapVerticalLayerSystem,
+  TerrainType,
   MapZone
 } from "../../types/map";
 import type { NpcDocument } from "../../types/npc";
@@ -44,12 +52,14 @@ import { submitMobileInboxEntry } from "../../utils/mobileSession";
 import {
   emitChaosCoreDatabaseUpdate,
   publishChaosCoreBundle,
+  type ChaosCoreDatabaseEntry,
   type LoadedChaosCoreDatabaseEntry
 } from "../../utils/chaosCoreDatabase";
-import { createSequentialId } from "../../utils/id";
-import { parseKeyValueLines, serializeKeyValueLines } from "../../utils/records";
+import { createSequentialId, runtimeId } from "../../utils/id";
+import { parseKeyValueLines, parseMultilineList, serializeKeyValueLines, serializeMultilineList } from "../../utils/records";
 import { openTechnicaPopout } from "../../utils/popout";
 import { validateMapDocument } from "../../utils/mapValidation";
+import { buildMap3DAdapterPayload, type Map3DAdapterTile } from "../../utils/map3dAdapter";
 import {
   createBlankMapDocument,
   createDefaultVerticalLayerSystem,
@@ -78,6 +88,29 @@ type MapNpcMarker = {
 
 type MapLabelDensity = "smart" | "always" | "minimal";
 type FocusTraySection = "controls" | "inspector" | "data";
+type MapRouteBuilderDraft = {
+  source: MapEntrySource;
+  floorOrdinal: number;
+  regionId: string;
+  operationId: string;
+  theaterScreenId: string;
+  sourceMapId: string;
+  doorId: string;
+  portalId: string;
+  label: string;
+  entryPointId: string;
+};
+type MapZoneRouteSource = "door" | "portal";
+type MapZoneRouteProof = {
+  zoneId: string;
+  label: string;
+  source: MapZoneRouteSource | "";
+  routeId: string;
+  targetMapId: string;
+  entryPointId: string;
+  targetExists: boolean | null;
+  warnings: string[];
+};
 type ViewportMetrics = {
   width: number;
   height: number;
@@ -120,6 +153,95 @@ const MAP_TOOL_SHORTCUTS: Partial<Record<string, MapTool>> = {
   h: "pan"
 };
 
+const MAP_RENDER_MODE_PROFILES: Array<{
+  id: MapRenderMode;
+  label: string;
+  summary: string;
+  previewCamera: Map3DSettings["previewCamera"];
+  wallHeight: number;
+  floorThickness: number;
+  defaultSurface: string;
+  tags: string[];
+}> = [
+  {
+    id: "classic_2d",
+    label: "Classic 2D",
+    summary: "Fast top-down field map using Chaos Core's original 2D runtime renderer.",
+    previewCamera: "top_down",
+    wallHeight: 1,
+    floorThickness: 0.2,
+    defaultSurface: "field",
+    tags: ["classic_2d"]
+  },
+  {
+    id: "simple_3d",
+    label: "Simple 3D",
+    summary: "Author in the 2D grid, publish a 3D adapter, and let Chaos Core render raised walls and surfaces.",
+    previewCamera: "isometric",
+    wallHeight: 1.25,
+    floorThickness: 0.2,
+    defaultSurface: "field",
+    tags: ["simple_3d", "technica_3d"]
+  },
+  {
+    id: "bespoke_3d",
+    label: "Bespoke 3D",
+    summary: "Use vertical layers, anchors, and entry routing for a custom 3D field space reached from theater/portal routes.",
+    previewCamera: "third_person",
+    wallHeight: 1.5,
+    floorThickness: 0.25,
+    defaultSurface: "field",
+    tags: ["bespoke_3d", "technica_3d"]
+  }
+];
+
+const MAP_ENTRY_SOURCE_LABELS: Record<MapEntrySource, string> = {
+  atlas_theater: "Atlas theater",
+  floor_region: "Floor region",
+  door: "Door",
+  portal: "Portal"
+};
+
+const DEFAULT_ROUTE_BUILDER_DRAFT: MapRouteBuilderDraft = {
+  source: "atlas_theater",
+  floorOrdinal: 0,
+  regionId: "floor_0",
+  operationId: "",
+  theaterScreenId: "room_ingress",
+  sourceMapId: "",
+  doorId: "door_id",
+  portalId: "portal_id",
+  label: "Atlas theater entry",
+  entryPointId: ""
+};
+
+const MAP_ZONE_ROUTE_TARGET_KEYS = [
+  "fieldMapId",
+  "technicaFieldMapId",
+  "targetImportedMapId",
+  "targetMapId"
+] as const;
+const MAP_ZONE_ROUTE_METADATA_KEYS = [
+  ...MAP_ZONE_ROUTE_TARGET_KEYS,
+  "doorId",
+  "portalId",
+  "fieldMapRouteSource",
+  "routeSource",
+  "entryPointId",
+  "fieldMapEntryPointId",
+  "spawnAnchorId",
+  "fieldMapLabel",
+  "routeLabel"
+] as const;
+
+const MAP_SPAWN_ANCHOR_LABELS: Record<MapSpawnAnchorKind, string> = {
+  player: "Player",
+  enemy: "Enemy",
+  npc: "NPC",
+  portal_exit: "Portal exit",
+  generic: "Generic"
+};
+
 const VERTICAL_EDGE_OPTIONS: Array<{ value: MapVerticalEdgeKind; label: string }> = [
   { value: "open", label: "Open" },
   { value: "ledge", label: "Ledge" },
@@ -154,6 +276,12 @@ const RULER_SIZE = 28;
 const MINIMAP_SIZE = 220;
 const MAP_SCENE_OVERSCAN_TILES = 3;
 const MAP_SCENE_INITIAL_VISIBLE_TILES = 48;
+const MAP_3D_PREVIEW_MAX_TILES = 320;
+const MAP_3D_PREVIEW_TILE_WIDTH = 34;
+const MAP_3D_PREVIEW_TILE_HEIGHT = 18;
+const MAP_3D_PREVIEW_ISO_X = 18;
+const MAP_3D_PREVIEW_ISO_Y = 10;
+const MAP_3D_PREVIEW_ELEVATION_SCALE = 16;
 
 function touchMap(document: MapDocument) {
   return {
@@ -168,6 +296,15 @@ function clampZoom(value: number) {
 
 function computeCellSize(tileSize: number, zoom: number, isFocusMode: boolean) {
   return Math.max(isFocusMode ? FOCUS_MIN_CELL_SIZE : STANDARD_MIN_CELL_SIZE, Math.round(tileSize * 0.72 * zoom));
+}
+
+function clampTileCoordinate(value: number, maxExclusive: number) {
+  return Math.max(0, Math.min(Math.max(0, maxExclusive - 1), value));
+}
+
+function getAdapterTileTerrain(tile: Map3DAdapterTile): TerrainType {
+  const terrain = tile.metadata.terrain;
+  return typeof terrain === "string" && terrain in terrainColorMap ? (terrain as TerrainType) : "grass";
 }
 
 function hexToRgb(color: string) {
@@ -285,6 +422,240 @@ function createDefaultZone(x: number, y: number, width: number, height: number, 
   };
 }
 
+function mergeUniqueList(current: string[], next: string[]) {
+  return Array.from(new Set([...current, ...next].map((item) => item.trim()).filter(Boolean)));
+}
+
+function createDefaultEntryRule(
+  source: MapEntrySource,
+  existingIds: string[],
+  entryPointId: string
+): MapEntryRule {
+  const sourceLabel = MAP_ENTRY_SOURCE_LABELS[source];
+  const idPrefix =
+    source === "atlas_theater" ? "entry_theater" : source === "floor_region" ? "entry_floor" : `entry_${source}`;
+
+  return {
+    id: createSequentialId(idPrefix, existingIds),
+    source,
+    floorOrdinal: source === "door" || source === "portal" ? undefined : 0,
+    regionId: source === "floor_region" ? "floor_0" : "",
+    operationId: "",
+    theaterScreenId: source === "atlas_theater" ? "theater_room_id" : "",
+    sourceMapId: source === "door" || source === "portal" ? "source_map_id" : "",
+    doorId: source === "door" ? "door_id" : "",
+    portalId: source === "portal" ? "portal_id" : "",
+    label: `${sourceLabel} entry`,
+    entryPointId,
+    unlockRequirements: [],
+    metadata: {}
+  };
+}
+
+function routeBuilderLabelForSource(source: MapEntrySource) {
+  return `${MAP_ENTRY_SOURCE_LABELS[source]} entry`;
+}
+
+function getEntryRouteHandshakeKey(entryRule: Pick<
+  MapEntryRule,
+  "source" | "floorOrdinal" | "regionId" | "operationId" | "theaterScreenId" | "sourceMapId" | "doorId" | "portalId"
+>) {
+  const normalize = (value: unknown) => String(value ?? "").trim().toLowerCase();
+
+  if (entryRule.source === "atlas_theater") {
+    return [
+      entryRule.source,
+      normalize(entryRule.operationId),
+      normalize(entryRule.theaterScreenId)
+    ].join("::");
+  }
+
+  if (entryRule.source === "floor_region") {
+    return [
+      entryRule.source,
+      normalize(entryRule.operationId),
+      Number.isFinite(entryRule.floorOrdinal) ? String(entryRule.floorOrdinal) : "",
+      normalize(entryRule.regionId)
+    ].join("::");
+  }
+
+  if (entryRule.source === "door") {
+    return [
+      entryRule.source,
+      normalize(entryRule.sourceMapId),
+      normalize(entryRule.doorId)
+    ].join("::");
+  }
+
+  return [
+    entryRule.source,
+    normalize(entryRule.sourceMapId),
+    normalize(entryRule.portalId)
+  ].join("::");
+}
+
+function createDefaultSpawnAnchor(
+  kind: MapSpawnAnchorKind,
+  x: number,
+  y: number,
+  existingIds: string[]
+) {
+  const label = MAP_SPAWN_ANCHOR_LABELS[kind];
+  const idPrefix = kind === "portal_exit" ? "portal_exit" : `${kind}_anchor`;
+
+  return {
+    id: createSequentialId(idPrefix, existingIds),
+    kind,
+    x,
+    y,
+    label,
+    tags: kind === "generic" ? [] : [kind],
+    metadata: {}
+  };
+}
+
+function parseJsonRecord(value: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function readStringProperty(value: unknown, key: string): string {
+  if (!value || typeof value !== "object" || !(key in value)) {
+    return "";
+  }
+
+  const property = (value as Record<string, unknown>)[key];
+  return typeof property === "string" ? property.trim() : "";
+}
+
+function readNumberProperty(value: unknown, key: string): number | null {
+  if (!value || typeof value !== "object" || !(key in value)) {
+    return null;
+  }
+
+  const property = (value as Record<string, unknown>)[key];
+  return typeof property === "number" && Number.isFinite(property) ? property : null;
+}
+
+function describeMapReceiptRoute(entryRule: unknown): string | null {
+  if (!entryRule || typeof entryRule !== "object") {
+    return null;
+  }
+
+  const source = readStringProperty(entryRule, "source") || "route";
+  const target = readStringProperty(entryRule, "entryPointId") || "default spawn";
+  const floorOrdinal = readNumberProperty(entryRule, "floorOrdinal");
+  const sourceDetail =
+    readStringProperty(entryRule, "theaterScreenId") ||
+    readStringProperty(entryRule, "regionId") ||
+    readStringProperty(entryRule, "doorId") ||
+    readStringProperty(entryRule, "portalId") ||
+    readStringProperty(entryRule, "sourceMapId");
+  const sourceLabel = sourceDetail ? `${source}:${sourceDetail}` : source;
+  const floorLabel = floorOrdinal === null ? "" : ` floor ${floorOrdinal}`;
+
+  return `${sourceLabel}${floorLabel} -> ${target}`;
+}
+
+function describeRuntimeZoneRoute(zone: unknown): string | null {
+  if (!zone || typeof zone !== "object") {
+    return null;
+  }
+
+  const metadata = "metadata" in zone ? (zone as Record<string, unknown>).metadata : null;
+  if (!metadata || typeof metadata !== "object") {
+    return null;
+  }
+
+  const metadataRecord = metadata as Record<string, unknown>;
+  const targetMapId =
+    readStringProperty(metadataRecord, "fieldMapId") ||
+    readStringProperty(metadataRecord, "technicaFieldMapId") ||
+    readStringProperty(metadataRecord, "targetImportedMapId") ||
+    readStringProperty(metadataRecord, "targetMapId");
+  const source =
+    readStringProperty(metadataRecord, "fieldMapRouteSource") ||
+    readStringProperty(metadataRecord, "routeSource") ||
+    (readStringProperty(metadataRecord, "portalId") ? "portal" : readStringProperty(metadataRecord, "doorId") ? "door" : "");
+  const routeId = source === "portal"
+    ? readStringProperty(metadataRecord, "portalId")
+    : readStringProperty(metadataRecord, "doorId");
+
+  if (!targetMapId && !source && !routeId) {
+    return null;
+  }
+
+  const zoneId = readStringProperty(zone, "id") || "zone";
+  const entryPointId =
+    readStringProperty(metadataRecord, "entryPointId") ||
+    readStringProperty(metadataRecord, "fieldMapEntryPointId") ||
+    readStringProperty(metadataRecord, "spawnAnchorId");
+  const spawnLabel = entryPointId ? ` -> spawn ${entryPointId}` : "";
+
+  return `zone ${zoneId} -> map ${targetMapId || "missing target"} via ${source || "missing source"} ${routeId || "missing id"}${spawnLabel}`;
+}
+
+function describeMapPublishReceipt(context: {
+  bundle: Awaited<ReturnType<typeof buildMapBundleForTarget>>;
+  loadedEntry: LoadedChaosCoreDatabaseEntry | null;
+}) {
+  const runtimeContent =
+    context.loadedEntry?.runtimeContent ??
+    context.bundle.files.find((file) => file.name === context.bundle.manifest.entryFile)?.content ??
+    "";
+  const runtimeMap = parseJsonRecord(runtimeContent);
+  if (!runtimeMap) {
+    return ["Runtime map JSON could not be parsed for receipt details."];
+  }
+
+  const entryRules = Array.isArray(runtimeMap.entryRules) ? runtimeMap.entryRules : [];
+  const spawnAnchors = Array.isArray(runtimeMap.spawnAnchors) ? runtimeMap.spawnAnchors : [];
+  const interactionZones = Array.isArray(runtimeMap.interactionZones) ? runtimeMap.interactionZones : [];
+  const outboundRoutes = interactionZones
+    .map((zone) => describeRuntimeZoneRoute(zone))
+    .filter((route): route is string => Boolean(route));
+  const adapter3d = runtimeMap.adapter3d && typeof runtimeMap.adapter3d === "object" ? (runtimeMap.adapter3d as Record<string, unknown>) : null;
+  const adapterTiles = Array.isArray(adapter3d?.tiles) ? adapter3d.tiles.length : 0;
+  const traversalLinks = Array.isArray(adapter3d?.traversalLinks) ? adapter3d.traversalLinks.length : 0;
+  const entryIds = entryRules
+    .map((entry) => (entry && typeof entry === "object" && "id" in entry ? String(entry.id) : ""))
+    .filter(Boolean);
+  const anchorIds = spawnAnchors
+    .map((anchor) => (anchor && typeof anchor === "object" && "id" in anchor ? String(anchor.id) : ""))
+    .filter(Boolean);
+  const routeTargets = entryRules
+    .map((entry) => readStringProperty(entry, "entryPointId"))
+    .filter(Boolean);
+  const missingRouteTargets = routeTargets.filter((target) => !anchorIds.includes(target));
+  const firstRoutePreview = describeMapReceiptRoute(entryRules[0]);
+  const routeHandshake =
+    entryRules.length === 0
+      ? "needs entry route"
+      : spawnAnchors.length === 0
+        ? "needs spawn anchor"
+        : missingRouteTargets.length > 0
+          ? `missing anchor target(s): ${missingRouteTargets.join(", ")}`
+          : "ready";
+
+  return [
+    `Map id: ${typeof runtimeMap.id === "string" ? runtimeMap.id : context.bundle.manifest.contentId}`,
+    `Render mode: ${typeof runtimeMap.renderMode === "string" ? runtimeMap.renderMode : "classic_2d"}`,
+    `Entry routes: ${entryRules.length}${entryIds.length ? ` (${entryIds.join(", ")})` : ""}`,
+    firstRoutePreview ? `Route preview: ${firstRoutePreview}` : "Route preview: no route configured",
+    `Outbound door/portal routes: ${outboundRoutes.length}`,
+    ...(outboundRoutes.length > 0
+      ? outboundRoutes.slice(0, 5).map((route) => `Outbound preview: ${route}`)
+      : ["Outbound preview: no door/portal route zones configured"]),
+    `Spawn anchors: ${spawnAnchors.length}${anchorIds.length ? ` (${anchorIds.join(", ")})` : ""}`,
+    `Chaos route handshake: ${routeHandshake}`,
+    `3D adapter: ${adapterTiles} tiles, ${traversalLinks} traversal links`
+  ];
+}
+
 function isNpcDocument(value: unknown): value is NpcDocument {
   return Boolean(
     value &&
@@ -312,6 +683,156 @@ function isMapDocumentPayload(value: unknown): value is MapDocument {
   );
 }
 
+function readMetadataText(record: Record<string, string> | undefined, key: string): string {
+  const value = record?.[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function readZoneTargetMapId(zone: MapZone): string {
+  return (
+    readMetadataText(zone.metadata, "fieldMapId") ||
+    readMetadataText(zone.metadata, "technicaFieldMapId") ||
+    readMetadataText(zone.metadata, "targetImportedMapId") ||
+    readMetadataText(zone.metadata, "targetMapId") ||
+    readMetadataText(zone.metadata, "targetMap")
+  );
+}
+
+function readZoneEntryPointId(zone: MapZone): string {
+  return (
+    readMetadataText(zone.metadata, "fieldMapEntryPointId") ||
+    readMetadataText(zone.metadata, "entryPointId") ||
+    readMetadataText(zone.metadata, "spawnAnchorId")
+  );
+}
+
+function readZoneRouteLabel(zone: MapZone): string {
+  return readMetadataText(zone.metadata, "fieldMapLabel") || readMetadataText(zone.metadata, "routeLabel") || zone.label;
+}
+
+function readZoneRouteSource(zone: MapZone): MapZoneRouteSource | "" {
+  const explicitSource =
+    readMetadataText(zone.metadata, "fieldMapRouteSource") ||
+    readMetadataText(zone.metadata, "routeSource");
+
+  if (explicitSource === "door" || explicitSource === "portal") {
+    return explicitSource;
+  }
+
+  if (readMetadataText(zone.metadata, "portalId")) {
+    return "portal";
+  }
+
+  if (readMetadataText(zone.metadata, "doorId")) {
+    return "door";
+  }
+
+  return "";
+}
+
+function readZoneRouteId(zone: MapZone, source = readZoneRouteSource(zone)): string {
+  if (source === "portal") {
+    return readMetadataText(zone.metadata, "portalId");
+  }
+
+  if (source === "door") {
+    return readMetadataText(zone.metadata, "doorId");
+  }
+
+  return readMetadataText(zone.metadata, "portalId") || readMetadataText(zone.metadata, "doorId");
+}
+
+function hasZoneRouteMetadata(zone: MapZone): boolean {
+  return MAP_ZONE_ROUTE_METADATA_KEYS.some((key) => readMetadataText(zone.metadata, key));
+}
+
+function setRouteMetadataValue(metadata: Record<string, string>, key: string, value: string) {
+  const next = { ...metadata };
+  const normalizedValue = value.trim();
+  if (normalizedValue) {
+    next[key] = normalizedValue;
+  } else {
+    delete next[key];
+  }
+  return next;
+}
+
+function setZoneRouteSourceMetadata(zone: MapZone, source: MapZoneRouteSource): MapZone {
+  const nextMetadata = setRouteMetadataValue(zone.metadata, "fieldMapRouteSource", source);
+  if (source === "door") {
+    delete nextMetadata.portalId;
+    if (!nextMetadata.doorId) {
+      nextMetadata.doorId = runtimeId(zone.id, "door");
+    }
+  } else {
+    delete nextMetadata.doorId;
+    if (!nextMetadata.portalId) {
+      nextMetadata.portalId = runtimeId(zone.id, "portal");
+    }
+  }
+
+  return {
+    ...zone,
+    action: zone.action.trim() ? zone.action : "custom",
+    metadata: nextMetadata
+  };
+}
+
+function createZoneRouteProof(
+  zone: MapZone,
+  options: {
+    currentMapId: string;
+    mapEntries: ChaosCoreDatabaseEntry[];
+    mapDatabaseLoaded: boolean;
+    duplicateRouteKeys: Set<string>;
+  }
+): MapZoneRouteProof {
+  const source = readZoneRouteSource(zone);
+  const routeId = readZoneRouteId(zone, source);
+  const targetMapId = readZoneTargetMapId(zone);
+  const entryPointId = readZoneEntryPointId(zone);
+  const normalizedTargetMapId = runtimeId(targetMapId);
+  const targetExists = !targetMapId
+    ? false
+    : normalizedTargetMapId === options.currentMapId ||
+      options.mapEntries.some((entry) => runtimeId(entry.contentId) === normalizedTargetMapId);
+  const routeKey = source && routeId ? `${source}:${runtimeId(routeId)}` : "";
+  const warnings: string[] = [];
+
+  if (!targetMapId) {
+    warnings.push("Choose the target map id that Chaos Core should load.");
+  }
+  if (!source) {
+    warnings.push("Choose whether this zone is a door route or a portal route.");
+  }
+  if (source === "door" && !routeId) {
+    warnings.push("Door routes need a door id.");
+  }
+  if (source === "portal" && !routeId) {
+    warnings.push("Portal routes need a portal id.");
+  }
+  if (targetMapId && options.mapDatabaseLoaded && !targetExists) {
+    warnings.push(`Target map '${targetMapId}' is not in the loaded Chaos Core map database.`);
+  }
+  if (targetMapId && normalizedTargetMapId === options.currentMapId) {
+    warnings.push("Target map is this same map. That is allowed, but double-check that this is an intentional loop.");
+  }
+  if (routeKey && options.duplicateRouteKeys.has(routeKey)) {
+    warnings.push(`Another zone on this map also uses ${source} id '${routeId}'.`);
+  }
+
+  return {
+    zoneId: zone.id,
+    label: readZoneRouteLabel(zone),
+    source,
+    routeId,
+    targetMapId,
+    entryPointId,
+    targetExists: targetMapId ? targetExists : null,
+    warnings
+  };
+}
+
 export function MapEditor() {
   const runtime = useTechnicaRuntime();
   const { desktopEnabled, repoPath, summaryStates, ensureSummaries, loadEntry } = useChaosCoreDatabase();
@@ -332,6 +853,7 @@ export function MapEditor() {
   const [selectedCell, setSelectedCell] = useState<{ x: number; y: number } | null>(null);
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
+  const [routeBuilderDraft, setRouteBuilderDraft] = useState<MapRouteBuilderDraft>(DEFAULT_ROUTE_BUILDER_DRAFT);
   const [activeVerticalLayerId, setActiveVerticalLayerId] = useState("ground");
   const [connectorDraft, setConnectorDraft] = useState({
     kind: "stairs" as MapVerticalConnectorKind,
@@ -375,14 +897,185 @@ export function MapEditor() {
   const canvasStageRef = useRef<HTMLDivElement | null>(null);
   const importRef = useRef<HTMLInputElement | null>(null);
   const deferredMap = useDeferredValue(map);
-  const issues = useMemo(() => validateMapDocument(deferredMap), [deferredMap]);
+  const map3dAdapter = useMemo(() => buildMap3DAdapterPayload(deferredMap), [deferredMap]);
   const canSendToDesktop = runtime.isMobile && Boolean(runtime.sessionOrigin && runtime.pairingToken);
   const isFocusMode = runtime.isPopout || expandedInline;
+  const map3dSettings: Map3DSettings = map.settings3d ?? {
+    renderMode: map.renderMode ?? "classic_2d",
+    wallHeight: 1,
+    floorThickness: 0.2,
+    previewCamera: "isometric",
+    defaultSurface: "field",
+    metadata: {}
+  };
+  const activeMapRenderMode = map.renderMode ?? map3dSettings.renderMode;
+  const activeMapRenderProfile =
+    MAP_RENDER_MODE_PROFILES.find((profile) => profile.id === activeMapRenderMode) ?? MAP_RENDER_MODE_PROFILES[0];
+  const selectedZone = map.zones.find((item) => item.id === selectedZoneId) ?? null;
+  const playerSpawnAnchor = map.spawnAnchors?.find((anchor) => anchor.kind === "player") ?? null;
+  const entryRouteCount = map.entryRules?.length ?? 0;
+  const spawnAnchorCount = map.spawnAnchors?.length ?? 0;
+  const spawnAnchorIds = useMemo(
+    () => new Set((map.spawnAnchors ?? []).map((anchor) => anchor.id.trim()).filter(Boolean)),
+    [map.spawnAnchors]
+  );
+  const routeTargetIds = useMemo(
+    () => (map.entryRules ?? []).map((entryRule) => entryRule.entryPointId.trim()).filter(Boolean),
+    [map.entryRules]
+  );
+  const missingRouteTargetIds = useMemo(
+    () => Array.from(new Set(routeTargetIds.filter((targetId) => !spawnAnchorIds.has(targetId)))),
+    [routeTargetIds, spawnAnchorIds]
+  );
+  const blankRouteTargetCount = (map.entryRules ?? []).filter((entryRule) => !entryRule.entryPointId.trim()).length;
+  const routeTargetsReady = entryRouteCount > 0 && blankRouteTargetCount === 0 && missingRouteTargetIds.length === 0;
+  const mapEntries = summaryStates.map.entries;
+  const mapDatabaseLoaded = summaryStates.map.status === "ready" || mapEntries.length > 0;
+  const currentRuntimeMapId = runtimeId(map.id || map.name, "field_map");
+  const outboundRouteProofs = useMemo(() => {
+    const routedZones = map.zones.filter(hasZoneRouteMetadata);
+    const routeKeyCounts = new Map<string, number>();
+
+    routedZones.forEach((zone) => {
+      const source = readZoneRouteSource(zone);
+      const routeId = readZoneRouteId(zone, source);
+      if (!source || !routeId) {
+        return;
+      }
+      const key = `${source}:${runtimeId(routeId)}`;
+      routeKeyCounts.set(key, (routeKeyCounts.get(key) ?? 0) + 1);
+    });
+
+    const duplicateRouteKeys = new Set(
+      Array.from(routeKeyCounts.entries())
+        .filter(([, count]) => count > 1)
+        .map(([key]) => key)
+    );
+
+    return routedZones.map((zone) =>
+      createZoneRouteProof(zone, {
+        currentMapId: currentRuntimeMapId,
+        mapEntries,
+        mapDatabaseLoaded,
+        duplicateRouteKeys
+      })
+    );
+  }, [currentRuntimeMapId, map.zones, mapDatabaseLoaded, mapEntries]);
+  const selectedZoneRouteProof = selectedZone
+    ? outboundRouteProofs.find((proof) => proof.zoneId === selectedZone.id) ?? null
+    : null;
+  const routeAuthoringIssues = useMemo<ValidationIssue[]>(
+    () =>
+      outboundRouteProofs.flatMap((proof) =>
+        proof.warnings.map((warning) => ({
+          severity: "warning" as const,
+          field: `zones.${proof.zoneId}`,
+          message: `Outbound route '${proof.zoneId}': ${warning}`
+        }))
+      ),
+    [outboundRouteProofs]
+  );
+  const issues = useMemo(
+    () => [...validateMapDocument(deferredMap), ...routeAuthoringIssues],
+    [deferredMap, routeAuthoringIssues]
+  );
+  const map3dReadiness = [
+    {
+      label: activeMapRenderMode === "classic_2d" ? "2D runtime" : "3D runtime adapter",
+      ready: activeMapRenderMode === "classic_2d" || map3dAdapter.tiles.length > 0
+    },
+    { label: "Player anchor", ready: Boolean(playerSpawnAnchor) },
+    { label: "Entry route", ready: entryRouteCount > 0 },
+    { label: "Route targets", ready: routeTargetsReady },
+    { label: "Map tags", ready: Boolean(map.mapTags?.length) }
+  ];
+  const map3dPreview = useMemo(() => {
+    const maxElevation = Math.max(0, ...map3dAdapter.tiles.map((tile) => tile.elevation));
+    const previewStep = Math.max(1, Math.ceil(Math.sqrt(Math.max(1, map3dAdapter.tiles.length) / MAP_3D_PREVIEW_MAX_TILES)));
+    const tileByCoordinate = new Map(map3dAdapter.tiles.map((tile) => [`${tile.x},${tile.y}`, tile]));
+    const stageWidth = Math.max(
+      360,
+      (map3dAdapter.width + map3dAdapter.height) * MAP_3D_PREVIEW_ISO_X + MAP_3D_PREVIEW_TILE_WIDTH + 96
+    );
+    const stageHeight = Math.max(
+      240,
+      (map3dAdapter.width + map3dAdapter.height) * MAP_3D_PREVIEW_ISO_Y +
+        maxElevation * MAP_3D_PREVIEW_ELEVATION_SCALE +
+        120
+    );
+    const xOffset = map3dAdapter.height * MAP_3D_PREVIEW_ISO_X + 48;
+    const yOffset = maxElevation * MAP_3D_PREVIEW_ELEVATION_SCALE + 24;
+    const getPreviewPoint = (x: number, y: number) => {
+      const tile = tileByCoordinate.get(`${x},${y}`);
+      const elevation = tile?.elevation ?? 0;
+      return {
+        x: xOffset + (x - y) * MAP_3D_PREVIEW_ISO_X + MAP_3D_PREVIEW_TILE_WIDTH / 2,
+        y: yOffset + (x + y) * MAP_3D_PREVIEW_ISO_Y - elevation * MAP_3D_PREVIEW_ELEVATION_SCALE + MAP_3D_PREVIEW_TILE_HEIGHT / 2
+      };
+    };
+    const tiles = map3dAdapter.tiles
+      .filter((tile) => tile.x % previewStep === 0 && tile.y % previewStep === 0)
+      .map((tile) => {
+        const terrain = getAdapterTileTerrain(tile);
+        const left = xOffset + (tile.x - tile.y) * MAP_3D_PREVIEW_ISO_X;
+        const top = yOffset + (tile.x + tile.y) * MAP_3D_PREVIEW_ISO_Y - tile.elevation * MAP_3D_PREVIEW_ELEVATION_SCALE;
+        const style = {
+          left: `${left}px`,
+          top: `${top}px`,
+          zIndex: Math.round((tile.x + tile.y) * 2 + tile.elevation * 8 + (tile.wall ? 200 : 0)),
+          ["--preview-tile-color" as string]: terrainColorMap[terrain],
+          ["--preview-elevation" as string]: `${Math.max(0, tile.elevation * MAP_3D_PREVIEW_ELEVATION_SCALE)}px`
+        } as CSSProperties;
+
+        return {
+          tile,
+          terrain,
+          style
+        };
+      });
+    const anchors = map3dAdapter.spawnAnchors.map((anchor) => {
+      const point = getPreviewPoint(anchor.x, anchor.y);
+      return {
+        anchor,
+        style: {
+          left: `${point.x}px`,
+          top: `${point.y}px`
+        } as CSSProperties
+      };
+    });
+    const connectorLines = map3dAdapter.traversalLinks.map((connector) => {
+      const from = getPreviewPoint(connector.from.x, connector.from.y);
+      const to = getPreviewPoint(connector.to.x, connector.to.y);
+      return {
+        connector,
+        from,
+        to
+      };
+    });
+
+    return {
+      tiles,
+      anchors,
+      connectorLines,
+      previewStep,
+      stageWidth,
+      stageHeight,
+      maxElevation,
+      hiddenTileCount: Math.max(0, map3dAdapter.tiles.length - tiles.length),
+      wallTileCount: map3dAdapter.tiles.filter((tile) => tile.wall).length,
+      blockedTileCount: map3dAdapter.tiles.filter((tile) => !tile.walkable).length,
+      noFloorTileCount: map3dAdapter.tiles.filter((tile) => !tile.floor).length,
+      elevatedTileCount: map3dAdapter.tiles.filter((tile) => tile.elevation > 0).length
+    };
+  }, [map3dAdapter]);
   const selectedObject = map.objects.find((item) => item.id === selectedObjectId) ?? null;
   const selectedEnemyObject = selectedObject && isEnemyObject(selectedObject) ? selectedObject : null;
-  const selectedZone = map.zones.find((item) => item.id === selectedZoneId) ?? null;
   const verticalLayerSystem = map.vertical ?? null;
   const verticalLayers = verticalLayerSystem?.layers ?? [];
+  const verticalCellCount = useMemo(
+    () => verticalLayers.reduce((count, layer) => count + layer.cells.length, 0),
+    [verticalLayers]
+  );
   const activeVerticalLayer =
     verticalLayers.find((layer) => layer.id === activeVerticalLayerId) ?? verticalLayers[0] ?? null;
   const activeVerticalCell =
@@ -768,6 +1461,14 @@ export function MapEditor() {
   }, [desktopEnabled, ensureSummaries, repoPath]);
 
   useEffect(() => {
+    if (!desktopEnabled || !repoPath.trim()) {
+      return;
+    }
+
+    void ensureSummaries("map");
+  }, [desktopEnabled, ensureSummaries, repoPath]);
+
+  useEffect(() => {
     setSelectedNpcPlacementEntryKey((current) => {
       if (current && npcEntries.some((entry) => entry.entryKey === current)) {
         return current;
@@ -987,6 +1688,523 @@ export function MapEditor() {
     setMap((current) => touchMap(updater(current)));
   }
 
+  function updateMap3DSettings(updater: (settings: Map3DSettings) => Map3DSettings) {
+    patchMap((current) => ({
+      ...current,
+      settings3d: updater(current.settings3d ?? map3dSettings)
+    }));
+  }
+
+  function applyMapRenderModePreset(renderMode: MapRenderMode) {
+    const profile = MAP_RENDER_MODE_PROFILES.find((option) => option.id === renderMode) ?? MAP_RENDER_MODE_PROFILES[0];
+    patchMap((current) => {
+      const currentSettings = current.settings3d ?? map3dSettings;
+      return {
+        ...current,
+        renderMode,
+        mapTags: mergeUniqueList(current.mapTags ?? [], profile.tags),
+        settings3d: {
+          ...currentSettings,
+          renderMode,
+          previewCamera: profile.previewCamera,
+          wallHeight: profile.wallHeight,
+          floorThickness: profile.floorThickness,
+          defaultSurface: profile.defaultSurface
+        },
+        vertical: renderMode === "bespoke_3d" && !current.vertical ? createDefaultVerticalLayerSystem() : current.vertical
+      };
+    });
+  }
+
+  function getStarterPoint(current: MapDocument) {
+    return {
+      x: clampTileCoordinate(selectedCell?.x ?? Math.floor(current.width / 2), current.width),
+      y: clampTileCoordinate(selectedCell?.y ?? Math.floor(current.height / 2), current.height)
+    };
+  }
+
+  function getPreset3DSettings(current: MapDocument, renderMode: MapRenderMode): Map3DSettings {
+    const profile = MAP_RENDER_MODE_PROFILES.find((option) => option.id === renderMode) ?? MAP_RENDER_MODE_PROFILES[0];
+    return {
+      ...(current.settings3d ?? map3dSettings),
+      renderMode,
+      previewCamera: profile.previewCamera,
+      wallHeight: profile.wallHeight,
+      floorThickness: profile.floorThickness,
+      defaultSurface: profile.defaultSurface
+    };
+  }
+
+  function prepareSimple3DFieldMap() {
+    let selectedAnchor: { x: number; y: number } | null = null;
+
+    patchMap((current) => {
+      const starterPoint = getStarterPoint(current);
+      selectedAnchor = starterPoint;
+      const { anchors, anchorId } = ensurePlayerEntryAnchor(current);
+      const existingAnchorIds = anchors.map((anchor) => anchor.id);
+      const enemyAnchor =
+        anchors.some((anchor) => anchor.kind === "enemy")
+          ? null
+          : {
+              ...createDefaultSpawnAnchor(
+                "enemy",
+                clampTileCoordinate(starterPoint.x + 2, current.width),
+                starterPoint.y,
+                existingAnchorIds
+              ),
+              label: "Starter Enemy Pocket",
+              tags: ["enemy", "starter", "field"]
+            };
+      const entryRules = current.entryRules?.length
+        ? current.entryRules
+        : [
+            {
+              ...createDefaultEntryRule("floor_region", [], anchorId),
+              label: "Floor 0 field entry",
+              regionId: "floor_0"
+            }
+          ];
+
+      return {
+        ...current,
+        renderMode: "simple_3d",
+        settings3d: getPreset3DSettings(current, "simple_3d"),
+        mapTags: mergeUniqueList(current.mapTags ?? [], ["field_map", "simple_3d", "technica_3d"]),
+        spawnAnchors: enemyAnchor ? [...anchors, enemyAnchor] : anchors,
+        entryRules
+      };
+    });
+
+    if (selectedAnchor) {
+      setSelectedCell(selectedAnchor);
+    }
+    setTool("select");
+    notify("Simple 3D field setup is ready: route, player anchor, tags, and starter enemy anchor checked.");
+  }
+
+  function prepareBespokePortalMap() {
+    let selectedAnchor: { x: number; y: number } | null = null;
+
+    patchMap((current) => {
+      const starterPoint = getStarterPoint(current);
+      selectedAnchor = starterPoint;
+      const { anchors, anchorId } = ensurePlayerEntryAnchor(current);
+      const portalAnchor =
+        anchors.find((anchor) => anchor.kind === "portal_exit") ??
+        {
+          ...createDefaultSpawnAnchor(
+            "portal_exit",
+            clampTileCoordinate(starterPoint.x + 1, current.width),
+            starterPoint.y,
+            anchors.map((anchor) => anchor.id)
+          ),
+          label: "Portal Arrival",
+          tags: ["portal_exit", "arrival"]
+        };
+      const nextAnchors = anchors.some((anchor) => anchor.id === portalAnchor.id)
+        ? anchors
+        : [...anchors, portalAnchor];
+      const entryRules = current.entryRules?.some((entryRule) => entryRule.source === "portal")
+        ? current.entryRules
+        : [
+            ...(current.entryRules ?? []),
+            {
+              ...createDefaultEntryRule(
+                "portal",
+                (current.entryRules ?? []).map((entryRule) => entryRule.id),
+                portalAnchor.id || anchorId
+              ),
+              label: "Portal entry",
+              sourceMapId: "source_map_id",
+              portalId: "portal_id"
+            }
+          ];
+
+      return {
+        ...current,
+        renderMode: "bespoke_3d",
+        settings3d: getPreset3DSettings(current, "bespoke_3d"),
+        mapTags: mergeUniqueList(current.mapTags ?? [], ["bespoke_3d", "technica_3d", "portal_destination"]),
+        vertical: current.vertical ?? createDefaultVerticalLayerSystem(),
+        spawnAnchors: nextAnchors,
+        entryRules
+      };
+    });
+
+    if (selectedAnchor) {
+      setSelectedCell(selectedAnchor);
+    }
+    setActiveVerticalLayerId((map.vertical ?? createDefaultVerticalLayerSystem()).defaultLayerId);
+    setTool("select");
+    notify("Bespoke 3D portal map setup is ready with vertical data, portal route, and arrival anchor.");
+  }
+
+  function addEnemyAnchorRing() {
+    patchMap((current) => {
+      const center = getStarterPoint(current);
+      const offsets = [
+        { x: 0, y: -2 },
+        { x: 2, y: 0 },
+        { x: 0, y: 2 },
+        { x: -2, y: 0 }
+      ];
+      let existingIds = (current.spawnAnchors ?? []).map((anchor) => anchor.id);
+      const anchors = offsets.map((offset, index) => {
+        const anchor = {
+          ...createDefaultSpawnAnchor(
+            "enemy",
+            clampTileCoordinate(center.x + offset.x, current.width),
+            clampTileCoordinate(center.y + offset.y, current.height),
+            existingIds
+          ),
+          label: `Enemy Pocket ${index + 1}`,
+          tags: ["enemy", "ambush", "field"]
+        };
+        existingIds = [...existingIds, anchor.id];
+        return anchor;
+      });
+
+      return {
+        ...current,
+        spawnAnchors: [...(current.spawnAnchors ?? []), ...anchors]
+      };
+    });
+    setTool("select");
+    notify("Added four tagged enemy spawn anchors around the selected area.");
+  }
+
+  function stampRaisedPlatform() {
+    let targetPoint: { x: number; y: number } | null = null;
+    let targetLayerId = activeVerticalLayerId;
+
+    patchMap((current) => {
+      const center = getStarterPoint(current);
+      targetPoint = center;
+      const vertical = current.vertical ?? createDefaultVerticalLayerSystem();
+      const layerId = vertical.layers.some((layer) => layer.id === activeVerticalLayerId)
+        ? activeVerticalLayerId
+        : vertical.defaultLayerId;
+      targetLayerId = layerId;
+      const platformCells = Array.from({ length: 9 }, (_, index) => {
+        const offsetX = (index % 3) - 1;
+        const offsetY = Math.floor(index / 3) - 1;
+        return {
+          x: clampTileCoordinate(center.x + offsetX, current.width),
+          y: clampTileCoordinate(center.y + offsetY, current.height),
+          offsetX,
+          offsetY
+        };
+      });
+      const currentRenderMode = current.renderMode ?? current.settings3d?.renderMode ?? "classic_2d";
+      const shouldPromoteToBespoke3D = currentRenderMode === "classic_2d";
+
+      return {
+        ...current,
+        renderMode: shouldPromoteToBespoke3D ? "bespoke_3d" : currentRenderMode,
+        settings3d: shouldPromoteToBespoke3D ? getPreset3DSettings(current, "bespoke_3d") : current.settings3d ?? map3dSettings,
+        mapTags: mergeUniqueList(current.mapTags ?? [], ["technica_3d", "raised_platform"]),
+        vertical: {
+          ...vertical,
+          layers: vertical.layers.map((layer) => {
+            if (layer.id !== layerId) {
+              return layer;
+            }
+
+            return platformCells.reduce(
+              (nextLayer, cell) =>
+                upsertMapVerticalCell(nextLayer, cell.x, cell.y, (verticalCell) => ({
+                  ...verticalCell,
+                  heightOffset: Math.max(verticalCell.heightOffset, 1),
+                  walkable: true,
+                  edges: {
+                    ...verticalCell.edges,
+                    ...(cell.offsetY === -1 ? { north: "rail" as const } : {}),
+                    ...(cell.offsetX === 1 ? { east: "rail" as const } : {}),
+                    ...(cell.offsetY === 1 ? { south: "rail" as const } : {}),
+                    ...(cell.offsetX === -1 ? { west: "rail" as const } : {})
+                  },
+                  metadata: {
+                    ...verticalCell.metadata,
+                    surface: String(verticalCell.metadata.surface ?? "raised_platform")
+                  }
+                })),
+              layer
+            );
+          })
+        }
+      };
+    });
+
+    if (targetPoint) {
+      setSelectedCell(targetPoint);
+    }
+    setActiveVerticalLayerId(targetLayerId);
+    setTool("select");
+    notify("Stamped a 3x3 raised platform on the active vertical layer.");
+  }
+
+  function updateEntryRule(index: number, updater: (entryRule: MapEntryRule) => MapEntryRule) {
+    patchMap((current) => ({
+      ...current,
+      entryRules: (current.entryRules ?? []).map((entryRule, entryIndex) =>
+        entryIndex === index ? updater(entryRule) : entryRule
+      )
+    }));
+  }
+
+  function addEntryRule(source: MapEntrySource) {
+    patchMap((current) => {
+      const playerAnchor = current.spawnAnchors?.find((anchor) => anchor.kind === "player");
+      const fallbackAnchor = current.spawnAnchors?.[0];
+      return {
+        ...current,
+        entryRules: [
+          ...(current.entryRules ?? []),
+          createDefaultEntryRule(source, (current.entryRules ?? []).map((entryRule) => entryRule.id), playerAnchor?.id ?? fallbackAnchor?.id ?? "player_start")
+        ]
+      };
+    });
+  }
+
+  function ensurePlayerEntryAnchor(current: MapDocument): { anchors: MapSpawnAnchor[]; anchorId: string } {
+    const anchors = current.spawnAnchors ?? [];
+    const existingAnchor = anchors.find((anchor) => anchor.kind === "player") ?? anchors[0];
+    if (existingAnchor) {
+      return { anchors, anchorId: existingAnchor.id };
+    }
+
+    const existingIds = anchors.map((anchor) => anchor.id);
+    const preferredId = existingIds.includes("player_start") ? createSequentialId("player_start", existingIds) : "player_start";
+    const anchor: MapSpawnAnchor = {
+      ...createDefaultSpawnAnchor(
+        "player",
+        selectedCell?.x ?? Math.max(1, Math.floor(current.width / 2)),
+        selectedCell?.y ?? Math.max(1, Math.floor(current.height / 2)),
+        existingIds
+      ),
+      id: preferredId,
+      label: "Player Start",
+      tags: ["player", "default"]
+    };
+
+    return { anchors: [...anchors, anchor], anchorId: anchor.id };
+  }
+
+  function updateRouteBuilderSource(source: MapEntrySource) {
+    setRouteBuilderDraft((current) => ({
+      ...current,
+      source,
+      label: current.label.trim() ? current.label : routeBuilderLabelForSource(source),
+      regionId: source === "floor_region" && !current.regionId.trim() ? "floor_0" : current.regionId,
+      theaterScreenId: source === "atlas_theater" && !current.theaterScreenId.trim() ? "room_ingress" : current.theaterScreenId,
+      doorId: source === "door" && !current.doorId.trim() ? "door_id" : current.doorId,
+      portalId: source === "portal" && !current.portalId.trim() ? "portal_id" : current.portalId
+    }));
+  }
+
+  function createEntryRouteFromBuilder(
+    current: MapDocument,
+    anchorId: string,
+    existingIds: string[]
+  ): MapEntryRule {
+    const source = routeBuilderDraft.source;
+    const baseRule = createDefaultEntryRule(source, existingIds, anchorId);
+    const label = routeBuilderDraft.label.trim() || routeBuilderLabelForSource(source);
+    const floorOrdinal = Math.max(0, Math.round(Number(routeBuilderDraft.floorOrdinal) || 0));
+
+    return {
+      ...baseRule,
+      source,
+      floorOrdinal: source === "door" || source === "portal" ? undefined : floorOrdinal,
+      regionId: source === "floor_region" ? routeBuilderDraft.regionId.trim() : "",
+      operationId: routeBuilderDraft.operationId.trim(),
+      theaterScreenId: source === "atlas_theater" ? routeBuilderDraft.theaterScreenId.trim() : "",
+      sourceMapId: source === "door" || source === "portal" ? routeBuilderDraft.sourceMapId.trim() : "",
+      doorId: source === "door" ? routeBuilderDraft.doorId.trim() : "",
+      portalId: source === "portal" ? routeBuilderDraft.portalId.trim() : "",
+      label,
+      entryPointId: routeBuilderDraft.entryPointId.trim() || anchorId,
+      metadata: {
+        ...baseRule.metadata,
+        technicaRouteBuilder: "true",
+        targetMapId: current.id,
+        routeSource: source
+      }
+    };
+  }
+
+  function applyRouteBuilderToMap() {
+    let appliedRouteLabel = "";
+    let appliedAnchorId = "";
+
+    patchMap((current) => {
+      const { anchors, anchorId } = ensurePlayerEntryAnchor(current);
+      const existingEntryRules = current.entryRules ?? [];
+      const draftRoute = createEntryRouteFromBuilder(current, routeBuilderDraft.entryPointId.trim() || anchorId, existingEntryRules.map((entryRule) => entryRule.id));
+      const draftKey = getEntryRouteHandshakeKey(draftRoute);
+      const existingRoute = existingEntryRules.find((entryRule) => getEntryRouteHandshakeKey(entryRule) === draftKey);
+      const nextRoute = existingRoute ? { ...draftRoute, id: existingRoute.id } : draftRoute;
+      appliedRouteLabel = nextRoute.label;
+      appliedAnchorId = nextRoute.entryPointId;
+
+      return {
+        ...current,
+        spawnAnchors: anchors,
+        mapTags: mergeUniqueList(current.mapTags ?? [], ["field_map", ...activeMapRenderProfile.tags]),
+        metadata: {
+          ...current.metadata,
+          technicaRouteHandshake: "ready",
+          technicaRouteSource: nextRoute.source
+        },
+        entryRules: [
+          ...existingEntryRules.filter((entryRule) => getEntryRouteHandshakeKey(entryRule) !== draftKey),
+          nextRoute
+        ]
+      };
+    });
+
+    setRouteBuilderDraft((current) => ({
+      ...current,
+      entryPointId: appliedAnchorId || current.entryPointId
+    }));
+    notify(`Route handshake '${appliedRouteLabel || routeBuilderLabelForSource(routeBuilderDraft.source)}' is ready.`);
+  }
+
+  function setPlayerAnchorToSelectedTile() {
+    if (!selectedCell) {
+      notify("Select a tile first, then use it as the player entry anchor.");
+      return;
+    }
+
+    let anchorId = "";
+    patchMap((current) => {
+      const anchors = current.spawnAnchors ?? [];
+      const existingPlayerIndex = anchors.findIndex((anchor) => anchor.kind === "player");
+      const preferredId = anchors.some((anchor) => anchor.id === "player_start")
+        ? createSequentialId("player_start", anchors.map((anchor) => anchor.id))
+        : "player_start";
+      const nextAnchor =
+        existingPlayerIndex >= 0
+          ? {
+              ...anchors[existingPlayerIndex],
+              x: selectedCell.x,
+              y: selectedCell.y,
+              label: anchors[existingPlayerIndex].label || "Player Start",
+              tags: mergeUniqueList(anchors[existingPlayerIndex].tags ?? [], ["player", "default"])
+            }
+          : {
+              ...createDefaultSpawnAnchor("player", selectedCell.x, selectedCell.y, anchors.map((anchor) => anchor.id)),
+              id: preferredId,
+              label: "Player Start",
+              tags: ["player", "default"]
+            };
+      anchorId = nextAnchor.id;
+
+      return {
+        ...current,
+        spawnAnchors:
+          existingPlayerIndex >= 0
+            ? anchors.map((anchor, index) => (index === existingPlayerIndex ? nextAnchor : anchor))
+            : [...anchors, nextAnchor]
+      };
+    });
+
+    setRouteBuilderDraft((current) => ({ ...current, entryPointId: anchorId || current.entryPointId }));
+    notify(`Player entry anchor set to ${selectedCell.x}, ${selectedCell.y}.`);
+  }
+
+  function repairRouteTargets() {
+    patchMap((current) => {
+      const { anchors, anchorId } = ensurePlayerEntryAnchor(current);
+      const anchorIds = new Set(anchors.map((anchor) => anchor.id));
+
+      return {
+        ...current,
+        spawnAnchors: anchors,
+        entryRules: (current.entryRules ?? []).map((entryRule) => {
+          const targetId = entryRule.entryPointId.trim();
+          if (targetId && anchorIds.has(targetId)) {
+            return entryRule;
+          }
+
+          return {
+            ...entryRule,
+            entryPointId: anchorId
+          };
+        })
+      };
+    });
+  }
+
+  function createFloorZeroRouteStarter() {
+    patchMap((current) => {
+      const { anchors, anchorId } = ensurePlayerEntryAnchor(current);
+      const entryRules = current.entryRules ?? [];
+
+      return {
+        ...current,
+        spawnAnchors: anchors,
+        mapTags: mergeUniqueList(current.mapTags ?? [], activeMapRenderProfile.tags),
+        entryRules: [
+          ...entryRules,
+          {
+            ...createDefaultEntryRule("floor_region", entryRules.map((entryRule) => entryRule.id), anchorId),
+            floorOrdinal: 0,
+            regionId: "floor_0",
+            label: "Floor 0 entry"
+          }
+        ]
+      };
+    });
+  }
+
+  function removeEntryRule(index: number) {
+    patchMap((current) => ({
+      ...current,
+      entryRules: (current.entryRules ?? []).filter((_, entryIndex) => entryIndex !== index)
+    }));
+  }
+
+  function updateSpawnAnchor(index: number, updater: (anchor: NonNullable<MapDocument["spawnAnchors"]>[number]) => NonNullable<MapDocument["spawnAnchors"]>[number]) {
+    patchMap((current) => ({
+      ...current,
+      spawnAnchors: (current.spawnAnchors ?? []).map((anchor, anchorIndex) =>
+        anchorIndex === index ? updater(anchor) : anchor
+      )
+    }));
+  }
+
+  function addSpawnAnchor(kind: MapSpawnAnchorKind) {
+    patchMap((current) => ({
+      ...current,
+      spawnAnchors: [
+        ...(current.spawnAnchors ?? []),
+        createDefaultSpawnAnchor(
+          kind,
+          selectedCell?.x ?? Math.max(1, Math.floor(current.width / 2)),
+          selectedCell?.y ?? Math.max(1, Math.floor(current.height / 2)),
+          (current.spawnAnchors ?? []).map((anchor) => anchor.id)
+        )
+      ]
+    }));
+  }
+
+  function removeSpawnAnchor(index: number) {
+    patchMap((current) => ({
+      ...current,
+      spawnAnchors: (current.spawnAnchors ?? []).filter((_, anchorIndex) => anchorIndex !== index)
+    }));
+  }
+
+  function focusSpawnAnchor(x: number, y: number) {
+    setSelectedCell({ x, y });
+    setSelectedObjectId(null);
+    setSelectedZoneId(null);
+    setSelectedNpcMarkerEntryKey(null);
+    setTool("select");
+  }
+
   function updateVerticalLayerSystem(updater: (current: MapVerticalLayerSystem) => MapVerticalLayerSystem) {
     patchMap((current) => {
       if (!current.vertical) {
@@ -1197,6 +2415,77 @@ export function MapEditor() {
       ...current,
       zones: current.zones.map((item) => (item.id === zoneId ? updater(item) : item))
     }));
+  }
+
+  function updateZoneMetadataValue(zoneId: string, key: string, value: string) {
+    updateZoneById(zoneId, (zone) => ({
+      ...zone,
+      metadata: setRouteMetadataValue(zone.metadata, key, value)
+    }));
+  }
+
+  function updateSelectedZoneRouteSource(source: MapZoneRouteSource) {
+    if (!selectedZone) {
+      return;
+    }
+
+    updateZoneById(selectedZone.id, (zone) => setZoneRouteSourceMetadata(zone, source));
+  }
+
+  function updateSelectedZoneTargetMapId(value: string) {
+    if (!selectedZone) {
+      return;
+    }
+
+    updateZoneById(selectedZone.id, (zone) => {
+      let metadata = { ...zone.metadata };
+      MAP_ZONE_ROUTE_TARGET_KEYS.forEach((key) => {
+        delete metadata[key];
+      });
+      metadata = setRouteMetadataValue(metadata, "fieldMapId", value);
+      return {
+        ...zone,
+        metadata
+      };
+    });
+  }
+
+  function prepareSelectedZoneAsRoute(source: MapZoneRouteSource) {
+    if (!selectedZone) {
+      return;
+    }
+
+    updateZoneById(selectedZone.id, (zone) => {
+      const nextZone = setZoneRouteSourceMetadata(zone, source);
+      return {
+        ...nextZone,
+        action: "custom",
+        metadata: {
+          ...nextZone.metadata,
+          [source === "door" ? "doorId" : "portalId"]:
+            nextZone.metadata[source === "door" ? "doorId" : "portalId"] || runtimeId(zone.id, source),
+          fieldMapLabel: nextZone.metadata.fieldMapLabel || zone.label || zone.id
+        }
+      };
+    });
+    notify(`Zone '${selectedZone.id}' is ready for ${source} route targeting.`);
+  }
+
+  function clearSelectedZoneRouteMetadata() {
+    if (!selectedZone || !confirmAction(`Clear route target metadata from zone '${selectedZone.id}'?`)) {
+      return;
+    }
+
+    updateZoneById(selectedZone.id, (zone) => {
+      const nextMetadata = { ...zone.metadata };
+      MAP_ZONE_ROUTE_METADATA_KEYS.forEach((key) => {
+        delete nextMetadata[key];
+      });
+      return {
+        ...zone,
+        metadata: nextMetadata
+      };
+    });
   }
 
   function applyBrushToWholeMap() {
@@ -1782,8 +3071,73 @@ export function MapEditor() {
       buildBundle={(current) => buildMapBundleForTarget(current, "chaos-core")}
       onLoadEntry={handleLoadDatabaseEntry}
       subtitle="Publish maps directly into the Chaos Core repo and reopen the live field maps here for iteration and balance work."
+      describePublishReceipt={({ bundle, loadedEntry }) => describeMapPublishReceipt({ bundle, loadedEntry })}
     />
   );
+
+  const outboundRouteProofPanel = (
+    <div className="map-route-proof-card">
+      <div className="map-route-proof-card__header">
+        <div>
+          <strong>Outbound Door / Portal Route Proof</strong>
+          <span>These are the exact interaction-zone routes Chaos Core will try before built-in actions.</span>
+        </div>
+        <div className="toolbar">
+          <span className={outboundRouteProofs.length > 0 ? "pill accent" : "pill"}>
+            {outboundRouteProofs.length} route{outboundRouteProofs.length === 1 ? "" : "s"}
+          </span>
+          <button type="button" className="ghost-button" onClick={() => void ensureSummaries("map", { force: true })}>
+            Refresh maps
+          </button>
+        </div>
+      </div>
+      {!mapDatabaseLoaded ? (
+        <small>Map database has not loaded yet. Refresh maps to verify target map ids against Chaos Core.</small>
+      ) : null}
+      {outboundRouteProofs.length === 0 ? (
+        <div className="empty-state compact">
+          No outbound routes yet. Select a zone and use Route Target to turn it into a door or portal.
+        </div>
+      ) : (
+        <div className="database-list compact">
+          {outboundRouteProofs.map((proof) => (
+            <button
+              key={proof.zoneId}
+              type="button"
+              className={proof.zoneId === selectedZoneId ? "database-entry active" : "database-entry"}
+              onClick={() => {
+                setSelectedZoneId(proof.zoneId);
+                setSelectedObjectId(null);
+                setSelectedCell(null);
+                setSelectedNpcMarkerEntryKey(null);
+                setTool("select");
+              }}
+            >
+              <strong>{proof.label || proof.zoneId}</strong>
+              <span>
+                zone {proof.zoneId} -&gt; map {proof.targetMapId || "missing target"} via{" "}
+                {proof.source || "missing source"} {proof.routeId || "missing id"}
+                {proof.entryPointId ? ` -&gt; spawn ${proof.entryPointId}` : ""}
+              </span>
+              <small>
+                {proof.warnings.length === 0
+                  ? "Ready for Chaos Core route resolution"
+                  : proof.warnings.join(" ")}
+              </small>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+  const selectedZoneRouteSource = selectedZone ? readZoneRouteSource(selectedZone) : "";
+  const selectedZoneRouteIdKey = selectedZoneRouteSource === "portal" ? "portalId" : "doorId";
+  const selectedZoneTargetMapId = selectedZone ? readZoneTargetMapId(selectedZone) : "";
+  const selectedZoneEntryPointId = selectedZone ? readZoneEntryPointId(selectedZone) : "";
+  const selectedZoneRouteLabel = selectedZone ? readZoneRouteLabel(selectedZone) : "";
+  const selectedZoneTargetMapInOptions = selectedZoneTargetMapId
+    ? mapEntries.some((entry) => entry.contentId === selectedZoneTargetMapId)
+    : false;
 
   const selectionInspectorPanel = (
     <Panel title="Selection Inspector" subtitle="Edit the selected tile, object, zone, or NPC marker directly.">
@@ -2246,6 +3600,113 @@ export function MapEditor() {
                 }
               />
             </label>
+            <div className="field full map-zone-route-target">
+              <div className="map-zone-route-target__header">
+                <div>
+                  <span>Route Target</span>
+                  <small>Use this when the zone is a door or portal into another Technica-authored field map.</small>
+                </div>
+                <div className="toolbar">
+                  <button type="button" className="ghost-button" onClick={() => prepareSelectedZoneAsRoute("door")}>
+                    Make door route
+                  </button>
+                  <button type="button" className="ghost-button" onClick={() => prepareSelectedZoneAsRoute("portal")}>
+                    Make portal route
+                  </button>
+                </div>
+              </div>
+              <div className="form-grid compact">
+                <label className="field">
+                  <span>Route source</span>
+                  <select
+                    value={selectedZoneRouteSource}
+                    onChange={(event) => {
+                      const nextSource = event.target.value;
+                      if (nextSource === "door" || nextSource === "portal") {
+                        updateSelectedZoneRouteSource(nextSource);
+                      } else {
+                        updateZoneMetadataValue(selectedZone!.id, "fieldMapRouteSource", "");
+                      }
+                    }}
+                  >
+                    <option value="">Not a map route</option>
+                    <option value="door">Door</option>
+                    <option value="portal">Portal</option>
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Target map</span>
+                  <input
+                    list="map-route-target-options"
+                    value={selectedZoneTargetMapId}
+                    onChange={(event) => updateSelectedZoneTargetMapId(event.target.value)}
+                    placeholder="published_field_map_id"
+                  />
+                  <datalist id="map-route-target-options">
+                    {selectedZoneTargetMapId && !selectedZoneTargetMapInOptions ? <option value={selectedZoneTargetMapId} /> : null}
+                    {mapEntries.map((entry) => (
+                      <option key={entry.entryKey} value={entry.contentId}>
+                        {entry.title || entry.contentId}
+                      </option>
+                    ))}
+                  </datalist>
+                </label>
+                <label className="field">
+                  <span>{selectedZoneRouteSource === "portal" ? "Portal id" : "Door id"}</span>
+                  <input
+                    value={readMetadataText(selectedZone!.metadata, selectedZoneRouteIdKey)}
+                    onChange={(event) => updateZoneMetadataValue(selectedZone!.id, selectedZoneRouteIdKey, event.target.value)}
+                    placeholder={selectedZoneRouteSource === "portal" ? "portal_bespoke" : "shop_door"}
+                  />
+                </label>
+                <label className="field">
+                  <span>Target spawn anchor</span>
+                  <input
+                    value={selectedZoneEntryPointId}
+                    onChange={(event) => updateZoneMetadataValue(selectedZone!.id, "entryPointId", event.target.value)}
+                    placeholder="player_start"
+                  />
+                </label>
+                <label className="field full">
+                  <span>Route label</span>
+                  <input
+                    value={selectedZoneRouteLabel}
+                    onChange={(event) => updateZoneMetadataValue(selectedZone!.id, "fieldMapLabel", event.target.value)}
+                    placeholder="Bespoke portal"
+                  />
+                </label>
+              </div>
+              <div className="map-zone-route-proof">
+                <strong>
+                  {selectedZoneRouteProof?.warnings.length
+                    ? "Route needs attention"
+                    : selectedZoneRouteProof
+                      ? "Route proof ready"
+                      : "No route metadata yet"}
+                </strong>
+                <span>
+                  zone {selectedZone!.id} -&gt; map {selectedZoneTargetMapId || "missing target"} via{" "}
+                  {selectedZoneRouteSource || "missing source"}{" "}
+                  {readMetadataText(selectedZone!.metadata, selectedZoneRouteIdKey) || "missing id"}
+                  {selectedZoneEntryPointId ? ` -> spawn ${selectedZoneEntryPointId}` : ""}
+                </span>
+                {selectedZoneRouteProof?.warnings.length ? (
+                  <div className="chip-row">
+                    {selectedZoneRouteProof.warnings.map((warning) => (
+                      <span key={warning} className="pill warning">{warning}</span>
+                    ))}
+                  </div>
+                ) : null}
+                <div className="toolbar">
+                  <button type="button" className="ghost-button" onClick={() => void ensureSummaries("map", { force: true })}>
+                    Verify target maps
+                  </button>
+                  <button type="button" className="ghost-button danger" onClick={clearSelectedZoneRouteMetadata}>
+                    Clear route target
+                  </button>
+                </div>
+              </div>
+            </div>
             <label className="field full">
               <span>Metadata</span>
               <textarea
@@ -2440,6 +3901,132 @@ export function MapEditor() {
     </Panel>
   );
 
+  const routeHandshakeBuilder = (
+    <div className="map-route-builder-card">
+      <div className="map-route-builder-card__header">
+        <div>
+          <strong>Route Handshake Builder</strong>
+          <span>Generate the matching Chaos Core entry rule for an operation room, floor region, door, or portal.</span>
+        </div>
+        <span className={routeTargetsReady ? "pill accent" : "pill warning"}>
+          {routeTargetsReady ? "Handshake ready" : "Needs route target"}
+        </span>
+      </div>
+      <div className="form-grid compact">
+        <label className="field">
+          <span>Route source</span>
+          <select value={routeBuilderDraft.source} onChange={(event) => updateRouteBuilderSource(event.target.value as MapEntrySource)}>
+            <option value="atlas_theater">Atlas theater room</option>
+            <option value="floor_region">Floor / region</option>
+            <option value="door">Door</option>
+            <option value="portal">Portal</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>Route label</span>
+          <input
+            value={routeBuilderDraft.label}
+            onChange={(event) => setRouteBuilderDraft((current) => ({ ...current, label: event.target.value }))}
+            placeholder={routeBuilderLabelForSource(routeBuilderDraft.source)}
+          />
+        </label>
+        {routeBuilderDraft.source === "atlas_theater" ? (
+          <label className="field">
+            <span>Theater room id</span>
+            <input
+              value={routeBuilderDraft.theaterScreenId}
+              onChange={(event) => setRouteBuilderDraft((current) => ({ ...current, theaterScreenId: event.target.value }))}
+              placeholder="room_ingress"
+            />
+          </label>
+        ) : null}
+        {routeBuilderDraft.source === "floor_region" ? (
+          <>
+            <label className="field">
+              <span>Floor ordinal</span>
+              <input
+                type="number"
+                min={0}
+                value={routeBuilderDraft.floorOrdinal}
+                onChange={(event) => setRouteBuilderDraft((current) => ({ ...current, floorOrdinal: Number(event.target.value || 0) }))}
+              />
+            </label>
+            <label className="field">
+              <span>Region id</span>
+              <input
+                value={routeBuilderDraft.regionId}
+                onChange={(event) => setRouteBuilderDraft((current) => ({ ...current, regionId: event.target.value }))}
+                placeholder="floor_0, silt_delta, fairhaven_docks"
+              />
+            </label>
+          </>
+        ) : null}
+        {routeBuilderDraft.source === "door" || routeBuilderDraft.source === "portal" ? (
+          <>
+            <label className="field">
+              <span>Source map id</span>
+              <input
+                value={routeBuilderDraft.sourceMapId}
+                onChange={(event) => setRouteBuilderDraft((current) => ({ ...current, sourceMapId: event.target.value }))}
+                placeholder="outer_deck_overworld"
+              />
+            </label>
+            <label className="field">
+              <span>{routeBuilderDraft.source === "portal" ? "Portal id" : "Door id"}</span>
+              <input
+                value={routeBuilderDraft.source === "portal" ? routeBuilderDraft.portalId : routeBuilderDraft.doorId}
+                onChange={(event) =>
+                  setRouteBuilderDraft((current) =>
+                    routeBuilderDraft.source === "portal"
+                      ? { ...current, portalId: event.target.value }
+                      : { ...current, doorId: event.target.value }
+                  )
+                }
+                placeholder={routeBuilderDraft.source === "portal" ? "portal_id" : "door_id"}
+              />
+            </label>
+          </>
+        ) : null}
+        <label className="field">
+          <span>Operation id</span>
+          <input
+            value={routeBuilderDraft.operationId}
+            onChange={(event) => setRouteBuilderDraft((current) => ({ ...current, operationId: event.target.value }))}
+            placeholder="Optional operation id"
+          />
+        </label>
+        <label className="field">
+          <span>Entry anchor</span>
+          <select
+            value={routeBuilderDraft.entryPointId}
+            onChange={(event) => setRouteBuilderDraft((current) => ({ ...current, entryPointId: event.target.value }))}
+          >
+            <option value="">Auto-use player anchor</option>
+            {(map.spawnAnchors ?? []).map((anchor) => (
+              <option key={anchor.id} value={anchor.id}>
+                {anchor.label || anchor.id} ({anchor.id})
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div className="toolbar">
+        <button type="button" className="ghost-button" onClick={applyRouteBuilderToMap}>
+          Create / replace route
+        </button>
+        <button type="button" className="ghost-button" onClick={setPlayerAnchorToSelectedTile}>
+          Use selected tile as player entry
+        </button>
+        <button type="button" className="ghost-button" onClick={repairRouteTargets}>
+          Repair route targets
+        </button>
+      </div>
+      <small>
+        For Operation Editor room routes, use the same field map id here and the same theater room id in the operation room.
+      </small>
+    </div>
+  );
+
   const mapControlsSurface = (
     <Panel
       title="Map Controls"
@@ -2518,6 +4105,434 @@ export function MapEditor() {
           <button type="button" className="ghost-button" onClick={syncBrushFromSelectedTile} disabled={!selectedCell}>
             Copy selected tile to brush
           </button>
+        </div>
+      </div>
+
+      <div className="subsection map-3d-build-kit">
+        <h4>3D Build Kit</h4>
+        <div className="map-selection-summary">
+          <strong>Fast setup for routeable 3D field maps</strong>
+          <span>
+            These actions wire the common authoring pieces together: render mode, tags, entry routes, spawn anchors,
+            and vertical layer hints. They do not change the Chaos Core map schema.
+          </span>
+          <div className="chip-row">
+            <span className="pill accent">{activeMapRenderProfile.label}</span>
+            <span className="pill">{entryRouteCount} routes</span>
+            <span className="pill">{spawnAnchorCount} anchors</span>
+            <span className="pill">{verticalCellCount} vertical cells</span>
+          </div>
+        </div>
+        <div className="map-build-action-grid">
+          <button type="button" className="map-build-action" onClick={prepareSimple3DFieldMap}>
+            <strong>Simple 3D field</strong>
+            <span>Mode, route, player anchor, starter enemy pocket.</span>
+          </button>
+          <button type="button" className="map-build-action" onClick={prepareBespokePortalMap}>
+            <strong>Bespoke portal map</strong>
+            <span>Vertical data, portal route, arrival anchor.</span>
+          </button>
+          <button type="button" className="map-build-action" onClick={addEnemyAnchorRing}>
+            <strong>Enemy anchor ring</strong>
+            <span>Add four tagged enemy pockets around selection.</span>
+          </button>
+          <button type="button" className="map-build-action" onClick={stampRaisedPlatform}>
+            <strong>Raised platform</strong>
+            <span>Stamp a 3x3 vertical platform on the active layer.</span>
+          </button>
+        </div>
+      </div>
+
+      <div className="subsection">
+        <h4>3D Field Workflow</h4>
+        <div className="map-mode-card-grid">
+          {MAP_RENDER_MODE_PROFILES.map((profile) => (
+            <button
+              key={profile.id}
+              type="button"
+              className={activeMapRenderMode === profile.id ? "map-mode-card active" : "map-mode-card"}
+              onClick={() => applyMapRenderModePreset(profile.id)}
+            >
+              <strong>{profile.label}</strong>
+              <small>{profile.summary}</small>
+            </button>
+          ))}
+        </div>
+        <div className="map-selection-summary">
+          <strong>
+            {activeMapRenderProfile.label} authoring // {map3dAdapter.tiles.length} adapter tiles
+          </strong>
+          <span>
+            Technica publishes the normal field map plus a generated 3D adapter. Chaos Core keeps 2D collision, but
+            renders simple/bespoke 3D maps with raised surfaces and route-aware spawn anchors.
+          </span>
+          <div className="chip-row">
+            {map3dReadiness.map((item) => (
+              <span key={item.label} className={item.ready ? "pill accent" : "pill warning"}>
+                {item.ready ? "Ready" : "Needs"} {item.label}
+              </span>
+            ))}
+          </div>
+        </div>
+        <div className="form-grid">
+          <label className="field">
+            <span>Map mode</span>
+            <select value={activeMapRenderMode} onChange={(event) => applyMapRenderModePreset(event.target.value as MapRenderMode)}>
+              {MAP_RENDER_MODE_PROFILES.map((profile) => (
+                <option key={profile.id} value={profile.id}>
+                  {profile.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Preview camera</span>
+            <select
+              value={map3dSettings.previewCamera}
+              onChange={(event) =>
+                updateMap3DSettings((settings) => ({
+                  ...settings,
+                  previewCamera: event.target.value as Map3DSettings["previewCamera"]
+                }))
+              }
+            >
+              <option value="isometric">Isometric</option>
+              <option value="third_person">Third person</option>
+              <option value="top_down">Top down</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Wall height</span>
+            <input
+              type="number"
+              min={0}
+              step={0.1}
+              value={map3dSettings.wallHeight}
+              onChange={(event) =>
+                updateMap3DSettings((settings) => ({
+                  ...settings,
+                  wallHeight: Number(event.target.value || 0)
+                }))
+              }
+            />
+          </label>
+          <label className="field">
+            <span>Floor thickness</span>
+            <input
+              type="number"
+              min={0}
+              step={0.05}
+              value={map3dSettings.floorThickness}
+              onChange={(event) =>
+                updateMap3DSettings((settings) => ({
+                  ...settings,
+                  floorThickness: Number(event.target.value || 0)
+                }))
+              }
+            />
+          </label>
+          <label className="field">
+            <span>Default 3D surface</span>
+            <input
+              value={map3dSettings.defaultSurface}
+              onChange={(event) =>
+                updateMap3DSettings((settings) => ({
+                  ...settings,
+                  defaultSurface: event.target.value
+                }))
+              }
+            />
+          </label>
+          <label className="field full">
+            <span>Map tags</span>
+            <textarea
+              rows={3}
+              value={serializeMultilineList(map.mapTags ?? [])}
+              onChange={(event) => patchMap((current) => ({ ...current, mapTags: parseMultilineList(event.target.value) }))}
+            />
+          </label>
+          <label className="field full">
+            <span>Floor / region tags</span>
+            <textarea
+              rows={3}
+              value={serializeMultilineList(map.regionTags ?? [])}
+              onChange={(event) => patchMap((current) => ({ ...current, regionTags: parseMultilineList(event.target.value) }))}
+            />
+          </label>
+          <label className="field full">
+            <span>3D metadata</span>
+            <textarea
+              rows={3}
+              value={serializeKeyValueLines(map3dSettings.metadata)}
+              onChange={(event) =>
+                updateMap3DSettings((settings) => ({
+                  ...settings,
+                  metadata: parseKeyValueLines(event.target.value)
+                }))
+              }
+            />
+          </label>
+        </div>
+      </div>
+
+      <div className="subsection">
+        <h4>Entry Routing</h4>
+        <div className="map-selection-summary">
+          <strong>{entryRouteCount} route(s) into this map</strong>
+          <span>
+            Routes tell Chaos Core where this authored field map can be entered from: theater rooms, floor regions,
+            doors, or portals. Each route should point at a spawn anchor.
+          </span>
+          <div className="chip-row">
+            <span className={routeTargetsReady ? "pill accent" : "pill warning"}>
+              {routeTargetsReady ? "Ready" : "Needs"} route targets
+            </span>
+            {blankRouteTargetCount > 0 ? <span className="pill warning">{blankRouteTargetCount} blank target(s)</span> : null}
+            {missingRouteTargetIds.length > 0 ? (
+              <span className="pill warning">Missing: {missingRouteTargetIds.join(", ")}</span>
+            ) : null}
+          </div>
+        </div>
+        {routeHandshakeBuilder}
+        {outboundRouteProofPanel}
+        <div className="toolbar">
+          <button type="button" className="ghost-button" onClick={() => addEntryRule("atlas_theater")}>
+            Add theater route
+          </button>
+          <button type="button" className="ghost-button" onClick={() => addEntryRule("floor_region")}>
+            Add floor route
+          </button>
+          <button type="button" className="ghost-button" onClick={() => addEntryRule("door")}>
+            Add door route
+          </button>
+          <button type="button" className="ghost-button" onClick={() => addEntryRule("portal")}>
+            Add portal route
+          </button>
+          <button type="button" className="ghost-button" onClick={createFloorZeroRouteStarter}>
+            Create floor-0 starter
+          </button>
+          <button type="button" className="ghost-button" onClick={repairRouteTargets}>
+            Repair route targets
+          </button>
+        </div>
+        <div className="database-list map-route-list">
+          {(map.entryRules ?? []).length === 0 ? (
+            <div className="empty-state compact">No entry routes yet. Add one when this map should be reachable in-game.</div>
+          ) : null}
+          {(map.entryRules ?? []).map((entryRule, index) => (
+            <article key={`${entryRule.id}-${index}`} className="database-entry map-route-card">
+              <div className="dialogue-entry-header">
+                <span className="flow-badge jump">{MAP_ENTRY_SOURCE_LABELS[entryRule.source] ?? entryRule.source}</span>
+                <button type="button" className="ghost-button danger" onClick={() => removeEntryRule(index)}>
+                  Remove
+                </button>
+              </div>
+              <div className="form-grid">
+                <label className="field">
+                  <span>Route id</span>
+                  <input value={entryRule.id} onChange={(event) => updateEntryRule(index, (entry) => ({ ...entry, id: event.target.value }))} />
+                </label>
+                <label className="field">
+                  <span>Source</span>
+                  <select
+                    value={entryRule.source}
+                    onChange={(event) => updateEntryRule(index, (entry) => ({ ...entry, source: event.target.value as MapEntrySource }))}
+                  >
+                    <option value="atlas_theater">Atlas theater</option>
+                    <option value="floor_region">Floor region</option>
+                    <option value="door">Door</option>
+                    <option value="portal">Portal</option>
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Label</span>
+                  <input value={entryRule.label} onChange={(event) => updateEntryRule(index, (entry) => ({ ...entry, label: event.target.value }))} />
+                </label>
+                <label className="field">
+                  <span>Entry anchor</span>
+                  <select
+                    value={entryRule.entryPointId ?? ""}
+                    onChange={(event) => updateEntryRule(index, (entry) => ({ ...entry, entryPointId: event.target.value }))}
+                  >
+                    <option value="">No anchor selected</option>
+                    {(map.spawnAnchors ?? []).map((anchor) => (
+                      <option key={anchor.id} value={anchor.id}>
+                        {anchor.label || anchor.id} ({anchor.id})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Floor</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={entryRule.floorOrdinal ?? 0}
+                    onChange={(event) => updateEntryRule(index, (entry) => ({ ...entry, floorOrdinal: Number(event.target.value || 0) }))}
+                  />
+                </label>
+                <label className="field">
+                  <span>Region id</span>
+                  <input
+                    value={entryRule.regionId ?? ""}
+                    onChange={(event) => updateEntryRule(index, (entry) => ({ ...entry, regionId: event.target.value }))}
+                    placeholder="floor_0, silt_delta, fairhaven_docks"
+                  />
+                </label>
+                <label className="field">
+                  <span>Theater screen id</span>
+                  <input
+                    value={entryRule.theaterScreenId ?? ""}
+                    onChange={(event) => updateEntryRule(index, (entry) => ({ ...entry, theaterScreenId: event.target.value }))}
+                    placeholder="theater room id"
+                  />
+                </label>
+                <label className="field">
+                  <span>Operation id</span>
+                  <input
+                    value={entryRule.operationId ?? ""}
+                    onChange={(event) => updateEntryRule(index, (entry) => ({ ...entry, operationId: event.target.value }))}
+                  />
+                </label>
+                <label className="field">
+                  <span>Source map id</span>
+                  <input
+                    value={entryRule.sourceMapId ?? ""}
+                    onChange={(event) => updateEntryRule(index, (entry) => ({ ...entry, sourceMapId: event.target.value }))}
+                  />
+                </label>
+                <label className="field">
+                  <span>{entryRule.source === "portal" ? "Portal id" : "Door id"}</span>
+                  <input
+                    value={entryRule.source === "portal" ? entryRule.portalId ?? "" : entryRule.doorId ?? ""}
+                    onChange={(event) =>
+                      updateEntryRule(index, (entry) => ({
+                        ...entry,
+                        doorId: entry.source === "door" ? event.target.value : entry.doorId,
+                        portalId: entry.source === "portal" ? event.target.value : entry.portalId
+                      }))
+                    }
+                  />
+                </label>
+                <label className="field full">
+                  <span>Unlock requirements</span>
+                  <textarea
+                    rows={3}
+                    value={serializeMultilineList(entryRule.unlockRequirements ?? [])}
+                    onChange={(event) =>
+                      updateEntryRule(index, (entry) => ({
+                        ...entry,
+                        unlockRequirements: parseMultilineList(event.target.value)
+                      }))
+                    }
+                  />
+                </label>
+              </div>
+            </article>
+          ))}
+        </div>
+      </div>
+
+      <div className="subsection">
+        <h4>Spawn Anchors</h4>
+        <div className="map-selection-summary">
+          <strong>{spawnAnchorCount} anchor(s)</strong>
+          <span>
+            Anchors are named spawn points for the player, portal exits, NPC staging, and enemy pockets. New anchors use
+            the selected tile when one is selected.
+          </span>
+        </div>
+        <div className="toolbar">
+          <button type="button" className="ghost-button" onClick={() => addSpawnAnchor("player")}>
+            Add player
+          </button>
+          <button type="button" className="ghost-button" onClick={() => addSpawnAnchor("portal_exit")}>
+            Add portal exit
+          </button>
+          <button type="button" className="ghost-button" onClick={() => addSpawnAnchor("enemy")}>
+            Add enemy pocket
+          </button>
+          <button type="button" className="ghost-button" onClick={() => addSpawnAnchor("npc")}>
+            Add NPC anchor
+          </button>
+        </div>
+        <div className="database-list map-anchor-list">
+          {(map.spawnAnchors ?? []).length === 0 ? (
+            <div className="empty-state compact">No spawn anchors yet. Add a player anchor before publishing routeable maps.</div>
+          ) : null}
+          {(map.spawnAnchors ?? []).map((anchor, index) => (
+            <article key={`${anchor.id}-${index}`} className="database-entry map-anchor-card">
+              <div className="dialogue-entry-header">
+                <span className="flow-badge jump">{MAP_SPAWN_ANCHOR_LABELS[anchor.kind] ?? anchor.kind}</span>
+                <div className="toolbar">
+                  <button type="button" className="ghost-button" onClick={() => focusSpawnAnchor(anchor.x, anchor.y)}>
+                    Focus
+                  </button>
+                  <button type="button" className="ghost-button danger" onClick={() => removeSpawnAnchor(index)}>
+                    Remove
+                  </button>
+                </div>
+              </div>
+              <div className="form-grid">
+                <label className="field">
+                  <span>Anchor id</span>
+                  <input value={anchor.id} onChange={(event) => updateSpawnAnchor(index, (entry) => ({ ...entry, id: event.target.value }))} />
+                </label>
+                <label className="field">
+                  <span>Kind</span>
+                  <select
+                    value={anchor.kind}
+                    onChange={(event) => updateSpawnAnchor(index, (entry) => ({ ...entry, kind: event.target.value as MapSpawnAnchorKind }))}
+                  >
+                    <option value="player">Player</option>
+                    <option value="enemy">Enemy</option>
+                    <option value="npc">NPC</option>
+                    <option value="portal_exit">Portal exit</option>
+                    <option value="generic">Generic</option>
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Label</span>
+                  <input value={anchor.label} onChange={(event) => updateSpawnAnchor(index, (entry) => ({ ...entry, label: event.target.value }))} />
+                </label>
+                <label className="field">
+                  <span>X</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={Math.max(0, map.width - 1)}
+                    value={anchor.x}
+                    onChange={(event) => updateSpawnAnchor(index, (entry) => ({ ...entry, x: Number(event.target.value || 0) }))}
+                  />
+                </label>
+                <label className="field">
+                  <span>Y</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={Math.max(0, map.height - 1)}
+                    value={anchor.y}
+                    onChange={(event) => updateSpawnAnchor(index, (entry) => ({ ...entry, y: Number(event.target.value || 0) }))}
+                  />
+                </label>
+                <label className="field">
+                  <span>Layer id</span>
+                  <input
+                    value={anchor.layerId ?? ""}
+                    onChange={(event) => updateSpawnAnchor(index, (entry) => ({ ...entry, layerId: event.target.value }))}
+                  />
+                </label>
+                <label className="field full">
+                  <span>Tags</span>
+                  <textarea
+                    rows={3}
+                    value={serializeMultilineList(anchor.tags ?? [])}
+                    onChange={(event) => updateSpawnAnchor(index, (entry) => ({ ...entry, tags: parseMultilineList(event.target.value) }))}
+                  />
+                </label>
+              </div>
+            </article>
+          ))}
         </div>
       </div>
 
@@ -3745,6 +5760,82 @@ export function MapEditor() {
               />
             </label>
             <label className="field">
+              <span>Map mode</span>
+              <select
+                value={map.renderMode ?? map3dSettings.renderMode}
+                onChange={(event) =>
+                  patchMap((current) => {
+                    const renderMode = event.target.value as Map3DSettings["renderMode"];
+                    const currentSettings = current.settings3d ?? map3dSettings;
+                    return {
+                      ...current,
+                      renderMode,
+                      settings3d: {
+                        ...currentSettings,
+                        renderMode
+                      }
+                    };
+                  })
+                }
+              >
+                <option value="classic_2d">Classic 2D field map</option>
+                <option value="simple_3d">Simple 3D from 2D grid</option>
+                <option value="bespoke_3d">Bespoke 3D field map</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Preview camera</span>
+              <select
+                value={map3dSettings.previewCamera}
+                onChange={(event) =>
+                  patchMap((current) => ({
+                    ...current,
+                    settings3d: {
+                      ...(current.settings3d ?? map3dSettings),
+                      previewCamera: event.target.value as Map3DSettings["previewCamera"]
+                    }
+                  }))
+                }
+              >
+                <option value="isometric">Isometric</option>
+                <option value="third_person">Third person</option>
+                <option value="top_down">Top down</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Wall height</span>
+              <input
+                type="number"
+                min={0}
+                step={0.1}
+                value={map3dSettings.wallHeight}
+                onChange={(event) =>
+                  patchMap((current) => ({
+                    ...current,
+                    settings3d: {
+                      ...(current.settings3d ?? map3dSettings),
+                      wallHeight: Number(event.target.value || 0)
+                    }
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Default 3D surface</span>
+              <input
+                value={map3dSettings.defaultSurface}
+                onChange={(event) =>
+                  patchMap((current) => ({
+                    ...current,
+                    settings3d: {
+                      ...(current.settings3d ?? map3dSettings),
+                      defaultSurface: event.target.value
+                    }
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
               <span>Zoom</span>
               <input type="range" min={0.6} max={1.8} step={0.1} value={zoom} onChange={(event) => setZoom(Number(event.target.value))} />
             </label>
@@ -3788,6 +5879,22 @@ export function MapEditor() {
               />
             </label>
             <label className="field full">
+              <span>Map tags</span>
+              <textarea
+                rows={3}
+                value={serializeMultilineList(map.mapTags ?? [])}
+                onChange={(event) => patchMap((current) => ({ ...current, mapTags: parseMultilineList(event.target.value) }))}
+              />
+            </label>
+            <label className="field full">
+              <span>Floor / region tags</span>
+              <textarea
+                rows={3}
+                value={serializeMultilineList(map.regionTags ?? [])}
+                onChange={(event) => patchMap((current) => ({ ...current, regionTags: parseMultilineList(event.target.value) }))}
+              />
+            </label>
+            <label className="field full">
               <span>Map metadata</span>
               <textarea
                 rows={4}
@@ -3795,6 +5902,486 @@ export function MapEditor() {
                 onChange={(event) => patchMap((current) => ({ ...current, metadata: parseKeyValueLines(event.target.value) }))}
               />
             </label>
+            <label className="field full">
+              <span>3D metadata</span>
+              <textarea
+                rows={3}
+                value={serializeKeyValueLines(map3dSettings.metadata)}
+                onChange={(event) =>
+                  patchMap((current) => ({
+                    ...current,
+                    settings3d: {
+                      ...(current.settings3d ?? map3dSettings),
+                      metadata: parseKeyValueLines(event.target.value)
+                    }
+                  }))
+                }
+              />
+            </label>
+          </div>
+
+          <div className="subsection">
+            <h4>Entry Rules</h4>
+            <div className="map-selection-summary">
+              <strong>{map.entryRules?.length ?? 0} entry rule(s)</strong>
+              <span>
+                Use these to connect floor regions, doors, portals, or Atlas theater screens into this authored field map.
+                Atlas theater routes use the theater room id as the screen id; floor-region routes can target floor numbers,
+                campaign regions, or published floor ids.
+              </span>
+            </div>
+            {routeHandshakeBuilder}
+            {outboundRouteProofPanel}
+            <div className="dialogue-entry-list">
+              {(map.entryRules ?? []).map((entryRule, index) => (
+                <article key={`${entryRule.id}-${index}`} className="dialogue-entry-card">
+                  <div className="dialogue-entry-header">
+                    <span className="flow-badge jump">{entryRule.source}</span>
+                    <button
+                      type="button"
+                      className="ghost-button danger"
+                      onClick={() =>
+                        patchMap((current) => ({
+                          ...current,
+                          entryRules: (current.entryRules ?? []).filter((_, entryIndex) => entryIndex !== index)
+                        }))
+                      }
+                    >
+                      Remove
+                    </button>
+                  </div>
+                  <div className="form-grid">
+                    <label className="field">
+                      <span>Rule id</span>
+                      <input
+                        value={entryRule.id}
+                        onChange={(event) =>
+                          patchMap((current) => ({
+                            ...current,
+                            entryRules: (current.entryRules ?? []).map((entry, entryIndex) =>
+                              entryIndex === index ? { ...entry, id: event.target.value } : entry
+                            )
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Source</span>
+                      <select
+                        value={entryRule.source}
+                        onChange={(event) =>
+                          patchMap((current) => ({
+                            ...current,
+                            entryRules: (current.entryRules ?? []).map((entry, entryIndex) =>
+                              entryIndex === index
+                                ? { ...entry, source: event.target.value as (typeof entryRule)["source"] }
+                                : entry
+                            )
+                          }))
+                        }
+                      >
+                        <option value="atlas_theater">Atlas theater screen</option>
+                        <option value="floor_region">Floor region</option>
+                        <option value="door">Door</option>
+                        <option value="portal">Portal</option>
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>Floor</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={entryRule.floorOrdinal ?? 0}
+                        onChange={(event) =>
+                          patchMap((current) => ({
+                            ...current,
+                            entryRules: (current.entryRules ?? []).map((entry, entryIndex) =>
+                              entryIndex === index ? { ...entry, floorOrdinal: Number(event.target.value || 0) } : entry
+                            )
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Region id</span>
+                      <input
+                        value={entryRule.regionId ?? ""}
+                        onChange={(event) =>
+                          patchMap((current) => ({
+                            ...current,
+                            entryRules: (current.entryRules ?? []).map((entry, entryIndex) =>
+                              entryIndex === index ? { ...entry, regionId: event.target.value } : entry
+                            )
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Theater screen id</span>
+                      <input
+                        value={entryRule.theaterScreenId ?? ""}
+                        onChange={(event) =>
+                          patchMap((current) => ({
+                            ...current,
+                            entryRules: (current.entryRules ?? []).map((entry, entryIndex) =>
+                              entryIndex === index ? { ...entry, theaterScreenId: event.target.value } : entry
+                            )
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Door / portal id</span>
+                      <input
+                        value={entryRule.doorId ?? entryRule.portalId ?? ""}
+                        onChange={(event) =>
+                          patchMap((current) => ({
+                            ...current,
+                            entryRules: (current.entryRules ?? []).map((entry, entryIndex) =>
+                              entryIndex === index
+                                ? {
+                                    ...entry,
+                                    doorId: entry.source === "door" ? event.target.value : entry.doorId,
+                                    portalId: entry.source === "portal" ? event.target.value : entry.portalId
+                                  }
+                                : entry
+                            )
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Entry anchor id</span>
+                      <input
+                        value={entryRule.entryPointId ?? ""}
+                        onChange={(event) =>
+                          patchMap((current) => ({
+                            ...current,
+                            entryRules: (current.entryRules ?? []).map((entry, entryIndex) =>
+                              entryIndex === index ? { ...entry, entryPointId: event.target.value } : entry
+                            )
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="field full">
+                      <span>Unlock requirements</span>
+                      <textarea
+                        rows={3}
+                        value={serializeMultilineList(entryRule.unlockRequirements ?? [])}
+                        onChange={(event) =>
+                          patchMap((current) => ({
+                            ...current,
+                            entryRules: (current.entryRules ?? []).map((entry, entryIndex) =>
+                              entryIndex === index ? { ...entry, unlockRequirements: parseMultilineList(event.target.value) } : entry
+                            )
+                          }))
+                        }
+                      />
+                    </label>
+                  </div>
+                </article>
+              ))}
+            </div>
+            <div className="toolbar">
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() =>
+                  patchMap((current) => ({
+                    ...current,
+                    entryRules: [
+                      ...(current.entryRules ?? []),
+                      {
+                        id: `entry_${(current.entryRules ?? []).length + 1}`,
+                        source: "floor_region",
+                        floorOrdinal: 0,
+                        regionId: "",
+                        operationId: "",
+                        theaterScreenId: "",
+                        sourceMapId: "",
+                        doorId: "",
+                        portalId: "",
+                        label: "New Entry",
+                        entryPointId: current.spawnAnchors?.find((anchor) => anchor.kind === "player")?.id ?? "player_start",
+                        unlockRequirements: [],
+                        metadata: {}
+                      }
+                    ]
+                  }))
+                }
+              >
+                Add entry rule
+              </button>
+            </div>
+          </div>
+
+          <div className="subsection">
+            <h4>Spawn Anchors</h4>
+            <div className="map-selection-summary">
+              <strong>{map.spawnAnchors?.length ?? 0} anchor(s)</strong>
+              <span>Anchors give 3D maps reliable player starts, enemy spawn pockets, NPC positions, and portal exits.</span>
+            </div>
+            <div className="dialogue-entry-list">
+              {(map.spawnAnchors ?? []).map((anchor, index) => (
+                <article key={`${anchor.id}-${index}`} className="dialogue-entry-card">
+                  <div className="dialogue-entry-header">
+                    <span className="flow-badge jump">{anchor.kind}</span>
+                    <button
+                      type="button"
+                      className="ghost-button danger"
+                      onClick={() =>
+                        patchMap((current) => ({
+                          ...current,
+                          spawnAnchors: (current.spawnAnchors ?? []).filter((_, anchorIndex) => anchorIndex !== index)
+                        }))
+                      }
+                    >
+                      Remove
+                    </button>
+                  </div>
+                  <div className="form-grid">
+                    <label className="field">
+                      <span>Anchor id</span>
+                      <input
+                        value={anchor.id}
+                        onChange={(event) =>
+                          patchMap((current) => ({
+                            ...current,
+                            spawnAnchors: (current.spawnAnchors ?? []).map((entry, anchorIndex) =>
+                              anchorIndex === index ? { ...entry, id: event.target.value } : entry
+                            )
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Kind</span>
+                      <select
+                        value={anchor.kind}
+                        onChange={(event) =>
+                          patchMap((current) => ({
+                            ...current,
+                            spawnAnchors: (current.spawnAnchors ?? []).map((entry, anchorIndex) =>
+                              anchorIndex === index ? { ...entry, kind: event.target.value as (typeof anchor)["kind"] } : entry
+                            )
+                          }))
+                        }
+                      >
+                        <option value="player">Player</option>
+                        <option value="enemy">Enemy</option>
+                        <option value="npc">NPC</option>
+                        <option value="portal_exit">Portal exit</option>
+                        <option value="generic">Generic</option>
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>X</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={anchor.x}
+                        onChange={(event) =>
+                          patchMap((current) => ({
+                            ...current,
+                            spawnAnchors: (current.spawnAnchors ?? []).map((entry, anchorIndex) =>
+                              anchorIndex === index ? { ...entry, x: Number(event.target.value || 0) } : entry
+                            )
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Y</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={anchor.y}
+                        onChange={(event) =>
+                          patchMap((current) => ({
+                            ...current,
+                            spawnAnchors: (current.spawnAnchors ?? []).map((entry, anchorIndex) =>
+                              anchorIndex === index ? { ...entry, y: Number(event.target.value || 0) } : entry
+                            )
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Layer id</span>
+                      <input
+                        value={anchor.layerId ?? ""}
+                        onChange={(event) =>
+                          patchMap((current) => ({
+                            ...current,
+                            spawnAnchors: (current.spawnAnchors ?? []).map((entry, anchorIndex) =>
+                              anchorIndex === index ? { ...entry, layerId: event.target.value } : entry
+                            )
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="field full">
+                      <span>Tags</span>
+                      <textarea
+                        rows={3}
+                        value={serializeMultilineList(anchor.tags ?? [])}
+                        onChange={(event) =>
+                          patchMap((current) => ({
+                            ...current,
+                            spawnAnchors: (current.spawnAnchors ?? []).map((entry, anchorIndex) =>
+                              anchorIndex === index ? { ...entry, tags: parseMultilineList(event.target.value) } : entry
+                            )
+                          }))
+                        }
+                      />
+                    </label>
+                  </div>
+                </article>
+              ))}
+            </div>
+            <div className="toolbar">
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() =>
+                  patchMap((current) => ({
+                    ...current,
+                    spawnAnchors: [
+                      ...(current.spawnAnchors ?? []),
+                      {
+                        id: `anchor_${(current.spawnAnchors ?? []).length + 1}`,
+                        kind: "enemy",
+                        x: selectedCell?.x ?? 1,
+                        y: selectedCell?.y ?? 1,
+                        label: "New Anchor",
+                        tags: ["enemy"],
+                        metadata: {}
+                      }
+                    ]
+                  }))
+                }
+              >
+                Add spawn anchor
+              </button>
+            </div>
+          </div>
+
+          <div className="subsection">
+            <h4>3D Adapter Preview</h4>
+            <div className="map-selection-summary">
+              <strong>{map3dAdapter.renderMode.replace(/_/g, " ")}</strong>
+              <span>
+                Technica will publish a generated 3D adapter payload alongside the normal 2D field map. Chaos Core can use this as
+                the simple 2D-to-3D runtime bridge while bespoke 3D authoring comes online.
+              </span>
+            </div>
+            <div className="chip-row">
+              <span className="pill">{map3dAdapter.tiles.length} adapter tiles</span>
+              <span className="pill">{map3dPreview.wallTileCount} walls</span>
+              <span className="pill">{map3dPreview.elevatedTileCount} elevated</span>
+              <span className="pill">{map3dPreview.blockedTileCount} blocked</span>
+              <span className="pill">{map3dAdapter.traversalLinks.length} traversal links</span>
+              <span className="pill">{map3dAdapter.spawnAnchors.length} spawn anchors</span>
+              <span className="pill">{map3dAdapter.previewCamera} camera</span>
+            </div>
+            <div className="map-3d-preview-shell">
+              <div className="map-3d-preview-toolbar">
+                <div className="chip-row">
+                  <span className="pill accent">Visual adapter</span>
+                  <span className="pill">Step {map3dPreview.previewStep}</span>
+                  {map3dPreview.hiddenTileCount > 0 ? (
+                    <span className="pill">{map3dPreview.hiddenTileCount} tiles sampled out</span>
+                  ) : null}
+                  {map3dPreview.noFloorTileCount > 0 ? (
+                    <span className="pill warning">{map3dPreview.noFloorTileCount} no-floor</span>
+                  ) : null}
+                </div>
+                <div className="map-3d-preview-legend">
+                  <span><i className="preview-key walkable" /> Walkable</span>
+                  <span><i className="preview-key wall" /> Wall</span>
+                  <span><i className="preview-key anchor" /> Anchor</span>
+                  <span><i className="preview-key connector" /> Connector</span>
+                </div>
+              </div>
+              <div className="map-3d-preview-viewport" aria-label="3D adapter visual preview">
+                <div
+                  className="map-3d-preview-stage"
+                  style={{
+                    width: `${map3dPreview.stageWidth}px`,
+                    height: `${map3dPreview.stageHeight}px`
+                  }}
+                >
+                  {map3dPreview.connectorLines.length > 0 ? (
+                    <svg
+                      className="map-3d-preview-connectors"
+                      width={map3dPreview.stageWidth}
+                      height={map3dPreview.stageHeight}
+                      viewBox={`0 0 ${map3dPreview.stageWidth} ${map3dPreview.stageHeight}`}
+                      aria-hidden="true"
+                    >
+                      {map3dPreview.connectorLines.map(({ connector, from, to }) => (
+                        <line
+                          key={connector.id}
+                          x1={from.x}
+                          y1={from.y}
+                          x2={to.x}
+                          y2={to.y}
+                          className={connector.bidirectional ? "map-3d-preview-connector two-way" : "map-3d-preview-connector"}
+                        />
+                      ))}
+                    </svg>
+                  ) : null}
+                  {map3dPreview.tiles.map(({ tile, terrain, style }) => (
+                    <button
+                      key={`preview-tile-${tile.x}-${tile.y}`}
+                      type="button"
+                      className={[
+                        "map-3d-preview-tile",
+                        tile.wall ? "wall" : "",
+                        tile.walkable ? "walkable" : "blocked",
+                        tile.floor ? "" : "void",
+                        tile.elevation > 0 ? "elevated" : ""
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
+                      style={style}
+                      title={`${tile.x},${tile.y} ${terrain} z${tile.elevation} ${tile.surface} ${tile.layerId}`}
+                      onClick={() => {
+                        setSelectedCell({ x: tile.x, y: tile.y });
+                        setSelectedObjectId(null);
+                        setSelectedZoneId(null);
+                        setSelectedNpcMarkerEntryKey(null);
+                        setTool("select");
+                      }}
+                    >
+                      <span className="map-3d-preview-column" />
+                      <span className="map-3d-preview-top" />
+                      {tile.wall ? <span className="map-3d-preview-wall-face" /> : null}
+                    </button>
+                  ))}
+                  {map3dPreview.anchors.map(({ anchor, style }) => (
+                    <button
+                      key={`preview-anchor-${anchor.id}`}
+                      type="button"
+                      className={`map-3d-preview-anchor ${anchor.kind}`}
+                      style={style}
+                      title={`${anchor.kind}: ${anchor.label || anchor.id}`}
+                      onClick={() => focusSpawnAnchor(anchor.x, anchor.y)}
+                    >
+                      <span>{anchor.kind === "player" ? "P" : anchor.kind === "enemy" ? "E" : anchor.kind === "portal_exit" ? "X" : "A"}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="map-3d-readiness-grid">
+              {map3dReadiness.map((item) => (
+                <span key={`adapter-preview-${item.label}`} className={item.ready ? "pill accent" : "pill warning"}>
+                  {item.ready ? "Ready" : "Needs"} {item.label}
+                </span>
+              ))}
+            </div>
           </div>
 
           <div className="subsection">

@@ -13,6 +13,27 @@ export interface FieldEnemySpawnDocument {
   mapIds: string[];
   floorOrdinals: number[];
   spawnCount: number;
+  regionIds?: string[];
+  mapTags?: string[];
+  spawnAnchorTags?: string[];
+  allowGeneratedAprons?: boolean;
+  avoidSafeZones?: boolean;
+  minDistanceFromPlayerSpawn?: number;
+}
+
+export type FieldEnemyPresentationMode = "billboard_sprite" | "model_3d";
+export type FieldEnemyFacingMode = "camera" | "movement" | "fixed";
+
+export interface FieldEnemyPresentationDocument {
+  mode: FieldEnemyPresentationMode;
+  modelKey: string;
+  modelAssetPath: string;
+  materialKey: string;
+  scale: number;
+  heightOffset: number;
+  facingMode: FieldEnemyFacingMode;
+  previewPose: string;
+  metadata: KeyValueRecord;
 }
 
 export type FieldEnemyDropResourcesDocument = ResourceWalletDocument;
@@ -39,6 +60,7 @@ export interface FieldEnemyDocument {
   kind: string;
   spriteKey: string;
   spriteAsset?: ImageAsset;
+  presentation?: FieldEnemyPresentationDocument;
   stats: FieldEnemyStatsDocument;
   spawn: FieldEnemySpawnDocument;
   drops: FieldEnemyDropsDocument;

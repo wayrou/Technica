@@ -1,7 +1,9 @@
 import { ImageAssetField } from "../../components/ImageAssetField";
+import { MerchantListingFields } from "../../components/MerchantListingFields";
 import { Panel } from "../../components/Panel";
 import { createBlankDecoration, createSampleDecoration } from "../../data/sampleDecoration";
 import type { DecorationDocument } from "../../types/decoration";
+import { normalizeMerchantListingDocument } from "../../types/merchant";
 import { StructuredDocumentStudio } from "../content/StructuredDocumentStudio";
 import { isoNow } from "../../utils/date";
 import { buildDecorationBundleForTarget } from "../../utils/exporters";
@@ -16,6 +18,7 @@ function normalizeDecoration(document: Partial<DecorationDocument> | null | unde
     ...fallback,
     ...candidate,
     tileSize: Number.isFinite(candidate.tileSize) ? Number(candidate.tileSize) : fallback.tileSize,
+    merchant: normalizeMerchantListingDocument(candidate.merchant, fallback.merchant),
     requiredQuestIds: Array.from(new Set((candidate.requiredQuestIds ?? []).map(String).map((entry) => entry.trim()).filter(Boolean)))
   };
 }
@@ -139,6 +142,11 @@ export function DecorationEditor() {
                 />
               </div>
             </div>
+
+            <MerchantListingFields
+              value={decoration.merchant}
+              onChange={(merchant) => patchDocument((current) => ({ ...normalizeDecoration(current), merchant }))}
+            />
 
             <div className="toolbar split">
             <div className="chip-row">

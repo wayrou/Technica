@@ -1,5 +1,6 @@
 import type { DoctrineDocument } from "../types/doctrine";
 import { createDoctrineId } from "../types/doctrine";
+import { createMerchantListingDocument } from "../types/merchant";
 import { createResourceWalletDocument } from "../types/resources";
 import { isoNow } from "../utils/date";
 
@@ -21,6 +22,7 @@ export function createBlankDoctrine(): DoctrineDocument {
     doctrineRules: "",
     description: "",
     unlockAfterFloor: 0,
+    merchant: createMerchantListingDocument(),
     requiredQuestIds: [],
     createdAt: timestamp,
     updatedAt: timestamp
@@ -50,6 +52,7 @@ export function createSampleDoctrine(): DoctrineDocument {
     doctrineRules: "Guard-oriented cards gain improved consistency. Reactive defense patterns favor lower strain over raw burst.",
     description: "A defensive discipline tuned for squads that want stable guard cycles, patient tempo, and durable board control.",
     unlockAfterFloor: 2,
+    merchant: createMerchantListingDocument({ soldAtMerchant: true, merchantFloor: 2 }),
     requiredQuestIds: [],
     createdAt: timestamp,
     updatedAt: timestamp

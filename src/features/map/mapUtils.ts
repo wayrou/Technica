@@ -44,6 +44,29 @@ export function createBlankMapDocument(name = "New Field Map", width = 16, heigh
     tiles: Array.from({ length: height }, () => Array.from({ length: width }, () => createDefaultTile())),
     objects: [],
     zones: [],
+    renderMode: "classic_2d",
+    mapTags: [],
+    regionTags: [],
+    entryRules: [],
+    spawnAnchors: [
+      {
+        id: "player_start",
+        kind: "player",
+        x: 1,
+        y: 1,
+        label: "Player Start",
+        tags: ["default"],
+        metadata: {}
+      }
+    ],
+    settings3d: {
+      renderMode: "classic_2d",
+      wallHeight: 1,
+      floorThickness: 0.2,
+      previewCamera: "isometric",
+      defaultSurface: "field",
+      metadata: {}
+    },
     metadata: {},
     createdAt: timestamp,
     updatedAt: timestamp

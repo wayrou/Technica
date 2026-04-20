@@ -1,4 +1,5 @@
 import type { EffectFlowDocument } from "./effectFlow";
+import type { MerchantListingDocument } from "./merchant";
 
 export type FieldModScope = "unit" | "squad";
 export type FieldModRarity = "common" | "uncommon" | "rare";
@@ -48,6 +49,7 @@ export interface FieldModDocument {
   cost: number;
   rarity: FieldModRarity;
   unlockAfterOperationFloor: number;
+  merchant: MerchantListingDocument;
   requiredQuestIds: string[];
   createdAt: string;
   updatedAt: string;

@@ -1,3 +1,5 @@
+import type { MerchantListingDocument } from "./merchant";
+
 export interface DishDocument {
   schemaVersion: string;
   sourceApp: "Technica";
@@ -5,6 +7,7 @@ export interface DishDocument {
   name: string;
   cost: number;
   unlockAfterOperationFloor: number;
+  merchant: MerchantListingDocument;
   requiredQuestIds: string[];
   effect: string;
   description: string;

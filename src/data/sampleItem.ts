@@ -1,4 +1,5 @@
 import type { ItemDocument } from "../types/item";
+import { createMerchantListingDocument } from "../types/merchant";
 import { isoNow } from "../utils/date";
 
 function createBaseAcquisition() {
@@ -41,6 +42,7 @@ export function createBlankItem(): ItemDocument {
     bulkBu: 1,
     powerW: 0,
     acquisition: createBaseAcquisition(),
+    merchant: createMerchantListingDocument(),
     weaponChassis: {
       stability: 70,
       cardSlots: 3
@@ -87,6 +89,7 @@ export function createSampleItem(): ItemDocument {
       },
       otherSourcesNotes: "Good fit for scripted tutorial rewards and engineering quest turn-ins."
     },
+    merchant: createMerchantListingDocument({ soldAtMerchant: true, merchantFloor: 1 }),
     weaponChassis: {
       stability: 0,
       cardSlots: 0

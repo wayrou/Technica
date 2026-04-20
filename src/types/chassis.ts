@@ -1,4 +1,5 @@
 import type { ResourceWalletDocument } from "./resources";
+import type { MerchantListingDocument } from "./merchant";
 import { runtimeId } from "../utils/id";
 
 export const chassisSlotTypes = ["weapon", "helmet", "chestpiece", "accessory"] as const;
@@ -21,6 +22,7 @@ export interface ChassisDocument {
   unlockAfterFloor: number;
   availableInHavenShop: boolean;
   havenShopUnlockAfterFloor: number;
+  merchant: MerchantListingDocument;
   requiredQuestIds: string[];
   allowedCardTags: string[];
   allowedCardFamilies: string[];

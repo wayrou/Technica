@@ -14,7 +14,9 @@ import type { GearDocument } from "../types/gear";
 import type { ItemDocument } from "../types/item";
 import type {
   MapDocument,
+  MapEntryRule,
   MapObject,
+  MapSpawnAnchor,
   MapTile,
   MapVerticalConnectorKind,
   MapVerticalDirection,
@@ -31,6 +33,7 @@ import type { UnitDocument } from "../types/unit";
 import { isoNow } from "./date";
 import { extractDialogueOccurrenceRules } from "./dialogueOccurrence";
 import { runtimeId, slugify } from "./id";
+import { buildMap3DAdapterPayload, type Map3DAdapterPayload } from "./map3dAdapter";
 
 export interface WorkspaceReferenceIndex {
   dialogueIds: Set<string>;
@@ -104,8 +107,32 @@ interface ChaosCoreFieldMap {
   tiles: ChaosCoreFieldTile[][];
   objects: ChaosCoreFieldObject[];
   interactionZones: ChaosCoreInteractionZone[];
+  renderMode?: MapDocument["renderMode"];
+  mapTags?: string[];
+  regionTags?: string[];
+  entryRules?: ChaosCoreFieldMapEntryRule[];
+  spawnAnchors?: ChaosCoreFieldMapSpawnAnchor[];
+  settings3d?: ChaosCoreFieldMap3DSettings;
+  adapter3d?: Map3DAdapterPayload;
   metadata?: Record<string, unknown>;
   vertical?: ChaosCoreFieldVerticalData;
+}
+
+interface ChaosCoreFieldMapEntryRule extends Omit<MapEntryRule, "id" | "entryPointId" | "operationId" | "sourceMapId" | "metadata"> {
+  id: string;
+  entryPointId?: string;
+  operationId?: string;
+  sourceMapId?: string;
+  metadata?: Record<string, unknown>;
+}
+
+interface ChaosCoreFieldMapSpawnAnchor extends Omit<MapSpawnAnchor, "id" | "metadata"> {
+  id: string;
+  metadata?: Record<string, unknown>;
+}
+
+interface ChaosCoreFieldMap3DSettings extends Omit<NonNullable<MapDocument["settings3d"]>, "metadata"> {
+  metadata?: Record<string, unknown>;
 }
 
 interface ChaosCoreFieldVerticalPoint {
@@ -718,6 +745,44 @@ function buildChaosCoreVerticalData(vertical: MapVerticalLayerSystem | undefined
   });
 }
 
+function buildChaosCoreEntryRules(entryRules: MapEntryRule[] | undefined): ChaosCoreFieldMap["entryRules"] | undefined {
+  if (!entryRules?.length) {
+    return undefined;
+  }
+
+  return entryRules.map((entryRule) =>
+    pruneEmpty({
+      ...entryRule,
+      id: runtimeId(entryRule.id, "entry"),
+      regionId: entryRule.regionId ? runtimeId(entryRule.regionId) : undefined,
+      operationId: entryRule.operationId ? runtimeId(entryRule.operationId) : undefined,
+      theaterScreenId: entryRule.theaterScreenId ? runtimeId(entryRule.theaterScreenId) : undefined,
+      sourceMapId: entryRule.sourceMapId ? runtimeId(entryRule.sourceMapId) : undefined,
+      doorId: entryRule.doorId ? runtimeId(entryRule.doorId) : undefined,
+      portalId: entryRule.portalId ? runtimeId(entryRule.portalId) : undefined,
+      entryPointId: entryRule.entryPointId ? runtimeId(entryRule.entryPointId, "spawn") : undefined,
+      unlockRequirements: entryRule.unlockRequirements,
+      metadata: coerceRecord(entryRule.metadata)
+    })
+  );
+}
+
+function buildChaosCoreSpawnAnchors(spawnAnchors: MapSpawnAnchor[] | undefined): ChaosCoreFieldMap["spawnAnchors"] | undefined {
+  if (!spawnAnchors?.length) {
+    return undefined;
+  }
+
+  return spawnAnchors.map((anchor) =>
+    pruneEmpty({
+      ...anchor,
+      id: runtimeId(anchor.id, "spawn"),
+      layerId: anchor.layerId ? runtimeId(anchor.layerId) : undefined,
+      tags: anchor.tags,
+      metadata: coerceRecord(anchor.metadata)
+    })
+  );
+}
+
 export function buildChaosCoreMapBundle(document: MapDocument, references = createWorkspaceReferenceIndex({ map: document })): ExportBundle {
   const contentId = runtimeId(document.id || document.name, "field_map");
   const mergedZones = [
@@ -801,6 +866,18 @@ export function buildChaosCoreMapBundle(document: MapDocument, references = crea
         }
       })
     ),
+    renderMode: document.renderMode ?? document.settings3d?.renderMode,
+    mapTags: document.mapTags,
+    regionTags: document.regionTags,
+    entryRules: buildChaosCoreEntryRules(document.entryRules),
+    spawnAnchors: buildChaosCoreSpawnAnchors(document.spawnAnchors),
+    settings3d: document.settings3d
+      ? pruneEmpty({
+          ...document.settings3d,
+          metadata: coerceRecord(document.settings3d.metadata)
+        })
+      : undefined,
+    adapter3d: buildMap3DAdapterPayload(document),
     metadata: coerceRecord(document.metadata),
     vertical: buildChaosCoreVerticalData(document.vertical)
   });

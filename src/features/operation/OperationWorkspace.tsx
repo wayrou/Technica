@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ChaosCoreDatabasePanel } from "../../components/ChaosCoreDatabasePanel";
 import { Panel } from "../../components/Panel";
 import {
+  operationFieldMapRouteSources,
   operationRoomTypes,
   operationTheaterClearModes,
   operationTheaterKeyTypes,
@@ -16,6 +17,7 @@ import {
 } from "../../types/operation";
 import { buildOperationBundleForTarget } from "../../utils/exporters";
 import { confirmAction, notify } from "../../utils/dialogs";
+import { runtimeId } from "../../utils/id";
 import { parseKeyValueLines, serializeKeyValueLines } from "../../utils/records";
 import type { LoadedChaosCoreDatabaseEntry } from "../../utils/chaosCoreDatabase";
 import type { StructuredStudioContext } from "../content/StructuredDocumentStudio";
@@ -34,6 +36,63 @@ import {
 } from "./operationEditorUtils";
 
 interface OperationWorkspaceProps extends StructuredStudioContext<OperationDocument> {}
+
+function getOperationRoomFieldRouteLabel(room: OperationRoomDocument) {
+  return room.fieldMapLabel?.trim() || `${room.label} field map`;
+}
+
+function getOperationRoomEntryAnchorId(room: OperationRoomDocument) {
+  return room.fieldMapEntryPointId?.trim() || "player_start";
+}
+
+function createFieldRouteHintRows(
+  operation: OperationDocument,
+  floor: OperationFloorDocument,
+  room: OperationRoomDocument
+) {
+  const source = room.fieldMapRouteSource;
+  const baseRows = [
+    ["Field map id", room.fieldMapId?.trim() || "Set field map id"],
+    ["Map route source", source],
+    ["Operation id", runtimeId(operation.id)],
+    ["Entry anchor id", runtimeId(getOperationRoomEntryAnchorId(room), "spawn")],
+    ["Route label", getOperationRoomFieldRouteLabel(room)]
+  ];
+
+  if (source === "atlas_theater") {
+    return [
+      ...baseRows,
+      ["Theater screen id", runtimeId(room.id)]
+    ];
+  }
+
+  if (source === "floor_region") {
+    return [
+      ...baseRows,
+      ["Floor ordinal", String(floor.floorOrdinal)],
+      ["Recommended region id", runtimeId(room.id)],
+      ["Alternate region ids", [runtimeId(floor.id), runtimeId(floor.sectorLabel)].filter(Boolean).join(", ")]
+    ];
+  }
+
+  if (source === "door") {
+    return [
+      ...baseRows,
+      ["Door id", room.fieldMapDoorId?.trim() ? runtimeId(room.fieldMapDoorId) : "Set door id"]
+    ];
+  }
+
+  return [
+    ...baseRows,
+    ["Portal id", room.fieldMapPortalId?.trim() ? runtimeId(room.fieldMapPortalId) : "Set portal id"]
+  ];
+}
+
+function formatFieldRouteHintText(operation: OperationDocument, floor: OperationFloorDocument, room: OperationRoomDocument) {
+  return createFieldRouteHintRows(operation, floor, room)
+    .map(([label, value]) => `${label}: ${value}`)
+    .join("\n");
+}
 
 export function OperationWorkspace({
   document,
@@ -81,6 +140,12 @@ export function OperationWorkspace({
   const selectedRoom = selectedFloor?.rooms.find((room) => room.id === selectedRoomId) ?? selectedFloor?.rooms[0] ?? null;
   const previewGeometry = selectedFloor ? buildPreviewGeometry(selectedFloor) : buildPreviewGeometry(createDefaultFloor(normalizedDocument));
   const floorPathSummary = selectedFloor ? createSelectionPathSummary(selectedFloor) : { reachableCount: 0, pathLengthToObjective: null };
+  const selectedRoomFieldRouteHints =
+    selectedFloor && selectedRoom ? createFieldRouteHintRows(normalizedDocument, selectedFloor, selectedRoom) : [];
+  const selectedRoomFieldRouteReady =
+    Boolean(selectedRoom?.fieldMapId?.trim()) &&
+    (!selectedRoom || selectedRoom.fieldMapRouteSource !== "door" || Boolean(selectedRoom.fieldMapDoorId?.trim())) &&
+    (!selectedRoom || selectedRoom.fieldMapRouteSource !== "portal" || Boolean(selectedRoom.fieldMapPortalId?.trim()));
 
   function updateOperation(updater: (current: OperationDocument) => OperationDocument) {
     patchDocument((current) => updater(normalizeOperationDocument(current)));
@@ -113,6 +178,61 @@ export function OperationWorkspace({
             }
       )
     }));
+  }
+
+  function markSelectedRoomAsFieldMapRoute() {
+    updateSelectedRoom((room) => ({
+      ...room,
+      type: "field_node",
+      clearMode: "field",
+      fieldMapRouteSource: "atlas_theater",
+      fieldMapLabel: room.fieldMapLabel || getOperationRoomFieldRouteLabel(room),
+      tags: Array.from(new Set([...room.tags, "field_route", "technica_field_map"]))
+    }));
+  }
+
+  function setSelectedRoomFieldRoutePreset(source: OperationRoomDocument["fieldMapRouteSource"]) {
+    updateSelectedRoom((room) => ({
+      ...room,
+      type: "field_node",
+      clearMode: "field",
+      fieldMapRouteSource: source,
+      fieldMapEntryPointId: room.fieldMapEntryPointId || "player_start",
+      fieldMapDoorId: source === "door" ? room.fieldMapDoorId || `${room.id}_door` : room.fieldMapDoorId,
+      fieldMapPortalId: source === "portal" ? room.fieldMapPortalId || `${room.id}_portal` : room.fieldMapPortalId,
+      fieldMapLabel: room.fieldMapLabel || getOperationRoomFieldRouteLabel(room),
+      tags: Array.from(new Set([...room.tags, "field_route", "technica_field_map", source]))
+    }));
+  }
+
+  function clearSelectedRoomFieldMapRoute() {
+    updateSelectedRoom((room) => ({
+      ...room,
+      fieldMapId: "",
+      fieldMapEntryPointId: "",
+      fieldMapRouteSource: "atlas_theater",
+      fieldMapDoorId: "",
+      fieldMapPortalId: "",
+      fieldMapLabel: ""
+    }));
+  }
+
+  function copySelectedRoomFieldRouteHints() {
+    if (!selectedFloor || !selectedRoom) {
+      return;
+    }
+
+    const text = formatFieldRouteHintText(normalizedDocument, selectedFloor, selectedRoom);
+    const clipboard = typeof navigator !== "undefined" ? navigator.clipboard : null;
+    if (!clipboard?.writeText) {
+      notify(text);
+      return;
+    }
+
+    void clipboard
+      .writeText(text)
+      .then(() => notify("Copied the matching Map Editor route hints."))
+      .catch(() => notify(text));
   }
 
   function addFloor() {
@@ -651,6 +771,85 @@ export function OperationWorkspace({
                     <span>Tactical encounter</span>
                     <input value={selectedRoom.tacticalEncounter ?? ""} onChange={(event) => updateSelectedRoom((room) => ({ ...room, tacticalEncounter: event.target.value }))} />
                   </label>
+                  <div className="field full operation-field-route-card">
+                    <div className="operation-field-route-card__header">
+                      <div>
+                        <span>Technica field map entrance</span>
+                        <p>Use this room as an Atlas theater door into a published 2D or 3D field map.</p>
+                      </div>
+                      <span className={`pill ${selectedRoomFieldRouteReady ? "accent" : "warning"}`}>
+                        {selectedRoomFieldRouteReady ? "Handshake ready" : "Needs route data"}
+                      </span>
+                    </div>
+                    <div className="operation-field-route-contract">
+                      <div className="operation-field-route-contract__header">
+                        <strong>Matching Map Editor values</strong>
+                        <button type="button" className="ghost-button" onClick={copySelectedRoomFieldRouteHints}>
+                          Copy hints
+                        </button>
+                      </div>
+                      <div className="operation-field-route-contract__grid">
+                        {selectedRoomFieldRouteHints.map(([label, value]) => (
+                          <div key={`${label}-${value}`}>
+                            <span>{label}</span>
+                            <code>{value}</code>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="form-grid compact">
+                      <label className="field">
+                        <span>Field map id</span>
+                        <input value={selectedRoom.fieldMapId ?? ""} onChange={(event) => updateSelectedRoom((room) => ({ ...room, fieldMapId: event.target.value }))} placeholder="outer_deck_overworld" />
+                      </label>
+                      <label className="field">
+                        <span>Route source</span>
+                        <select value={selectedRoom.fieldMapRouteSource} onChange={(event) => updateSelectedRoom((room) => ({ ...room, fieldMapRouteSource: event.target.value as OperationRoomDocument["fieldMapRouteSource"] }))}>
+                          {operationFieldMapRouteSources.map((source) => (
+                            <option key={source} value={source}>
+                              {formatChoiceLabel(source)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="field">
+                        <span>Entry spawn anchor id</span>
+                        <input value={selectedRoom.fieldMapEntryPointId ?? ""} onChange={(event) => updateSelectedRoom((room) => ({ ...room, fieldMapEntryPointId: event.target.value }))} placeholder="player_start" />
+                      </label>
+                      <label className="field">
+                        <span>Route label</span>
+                        <input value={selectedRoom.fieldMapLabel ?? ""} onChange={(event) => updateSelectedRoom((room) => ({ ...room, fieldMapLabel: event.target.value }))} placeholder={`${selectedRoom.label} field map`} />
+                      </label>
+                      <label className="field">
+                        <span>Door id</span>
+                        <input value={selectedRoom.fieldMapDoorId ?? ""} onChange={(event) => updateSelectedRoom((room) => ({ ...room, fieldMapDoorId: event.target.value }))} placeholder="door id for door routes" />
+                      </label>
+                      <label className="field">
+                        <span>Portal id</span>
+                        <input value={selectedRoom.fieldMapPortalId ?? ""} onChange={(event) => updateSelectedRoom((room) => ({ ...room, fieldMapPortalId: event.target.value }))} placeholder="portal id for portal routes" />
+                      </label>
+                    </div>
+                    <div className="toolbar">
+                      <button type="button" className="ghost-button" onClick={markSelectedRoomAsFieldMapRoute}>
+                        Use this room as theater route
+                      </button>
+                      <button type="button" className="ghost-button" onClick={() => setSelectedRoomFieldRoutePreset("floor_region")}>
+                        Floor route preset
+                      </button>
+                      <button type="button" className="ghost-button" onClick={() => setSelectedRoomFieldRoutePreset("door")}>
+                        Door preset
+                      </button>
+                      <button type="button" className="ghost-button" onClick={() => setSelectedRoomFieldRoutePreset("portal")}>
+                        Portal preset
+                      </button>
+                      <button type="button" className="ghost-button danger" onClick={clearSelectedRoomFieldMapRoute}>
+                        Clear field route
+                      </button>
+                    </div>
+                    <small>
+                      Exported to Chaos Core as an explicit room-to-map route. If the map has a matching spawn anchor, the theater button will enter at that anchor.
+                    </small>
+                  </div>
                   <label className="field">
                     <span>Core slot capacity</span>
                     <input type="number" value={selectedRoom.coreSlotCapacity} onChange={(event) => updateSelectedRoom((room) => ({ ...room, coreSlotCapacity: Number(event.target.value || 0) }))} />

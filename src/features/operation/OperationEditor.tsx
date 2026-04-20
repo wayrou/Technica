@@ -1,7 +1,8 @@
 import { createBlankOperation, createSampleOperation } from "../../data/sampleOperation";
 import type { ExportTarget } from "../../types/common";
 import { normalizeOperationDocument, type OperationDocument } from "../../types/operation";
-import { validateOperationDocument } from "../../utils/contentValidation";
+import { validateOperationDocument, validateOperationFieldMapLinks } from "../../utils/contentValidation";
+import { readCurrentMapDrafts } from "../../utils/currentDrafts";
 import { buildOperationBundleForTarget } from "../../utils/exporters";
 import { StructuredDocumentStudio } from "../content/StructuredDocumentStudio";
 import { OperationWorkspace } from "./OperationWorkspace";
@@ -16,7 +17,13 @@ export function OperationEditor() {
       initialDocument={createSampleOperation()}
       createBlank={createBlankOperation}
       createSample={createSampleOperation}
-      validate={(document: OperationDocument) => validateOperationDocument(normalizeOperationDocument(document))}
+      validate={(document: OperationDocument) => {
+        const normalizedDocument = normalizeOperationDocument(document);
+        return [
+          ...validateOperationDocument(normalizedDocument),
+          ...validateOperationFieldMapLinks(normalizedDocument, readCurrentMapDrafts())
+        ];
+      }}
       buildBundleForTarget={(document: OperationDocument, target: ExportTarget) =>
         buildOperationBundleForTarget(normalizeOperationDocument(document), target)
       }

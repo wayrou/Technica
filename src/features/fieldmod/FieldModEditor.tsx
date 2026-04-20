@@ -1,4 +1,5 @@
 import { EffectFlowComposer } from "../../components/EffectFlowComposer";
+import { MerchantListingFields } from "../../components/MerchantListingFields";
 import { Panel } from "../../components/Panel";
 import { createBlankFieldMod, createSampleFieldMod } from "../../data/sampleFieldMod";
 import { StructuredDocumentStudio } from "../content/StructuredDocumentStudio";
@@ -9,6 +10,7 @@ import {
   fieldModTriggers,
   type FieldModDocument,
 } from "../../types/fieldmod";
+import { normalizeMerchantListingDocument } from "../../types/merchant";
 import { isoNow } from "../../utils/date";
 import { buildFieldModBundleForTarget } from "../../utils/exporters";
 import { normalizeEffectFlowDocument, summarizeEffectFlow } from "../../utils/effectFlow";
@@ -42,6 +44,7 @@ function normalizeFieldMod(document: Partial<FieldModDocument> | null | undefine
     unlockAfterOperationFloor: Number.isFinite(candidate.unlockAfterOperationFloor)
       ? Number(candidate.unlockAfterOperationFloor)
       : fallback.unlockAfterOperationFloor,
+    merchant: normalizeMerchantListingDocument(candidate.merchant, fallback.merchant),
     requiredQuestIds: Array.from(new Set((candidate.requiredQuestIds ?? []).map(String).map((entry) => entry.trim()).filter(Boolean))),
     effectFlow: normalizeEffectFlowDocument(candidate.effectFlow),
   };
@@ -124,6 +127,11 @@ export function FieldModEditor() {
                   <label className="field"><span>Unlock after operation floor</span><input type="number" min={0} value={normalizedDocument.unlockAfterOperationFloor} onChange={(event) => patchDocument((current) => ({ ...normalizeFieldMod(current), unlockAfterOperationFloor: Number(event.target.value || 0) }))} /></label>
                   <label className="field full"><span>Require completed quests</span><input value={serializeCommaList(normalizedDocument.requiredQuestIds)} placeholder="quest_restore_signal_grid, quest_clear_foundry_gate" onChange={(event) => patchDocument((current) => ({ ...normalizeFieldMod(current), requiredQuestIds: parseCommaList(event.target.value) }))} /></label>
                 </div>
+
+                <MerchantListingFields
+                  value={normalizedDocument.merchant}
+                  onChange={(merchant) => patchDocument((current) => ({ ...normalizeFieldMod(current), merchant }))}
+                />
 
                 <div className="toolbar split">
                   <div className="chip-row">

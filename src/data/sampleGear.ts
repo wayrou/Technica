@@ -1,4 +1,5 @@
 import type { GearDocument } from "../types/gear";
+import { createMerchantListingDocument } from "../types/merchant";
 import { isoNow } from "../utils/date";
 
 function createBaseAcquisition() {
@@ -53,6 +54,7 @@ export function createBlankGear(): GearDocument {
       startingOwned: true
     },
     acquisition: createBaseAcquisition(),
+    merchant: createMerchantListingDocument(),
     metadata: {},
     createdAt: timestamp,
     updatedAt: timestamp
@@ -107,6 +109,7 @@ export function createSampleGear(): GearDocument {
       },
       otherSourcesNotes: "Can also be handed out as a scripted tutorial loadout reward."
     },
+    merchant: createMerchantListingDocument({ soldAtMerchant: true, merchantFloor: 1 }),
     metadata: {
       source: "Technica sample",
       role: "frontline"

@@ -1,5 +1,6 @@
 import type { ChassisDocument } from "../types/chassis";
 import { createChassisId } from "../types/chassis";
+import { createMerchantListingDocument } from "../types/merchant";
 import { createResourceWalletDocument } from "../types/resources";
 import { isoNow } from "../utils/date";
 
@@ -23,6 +24,7 @@ export function createBlankChassis(): ChassisDocument {
     unlockAfterFloor: 0,
     availableInHavenShop: true,
     havenShopUnlockAfterFloor: 0,
+    merchant: createMerchantListingDocument(),
     requiredQuestIds: [],
     allowedCardTags: [],
     allowedCardFamilies: [],
@@ -57,6 +59,7 @@ export function createSampleChassis(): ChassisDocument {
     unlockAfterFloor: 2,
     availableInHavenShop: true,
     havenShopUnlockAfterFloor: 2,
+    merchant: createMerchantListingDocument({ soldAtMerchant: true, merchantFloor: 2 }),
     requiredQuestIds: [],
     allowedCardTags: ["guard", "stability"],
     allowedCardFamilies: [],

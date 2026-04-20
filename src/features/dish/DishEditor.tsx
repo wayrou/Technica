@@ -1,18 +1,23 @@
 import { Panel } from "../../components/Panel";
+import { MerchantListingFields } from "../../components/MerchantListingFields";
 import { createBlankDish, createSampleDish } from "../../data/sampleDish";
 import { StructuredDocumentStudio } from "../content/StructuredDocumentStudio";
 import type { DishDocument } from "../../types/dish";
+import { normalizeMerchantListingDocument } from "../../types/merchant";
 import { isoNow } from "../../utils/date";
 import { buildDishBundleForTarget } from "../../utils/exporters";
 import { validateDishDocument } from "../../utils/contentValidation";
 import { parseCommaList, serializeCommaList } from "../../utils/records";
 
 function normalizeDish(document: DishDocument): DishDocument {
+  const fallback = createBlankDish();
   return {
+    ...fallback,
     ...document,
     unlockAfterOperationFloor: Number.isFinite(document.unlockAfterOperationFloor)
       ? document.unlockAfterOperationFloor
       : 0,
+    merchant: normalizeMerchantListingDocument(document.merchant, fallback.merchant),
     requiredQuestIds: Array.from(new Set((document.requiredQuestIds ?? []).map((entry) => entry.trim()).filter(Boolean)))
   };
 }
@@ -145,6 +150,11 @@ export function DishEditor() {
               />
             </label>
           </div>
+
+          <MerchantListingFields
+            value={normalizedDocument.merchant}
+            onChange={(merchant) => patchDocument((current) => ({ ...normalizeDish(current), merchant }))}
+          />
 
           <div className="toolbar split">
             <div className="chip-row">

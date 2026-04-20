@@ -10,6 +10,7 @@ import {
   type GearStats,
   type SupportedWeaponType,
 } from "../types/gear";
+import { normalizeMerchantListingDocument } from "../types/merchant";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
@@ -181,6 +182,7 @@ export function normalizeGearDocument(value: unknown): GearDocument {
     wear: readFiniteNumber(record.wear, fallback.wear),
     inventory: normalizeInventory(record.inventory, fallback.inventory),
     acquisition: normalizeAcquisition(record.acquisition, fallback.acquisition),
+    merchant: normalizeMerchantListingDocument(record.merchant, fallback.merchant),
     iconAsset: normalizeImageAsset(record.iconAsset),
     metadata: normalizeMetadata(record.metadata),
     createdAt: readString(record.createdAt, fallback.createdAt),

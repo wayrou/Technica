@@ -79,6 +79,49 @@ export function createSampleMap(): MapDocument {
         }
       }
     ],
+    renderMode: "simple_3d",
+    mapTags: ["settlement", "field"],
+    regionTags: ["oak_square"],
+    entryRules: [
+      {
+        id: "entry_from_floor_region",
+        source: "floor_region",
+        floorOrdinal: 0,
+        regionId: "oak_square",
+        label: "Enter Oak Square",
+        entryPointId: "player_start",
+        unlockRequirements: [],
+        metadata: {}
+      }
+    ],
+    spawnAnchors: [
+      {
+        id: "player_start",
+        kind: "player",
+        x: 2,
+        y: 2,
+        label: "Player Start",
+        tags: ["default"],
+        metadata: {}
+      },
+      {
+        id: "enemy_lane",
+        kind: "enemy",
+        x: 8,
+        y: 5,
+        label: "Enemy Lane",
+        tags: ["enemy", "field"],
+        metadata: {}
+      }
+    ],
+    settings3d: {
+      renderMode: "simple_3d",
+      wallHeight: 1,
+      floorThickness: 0.2,
+      previewCamera: "isometric",
+      defaultSurface: "field",
+      metadata: {}
+    },
     metadata: {
       biome: "village",
       lighting: "morning"

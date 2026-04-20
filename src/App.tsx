@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import technicaLogo from "./assets/technica-logo.png";
 import { EditorErrorBoundary } from "./components/EditorErrorBoundary";
 import { Panel } from "./components/Panel";
@@ -101,6 +101,7 @@ const FLOW_POPOUT_BY_TAB: Partial<Record<TechnicaTabId, TechnicaPopoutId>> = {
 };
 const workspaceShortcuts = [
   { keys: "Ctrl/Cmd + 1..0", label: "Switch tabs" },
+  { keys: "Ctrl/Cmd + K", label: "Focus editor switcher" },
   { keys: "Ctrl/Cmd + S", label: "Save current draft file" },
   { keys: "Ctrl/Cmd + O", label: "Import draft file" },
   { keys: "Ctrl/Cmd + Enter", label: "Export current bundle" },
@@ -303,6 +304,64 @@ const tabs: Array<{ id: TechnicaTabId; label: string }> = [
   }
 ];
 
+const tabGroups: Array<{
+  id: string;
+  label: string;
+  description: string;
+  tabs: TechnicaTabId[];
+}> = [
+  {
+    id: "world",
+    label: "World",
+    description: "Maps, inhabitants, chatter, and field encounters.",
+    tabs: ["map", "field_enemy", "npc", "faction", "chatter", "decoration"]
+  },
+  {
+    id: "story",
+    label: "Story",
+    description: "Narrative, quest, mail, codex, and key item content.",
+    tabs: ["dialogue", "quest", "mail", "codex", "key_item"]
+  },
+  {
+    id: "combat",
+    label: "Combat",
+    description: "Cards, units, classes, gear, chassis, and doctrines.",
+    tabs: ["card", "unit", "class", "gear", "chassis", "doctrine"]
+  },
+  {
+    id: "systems",
+    label: "Systems",
+    description: "Items, recipes, dishes, field mods, and schemas.",
+    tabs: ["item", "crafting", "dish", "fieldmod", "schema"]
+  },
+  {
+    id: "theater",
+    label: "Theater",
+    description: "Operation and Atlas theater authoring.",
+    tabs: ["operation"]
+  },
+  {
+    id: "database",
+    label: "Database",
+    description: "Inspect and route published Chaos Core content.",
+    tabs: ["database"]
+  }
+];
+
+const tabById = new Map(tabs.map((tab) => [tab.id, tab]));
+const quickWorkflowTabIds: TechnicaTabId[] = ["map", "field_enemy", "operation", "gear", "database"];
+
+function getEditorShortLabel(label: string) {
+  return label
+    .replace(/\b(Editor|Entry|Recipe|Mods)\b/gi, "")
+    .trim()
+    .split(/\s+/)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 3)
+    .toUpperCase();
+}
+
 export default function App() {
   const runtime = useTechnicaRuntime();
   const mobileSession = useMobileSession();
@@ -310,7 +369,13 @@ export default function App() {
   const [storedActiveTab, setStoredActiveTab] = usePersistentState<TechnicaTabId>("technica.activeTab", "dialogue");
   const [isMobileSessionOpen, setIsMobileSessionOpen] = useState(false);
   const [isShortcutOverlayOpen, setIsShortcutOverlayOpen] = useState(false);
+  const [editorSearch, setEditorSearch] = useState("");
+  const [isEditorBankCompact, setIsEditorBankCompact] = usePersistentState<boolean>(
+    "technica.editorBank.compact",
+    false
+  );
   const mobileSessionPopoverRef = useRef<HTMLDivElement | null>(null);
+  const editorSearchInputRef = useRef<HTMLInputElement | null>(null);
   const requestedEditorPopoutTab: TechnicaTabId | null =
     requestedPopoutTab === "card-flow" ||
     requestedPopoutTab === "fieldmod-flow"
@@ -325,6 +390,34 @@ export default function App() {
         : tabs.find((tab) => tab.id === activeTab)?.label ?? "Technica";
   const activeSurfaceKey = requestedPopoutTab ?? activeTab;
   const mobileTabs = tabs;
+  const activeGroup = tabGroups.find((group) => group.tabs.includes(activeTab));
+  const visibleTabGroups = useMemo(() => {
+    const query = editorSearch.trim().toLowerCase();
+
+    return tabGroups
+      .map((group) => {
+        const groupTabs = group.tabs
+          .map((tabId) => tabById.get(tabId))
+          .filter((tab): tab is { id: TechnicaTabId; label: string } => Boolean(tab))
+          .filter((tab) => {
+            if (!query) {
+              return true;
+            }
+
+            return (
+              tab.label.toLowerCase().includes(query) ||
+              tab.id.toLowerCase().includes(query) ||
+              group.label.toLowerCase().includes(query)
+            );
+          });
+
+        return {
+          ...group,
+          tabs: groupTabs
+        };
+      })
+      .filter((group) => group.tabs.length > 0);
+  }, [editorSearch]);
 
   useEffect(() => {
     if (!isMobileSessionOpen) {
@@ -374,6 +467,13 @@ export default function App() {
       }
 
       if (!commandKey) {
+        return;
+      }
+
+      if (key === "k" && runtime.isDesktop && !requestedPopoutTab) {
+        event.preventDefault();
+        editorSearchInputRef.current?.focus();
+        editorSearchInputRef.current?.select();
         return;
       }
 
@@ -430,7 +530,7 @@ export default function App() {
         window.removeEventListener("keydown", handleGlobalShortcuts);
       }
     };
-  }, [activeTab, activeTabLabel, isShortcutOverlayOpen, requestedPopoutTab, setStoredActiveTab]);
+  }, [activeTab, activeTabLabel, isShortcutOverlayOpen, requestedPopoutTab, runtime.isDesktop, setStoredActiveTab]);
 
   function handleOpenTab(tabId: TechnicaTabId) {
     if (requestedPopoutTab) {
@@ -607,32 +707,6 @@ export default function App() {
         ) : null}
       </header>
 
-      {!requestedPopoutTab && runtime.isDesktop ? (
-        <nav className="tab-nav" aria-label="Technica editors">
-          {tabs.map((tab) => (
-            <div key={tab.id} className="tab-nav-item">
-              <button
-                type="button"
-                className={tab.id === activeTab ? "tab-button active" : "tab-button"}
-                onClick={() => setStoredActiveTab(tab.id)}
-              >
-                <span>{tab.label}</span>
-              </button>
-              {runtime.isDesktop ? (
-                <button
-                  type="button"
-                  className="tab-popout-button"
-                  onClick={() => void openTechnicaPopout(tab.id, tab.label)}
-                  aria-label={`Pop out ${tab.label}`}
-                >
-                  Open
-                </button>
-              ) : null}
-            </div>
-          ))}
-        </nav>
-      ) : null}
-
       {runtime.isMobile ? (
         <>
           <div className="mobile-session-banner">
@@ -670,40 +744,6 @@ export default function App() {
         </>
       ) : null}
 
-      {runtime.isDesktop && !requestedPopoutTab ? (
-        <div className="workspace-bar">
-          <div className="chip-row">
-            <span className="pill">Workspace</span>
-            <span className="pill">{activeTabLabel}</span>
-          </div>
-          <div className="toolbar">
-            <button type="button" className="ghost-button" onClick={() => void openTechnicaPopout(activeTab, activeTabLabel)}>
-              Pop out editor
-            </button>
-            <button type="button" className="ghost-button" onClick={() => void openTechnicaPopout("database", "Database")}>
-              Open database window
-            </button>
-            {FLOW_POPOUT_BY_TAB[activeTab] ? (
-              <button
-                type="button"
-                className="ghost-button"
-                onClick={() =>
-                  void openTechnicaPopout(
-                    FLOW_POPOUT_BY_TAB[activeTab]!,
-                    activeTab === "card" ? "Card Effect Flow" : "Field Mod Effect Flow"
-                  )
-                }
-              >
-                Open effect flow window
-              </button>
-            ) : null}
-            <button type="button" className="ghost-button" onClick={() => setIsShortcutOverlayOpen((current) => !current)}>
-              Shortcuts
-            </button>
-          </div>
-        </div>
-      ) : null}
-
       {isShortcutOverlayOpen ? (
         <div className="workspace-shortcuts-overlay" role="dialog" aria-label="Keyboard shortcuts">
           <Panel
@@ -723,13 +763,149 @@ export default function App() {
         </div>
       ) : null}
 
-      <main className="app-main">
-        <EditorErrorBoundary>
-          <Suspense fallback={<div className="empty-state compact">Loading editor...</div>}>
-            {renderActiveEditor()}
-          </Suspense>
-        </EditorErrorBoundary>
-      </main>
+      {runtime.isDesktop && !requestedPopoutTab ? (
+        <div className={isEditorBankCompact ? "app-workbench compact-editor-bank" : "app-workbench"}>
+          <aside
+            className={isEditorBankCompact ? "editor-sidebar compact" : "editor-sidebar"}
+            aria-label="Technica editors"
+          >
+            <div className="editor-sidebar-header">
+              <div>
+                <span className="eyebrow">Editor Bank</span>
+                <strong>{isEditorBankCompact ? activeTabLabel : activeGroup?.label ?? "Workspace"}</strong>
+              </div>
+              <button
+                type="button"
+                className="editor-sidebar-toggle"
+                onClick={() => setIsEditorBankCompact((current) => !current)}
+                aria-pressed={isEditorBankCompact}
+              >
+                {isEditorBankCompact ? "Full" : "Compact"}
+              </button>
+            </div>
+            <label className="editor-search">
+              <span>Quick switch</span>
+              <input
+                ref={editorSearchInputRef}
+                value={editorSearch}
+                placeholder="Search editors..."
+                onChange={(event) => setEditorSearch(event.target.value)}
+              />
+            </label>
+            <div className="editor-quick-strip" aria-label="Primary workflows">
+              {quickWorkflowTabIds.map((tabId) => {
+                const tab = tabById.get(tabId);
+                if (!tab) {
+                  return null;
+                }
+
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    className={tab.id === activeTab ? "editor-quick-button active" : "editor-quick-button"}
+                    onClick={() => {
+                      setStoredActiveTab(tab.id);
+                      setEditorSearch("");
+                    }}
+                    title={tab.label}
+                  >
+                    <span>{getEditorShortLabel(tab.label)}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="editor-group-list">
+              {visibleTabGroups.map((group) => (
+                <section key={group.id} className="editor-group">
+                  <div className="editor-group-title">
+                    <strong>{group.label}</strong>
+                    <span>{group.description}</span>
+                  </div>
+                  <div className="editor-nav-list">
+                    {group.tabs.map((tab) => (
+                      <div key={tab.id} className={tab.id === activeTab ? "editor-nav-row active" : "editor-nav-row"}>
+                        <button
+                          type="button"
+                          className="editor-nav-button"
+                          onClick={() => {
+                            setStoredActiveTab(tab.id);
+                            setEditorSearch("");
+                          }}
+                        >
+                          <span data-short={getEditorShortLabel(tab.label)}>{tab.label}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="editor-nav-popout"
+                          onClick={() => void openTechnicaPopout(tab.id, tab.label)}
+                          aria-label={`Pop out ${tab.label}`}
+                        >
+                          Open
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+          </aside>
+
+          <section className="editor-workspace" aria-label={`${activeTabLabel} workspace`}>
+            <div className="workspace-bar">
+              <div className="chip-row">
+                <span className="pill">Workspace</span>
+                <span className="pill">{activeGroup?.label ?? "Editor"}</span>
+                <span className="pill accent">{activeTabLabel}</span>
+              </div>
+              <div className="toolbar">
+                <button type="button" className="ghost-button" onClick={() => void openTechnicaPopout(activeTab, activeTabLabel)}>
+                  Pop out editor
+                </button>
+                <button type="button" className="ghost-button" onClick={() => void openTechnicaPopout("database", "Database")}>
+                  Open database window
+                </button>
+                {FLOW_POPOUT_BY_TAB[activeTab] ? (
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={() =>
+                      void openTechnicaPopout(
+                        FLOW_POPOUT_BY_TAB[activeTab]!,
+                        activeTab === "card" ? "Card Effect Flow" : "Field Mod Effect Flow"
+                      )
+                    }
+                  >
+                    Open effect flow window
+                  </button>
+                ) : null}
+                <button type="button" className="ghost-button" onClick={() => editorSearchInputRef.current?.focus()}>
+                  Switch editor
+                </button>
+                <button type="button" className="ghost-button" onClick={() => setIsShortcutOverlayOpen((current) => !current)}>
+                  Shortcuts
+                </button>
+              </div>
+            </div>
+
+            <main className="app-main">
+              <EditorErrorBoundary>
+                <Suspense fallback={<div className="empty-state compact">Loading editor...</div>}>
+                  {renderActiveEditor()}
+                </Suspense>
+              </EditorErrorBoundary>
+            </main>
+          </section>
+        </div>
+      ) : (
+        <main className="app-main">
+          <EditorErrorBoundary>
+            <Suspense fallback={<div className="empty-state compact">Loading editor...</div>}>
+              {renderActiveEditor()}
+            </Suspense>
+          </EditorErrorBoundary>
+        </main>
+      )}
     </div>
   );
 }

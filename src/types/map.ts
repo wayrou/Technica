@@ -69,6 +69,47 @@ export interface MapVerticalLayerSystem {
   metadata: KeyValueRecord;
 }
 
+export type MapRenderMode = "classic_2d" | "simple_3d" | "bespoke_3d";
+export type MapEntrySource = "atlas_theater" | "floor_region" | "door" | "portal";
+export type MapSpawnAnchorKind = "player" | "enemy" | "npc" | "portal_exit" | "generic";
+export type MapPreviewCameraMode = "isometric" | "third_person" | "top_down";
+
+export interface MapEntryRule {
+  id: string;
+  source: MapEntrySource;
+  floorOrdinal?: number;
+  regionId?: string;
+  operationId?: string;
+  theaterScreenId?: string;
+  sourceMapId?: string;
+  doorId?: string;
+  portalId?: string;
+  label: string;
+  entryPointId: string;
+  unlockRequirements: string[];
+  metadata: KeyValueRecord;
+}
+
+export interface MapSpawnAnchor {
+  id: string;
+  kind: MapSpawnAnchorKind;
+  x: number;
+  y: number;
+  layerId?: string;
+  label: string;
+  tags: string[];
+  metadata: KeyValueRecord;
+}
+
+export interface Map3DSettings {
+  renderMode: MapRenderMode;
+  wallHeight: number;
+  floorThickness: number;
+  previewCamera: MapPreviewCameraMode;
+  defaultSurface: string;
+  metadata: KeyValueRecord;
+}
+
 export interface MapObject {
   id: string;
   type: string;
@@ -104,6 +145,12 @@ export interface MapDocument {
   tiles: MapTile[][];
   objects: MapObject[];
   zones: MapZone[];
+  renderMode?: MapRenderMode;
+  mapTags?: string[];
+  regionTags?: string[];
+  entryRules?: MapEntryRule[];
+  spawnAnchors?: MapSpawnAnchor[];
+  settings3d?: Map3DSettings;
   metadata: KeyValueRecord;
   vertical?: MapVerticalLayerSystem;
   createdAt: string;

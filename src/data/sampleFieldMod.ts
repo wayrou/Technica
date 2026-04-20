@@ -1,4 +1,5 @@
 import type { FieldModDocument } from "../types/fieldmod";
+import { createMerchantListingDocument } from "../types/merchant";
 import { isoNow } from "../utils/date";
 import { createActionNode, createBlankEffectFlow } from "../utils/effectFlow";
 
@@ -20,6 +21,7 @@ export function createBlankFieldMod(): FieldModDocument {
     cost: 10,
     rarity: "common",
     unlockAfterOperationFloor: 0,
+    merchant: createMerchantListingDocument(),
     requiredQuestIds: [],
     createdAt: timestamp,
     updatedAt: timestamp
@@ -55,6 +57,7 @@ export function createSampleFieldMod(): FieldModDocument {
     cost: 10,
     rarity: "common",
     unlockAfterOperationFloor: 4,
+    merchant: createMerchantListingDocument({ soldAtMerchant: true, merchantFloor: 4 }),
     requiredQuestIds: [],
     createdAt: timestamp,
     updatedAt: timestamp

@@ -15,6 +15,8 @@ import type { GearDocument } from "../types/gear";
 import type { ItemDocument } from "../types/item";
 import type { KeyItemDocument } from "../types/keyItem";
 import type { MailDocument } from "../types/mail";
+import type { MapDocument, MapEntryRule } from "../types/map";
+import type { MerchantListingDocument } from "../types/merchant";
 import type { NpcDocument } from "../types/npc";
 import type { OperationDocument } from "../types/operation";
 import { resourceKeys, resourceLabels, type ResourceWalletDocument } from "../types/resources";
@@ -127,6 +129,26 @@ function validateResourceWallet(
   });
 }
 
+function validateMerchantListing(
+  merchant: MerchantListingDocument | undefined,
+  fieldPrefix: string,
+  labelPrefix: string,
+  issues: ValidationIssue[],
+) {
+  if (!merchant?.soldAtMerchant) {
+    return;
+  }
+
+  requirePositive(merchant.merchantFloor, `${fieldPrefix}.merchantFloor`, `${labelPrefix} merchant floor`, issues, false);
+  if (!Number.isInteger(merchant.merchantFloor)) {
+    issues.push({
+      severity: "error",
+      field: `${fieldPrefix}.merchantFloor`,
+      message: `${labelPrefix} merchant floor must be a whole number.`
+    });
+  }
+}
+
 export function validateGearDocument(document: GearDocument): ValidationIssue[] {
   const normalizedDocument = normalizeGearDocument(document);
   const issues: ValidationIssue[] = [];
@@ -154,6 +176,7 @@ export function validateGearDocument(document: GearDocument): ValidationIssue[] 
       issues
     );
   }
+  validateMerchantListing(normalizedDocument.merchant, "merchant", "Gear", issues);
   if (normalizedDocument.acquisition.enemyDrop.enabled && normalizedDocument.acquisition.enemyDrop.enemyUnitIds.length === 0) {
     issues.push({
       severity: "warning",
@@ -235,6 +258,7 @@ export function validateItemDocument(document: ItemDocument): ValidationIssue[] 
   requirePositive(document.bulkBu, "bulkBu", "Bulk", issues);
   requirePositive(document.powerW, "powerW", "Power draw", issues);
   validateImageAsset(document.iconAsset, "iconAsset", "Item icon", issues);
+  validateMerchantListing(document.merchant, "merchant", "Item", issues);
 
   if (isWeaponChassis) {
     if (document.kind !== "equipment") {
@@ -317,6 +341,7 @@ export function validateChassisDocument(document: ChassisDocument): ValidationIs
       issues
     );
   }
+  validateMerchantListing(document.merchant, "merchant", "Chassis", issues);
   validateResourceWallet(document.buildCost, "buildCost", "Build cost", issues);
   warnOnDuplicates(document.requiredQuestIds, "requiredQuestIds", "Required quest ids", issues);
   warnOnDuplicates(document.allowedCardTags, "allowedCardTags", "Allowed card tags", issues);
@@ -333,6 +358,7 @@ export function validateDoctrineDocument(document: DoctrineDocument): Validation
   requireText(document.shortDescription, "shortDescription", "Doctrine short description", issues);
   requireText(document.description, "description", "Doctrine description", issues);
   requirePositive(document.unlockAfterFloor, "unlockAfterFloor", "Unlock after floor", issues);
+  validateMerchantListing(document.merchant, "merchant", "Doctrine", issues);
   validateResourceWallet(document.buildCostModifier, "buildCostModifier", "Build cost modifier", issues);
   warnOnDuplicates(document.intentTags, "intentTags", "Intent tags", issues);
   warnOnDuplicates(document.requiredQuestIds, "requiredQuestIds", "Required quest ids", issues);
@@ -347,6 +373,153 @@ export function validateChatterDocument(document: ChatterDocument): ValidationIs
   requireText(document.location, "location", "Chatter location", issues);
   requireText(document.content, "content", "Chatter content", issues);
   requireText(document.aerissResponse, "aerissResponse", "Aeriss response", issues);
+
+  return issues;
+}
+
+function getMetadataStringList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => (typeof entry === "string" && entry.trim() ? [entry.trim()] : []));
+  }
+
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+function hasCaseInsensitiveOverlap(left: readonly string[] | undefined, right: readonly string[]) {
+  const rightValues = new Set(right.map((entry) => entry.toLowerCase()));
+  return (left ?? []).some((entry) => rightValues.has(entry.toLowerCase()));
+}
+
+function getMapValidationTags(map: MapDocument): string[] {
+  return Array.from(
+    new Set([
+      ...(map.mapTags ?? []),
+      ...getMetadataStringList(map.metadata.tags),
+      ...getMetadataStringList(map.metadata.mapTags)
+    ].map((entry) => entry.trim()).filter(Boolean))
+  );
+}
+
+function getMapValidationRegionIds(map: MapDocument): string[] {
+  return Array.from(
+    new Set([
+      ...(map.regionTags ?? []),
+      ...getMetadataStringList(map.metadata.regionIds),
+      ...getMetadataStringList(map.metadata.regions),
+      map.metadata.regionId ?? ""
+    ].map((entry) => entry.trim()).filter(Boolean))
+  );
+}
+
+function getMapValidationFloorOrdinal(map: MapDocument): number | null {
+  const rawValue = map.metadata.floorOrdinal ?? map.metadata.floor;
+  if (!rawValue) {
+    return null;
+  }
+
+  const parsed = Number(rawValue);
+  return Number.isFinite(parsed) ? Math.floor(parsed) : null;
+}
+
+function isGeneratedApronMapDraft(map: MapDocument): boolean {
+  return Boolean(
+    map.metadata.generatedApron ||
+    map.metadata.isGeneratedApron ||
+    map.metadata.mapKind === "generated_apron" ||
+    map.metadata.type === "apron" ||
+    getMapValidationTags(map).some((tag) => tag.toLowerCase() === "apron" || tag.toLowerCase() === "generated_apron")
+  );
+}
+
+function fieldEnemyTargetsMapDraft(document: FieldEnemyDocument, map: MapDocument): boolean {
+  if (document.spawn.mapIds.includes(map.id)) {
+    return true;
+  }
+
+  if (hasCaseInsensitiveOverlap(document.spawn.mapTags, getMapValidationTags(map))) {
+    return true;
+  }
+
+  if (hasCaseInsensitiveOverlap(document.spawn.regionIds, getMapValidationRegionIds(map))) {
+    return true;
+  }
+
+  const floorOrdinal = getMapValidationFloorOrdinal(map);
+  if (floorOrdinal !== null && document.spawn.floorOrdinals.includes(floorOrdinal)) {
+    return true;
+  }
+
+  return Boolean(document.spawn.allowGeneratedAprons && isGeneratedApronMapDraft(map));
+}
+
+function getEnemySpawnAnchors(map: MapDocument) {
+  return (map.spawnAnchors ?? []).filter((anchor) => anchor.kind === "enemy" || anchor.kind === "generic");
+}
+
+function getMatchingEnemySpawnAnchors(map: MapDocument, anchorTags: readonly string[]) {
+  const anchors = getEnemySpawnAnchors(map);
+  if (anchorTags.length === 0) {
+    return anchors;
+  }
+
+  return anchors.filter((anchor) => hasCaseInsensitiveOverlap(anchor.tags, anchorTags));
+}
+
+export function validateFieldEnemyMapLinks(
+  document: FieldEnemyDocument,
+  maps: readonly MapDocument[],
+): ValidationIssue[] {
+  if (maps.length === 0) {
+    return [];
+  }
+
+  const issues: ValidationIssue[] = [];
+  const anchorTags = document.spawn.spawnAnchorTags ?? [];
+  const targetedMaps = maps.filter((map) => fieldEnemyTargetsMapDraft(document, map));
+
+  targetedMaps.forEach((map) => {
+    const enemyAnchors = getEnemySpawnAnchors(map);
+    const matchingAnchors = getMatchingEnemySpawnAnchors(map, anchorTags);
+
+    if (anchorTags.length > 0 && matchingAnchors.length === 0) {
+      issues.push({
+        severity: "warning",
+        field: "spawn.spawnAnchorTags",
+        message: `Targeted map '${map.id}' has no enemy or generic spawn anchors matching: ${anchorTags.join(", ")}. Chaos Core will fall back to random walkable tiles.`
+      });
+    }
+
+    if (enemyAnchors.length === 0 && (map.renderMode === "simple_3d" || map.renderMode === "bespoke_3d")) {
+      issues.push({
+        severity: "warning",
+        field: "spawn.spawnAnchorTags",
+        message: `Targeted 3D map '${map.id}' has no enemy/generic spawn anchors. Add enemy anchors in the Map Editor for predictable 3D placement.`
+      });
+    }
+
+    if (matchingAnchors.length > 0 && document.spawn.spawnCount > matchingAnchors.length) {
+      issues.push({
+        severity: "warning",
+        field: "spawn.spawnCount",
+        message: `Spawn count is ${document.spawn.spawnCount}, but targeted map '${map.id}' only has ${matchingAnchors.length} matching enemy/generic anchor(s). Chaos Core can only place one spawned enemy per matching anchor.`
+      });
+    }
+
+    if ((document.spawn.minDistanceFromPlayerSpawn ?? 0) > 0 && !(map.spawnAnchors ?? []).some((anchor) => anchor.kind === "player")) {
+      issues.push({
+        severity: "warning",
+        field: "spawn.minDistanceFromPlayerSpawn",
+        message: `Targeted map '${map.id}' has no player spawn anchor, so minimum distance from player spawn cannot be enforced there.`
+      });
+    }
+  });
 
   return issues;
 }
@@ -367,24 +540,58 @@ export function validateFieldEnemyDocument(document: FieldEnemyDocument): Valida
   requirePositive(document.drops.wad, "drops.wad", "WAD drop", issues);
   validateResourceWallet(document.drops.resources, "drops.resources", "Drop", issues);
 
-  if (document.spawn.mapIds.length === 0 && document.spawn.floorOrdinals.length === 0) {
+  const hasSpawnTarget =
+    document.spawn.mapIds.length > 0 ||
+    document.spawn.floorOrdinals.length > 0 ||
+    Boolean(document.spawn.regionIds?.length) ||
+    Boolean(document.spawn.mapTags?.length) ||
+    Boolean(document.spawn.allowGeneratedAprons);
+
+  if (!hasSpawnTarget) {
     issues.push({
       severity: "error",
       field: "spawn",
-      message: "Field enemies need at least one spawn target: specific maps, floor numbers, or both.",
+      message: "Field enemies need at least one spawn target: map ids, floor numbers, region ids, map tags, or generated aprons.",
     });
   }
 
   warnOnDuplicates(document.spawn.mapIds, "spawn.mapIds", "Map ids", issues);
+  warnOnDuplicates(document.spawn.regionIds ?? [], "spawn.regionIds", "Region ids", issues);
+  warnOnDuplicates(document.spawn.mapTags ?? [], "spawn.mapTags", "Map tags", issues);
+  warnOnDuplicates(document.spawn.spawnAnchorTags ?? [], "spawn.spawnAnchorTags", "Spawn anchor tags", issues);
+
+  if (document.presentation?.mode === "model_3d") {
+    const hasModelSource = Boolean(document.presentation.modelKey.trim() || document.presentation.modelAssetPath.trim());
+    if (!hasModelSource) {
+      issues.push({
+        severity: "warning",
+        field: "presentation.modelKey",
+        message: "3D model presentation should include a model key or model asset path so Chaos Core can render the intended enemy.",
+      });
+    }
+  } else {
+    const hasSpriteSource = Boolean(document.spriteKey.trim() || document.spriteAsset?.dataUrl || document.metadata.spritePath?.trim());
+    if (!hasSpriteSource) {
+      issues.push({
+        severity: "warning",
+        field: "spriteKey",
+        message: "Billboard sprite presentation should include a sprite key, uploaded sprite, or metadata spritePath.",
+      });
+    }
+  }
+
+  if (document.presentation) {
+    requirePositive(document.presentation.scale, "presentation.scale", "Presentation scale", issues, false);
+  }
 
   const seenFloorOrdinals = new Set<number>();
   const duplicateFloorOrdinals = new Set<number>();
   document.spawn.floorOrdinals.forEach((ordinal) => {
-    if (!Number.isFinite(ordinal) || ordinal <= 0) {
+    if (!Number.isFinite(ordinal) || ordinal < 0) {
       issues.push({
         severity: "error",
         field: "spawn.floorOrdinals",
-        message: "Floor numbers must be greater than 0.",
+        message: "Floor numbers must be 0 or greater.",
       });
       return;
     }
@@ -456,6 +663,7 @@ export function validateCraftingDocument(document: CraftingDocument): Validation
   if (document.acquisitionMethod === "unlock_floor") {
     requirePositive(document.unlockFloor, "unlockFloor", "Recipe unlock floor", issues, false);
   }
+  validateMerchantListing(document.merchant, "merchant", "Recipe", issues);
 
   warnOnDuplicates(document.requiredQuestIds, "requiredQuestIds", "Required quest ids", issues);
 
@@ -476,6 +684,7 @@ export function validateDishDocument(document: DishDocument): ValidationIssue[] 
     "Dish unlock floor",
     issues
   );
+  validateMerchantListing(document.merchant, "merchant", "Dish", issues);
   warnOnDuplicates(document.requiredQuestIds, "requiredQuestIds", "Required quest ids", issues);
 
   return issues;
@@ -529,6 +738,7 @@ export function validateDecorationDocument(document: DecorationDocument): Valida
   requireText(document.name, "name", "Decoration name", issues);
   requirePositive(document.tileSize, "tileSize", "Tile size", issues, false);
   validateImageAsset(document.spriteAsset, "spriteAsset", "Decoration sprite", issues);
+  validateMerchantListing(document.merchant, "merchant", "Decoration", issues);
   warnOnDuplicates(document.requiredQuestIds, "requiredQuestIds", "Required quest ids", issues);
 
   return issues;
@@ -555,6 +765,7 @@ export function validateFieldModDocument(document: FieldModDocument): Validation
       message: "Proc chance cannot be greater than 1.",
     });
   }
+  validateMerchantListing(document.merchant, "merchant", "Field mod", issues);
   warnOnDuplicates(document.requiredQuestIds, "requiredQuestIds", "Required quest ids", issues);
   issues.push(...validateEffectFlowDocument(document.effectFlow, "effectFlow"));
 
@@ -776,6 +987,109 @@ export function validateUnitDocument(document: UnitDocument): ValidationIssue[] 
   return issues;
 }
 
+function normalizeRouteText(value: string | undefined) {
+  return value?.trim() ?? "";
+}
+
+function mapRouteLooksLinkedToOperationRoom(
+  entryRule: MapEntryRule,
+  document: OperationDocument,
+  floor: OperationDocument["floors"][number],
+  room: OperationDocument["floors"][number]["rooms"][number],
+) {
+  if (entryRule.source !== room.fieldMapRouteSource) {
+    return false;
+  }
+
+  const expectedEntryPointId = normalizeRouteText(room.fieldMapEntryPointId);
+  if (expectedEntryPointId && entryRule.entryPointId !== expectedEntryPointId) {
+    return false;
+  }
+
+  if (room.fieldMapRouteSource === "atlas_theater") {
+    return (
+      entryRule.theaterScreenId === room.id ||
+      entryRule.regionId === room.id ||
+      entryRule.operationId === document.id ||
+      entryRule.operationId === document.codename
+    );
+  }
+
+  if (room.fieldMapRouteSource === "floor_region") {
+    return (
+      entryRule.floorOrdinal === floor.floorOrdinal ||
+      entryRule.regionId === room.id ||
+      entryRule.regionId === floor.id ||
+      entryRule.regionId === floor.atlasFloorId ||
+      entryRule.regionId === floor.sectorLabel
+    );
+  }
+
+  if (room.fieldMapRouteSource === "door") {
+    return Boolean(normalizeRouteText(room.fieldMapDoorId)) && entryRule.doorId === room.fieldMapDoorId;
+  }
+
+  if (room.fieldMapRouteSource === "portal") {
+    return Boolean(normalizeRouteText(room.fieldMapPortalId)) && entryRule.portalId === room.fieldMapPortalId;
+  }
+
+  return false;
+}
+
+export function validateOperationFieldMapLinks(
+  document: OperationDocument,
+  maps: readonly MapDocument[],
+): ValidationIssue[] {
+  if (maps.length === 0) {
+    return [];
+  }
+
+  const issues: ValidationIssue[] = [];
+  const mapById = new Map(maps.map((map) => [map.id, map]));
+
+  document.floors.forEach((floor, floorIndex) => {
+    floor.rooms.forEach((room, roomIndex) => {
+      const fieldMapId = normalizeRouteText(room.fieldMapId);
+      if (!fieldMapId) {
+        return;
+      }
+
+      const fieldPrefix = `floors.${floorIndex}.rooms.${roomIndex}`;
+      const linkedMap = mapById.get(fieldMapId);
+      if (!linkedMap) {
+        issues.push({
+          severity: "warning",
+          field: `${fieldPrefix}.fieldMapId`,
+          message: `Room '${room.id}' links to field map '${fieldMapId}', but that map is not available in the current validation set. Load or publish the matching map alongside this operation so Chaos Core can resolve the route.`
+        });
+        return;
+      }
+
+      const expectedEntryPointId = normalizeRouteText(room.fieldMapEntryPointId);
+      if (expectedEntryPointId && !(linkedMap.spawnAnchors ?? []).some((anchor) => anchor.id === expectedEntryPointId)) {
+        issues.push({
+          severity: "warning",
+          field: `${fieldPrefix}.fieldMapEntryPointId`,
+          message: `Room '${room.id}' expects spawn anchor '${expectedEntryPointId}', but map '${fieldMapId}' does not define that anchor.`
+        });
+      }
+
+      const matchingRoute = (linkedMap.entryRules ?? []).find((entryRule) =>
+        mapRouteLooksLinkedToOperationRoom(entryRule, document, floor, room)
+      );
+      if (!matchingRoute) {
+        issues.push({
+          severity: "warning",
+          field: `${fieldPrefix}.fieldMapId`,
+          message: `Room '${room.id}' links to map '${fieldMapId}', but that map has no matching ${room.fieldMapRouteSource.replace(/_/g, " ")} entry rule. Use the Map Editor route handshake builder to create the matching route before publishing.`
+        });
+      }
+    });
+  });
+
+  return issues;
+}
+
 export function validateOperationDocument(document: OperationDocument): ValidationIssue[] {
   const normalizedDocument = document;
   const issues: ValidationIssue[] = [];
@@ -912,6 +1226,32 @@ export function validateOperationDocument(document: OperationDocument): Validati
         `Shop inventory on room '${room.id}'`,
         issues
       );
+
+      if (room.fieldMapId?.trim()) {
+        if (room.clearMode !== "field") {
+          issues.push({
+            severity: "warning",
+            field: `floors.${floorIndex}.rooms.${roomIndex}.clearMode`,
+            message: `Room '${room.id}' has a Technica field-map route but clear mode is '${room.clearMode}'. Use field clear mode if this room should enter a field map.`
+          });
+        }
+
+        if (room.fieldMapRouteSource === "door" && !room.fieldMapDoorId?.trim()) {
+          issues.push({
+            severity: "warning",
+            field: `floors.${floorIndex}.rooms.${roomIndex}.fieldMapDoorId`,
+            message: `Room '${room.id}' uses a door field-map route but has no door id.`
+          });
+        }
+
+        if (room.fieldMapRouteSource === "portal" && !room.fieldMapPortalId?.trim()) {
+          issues.push({
+            severity: "warning",
+            field: `floors.${floorIndex}.rooms.${roomIndex}.fieldMapPortalId`,
+            message: `Room '${room.id}' uses a portal field-map route but has no portal id.`
+          });
+        }
+      }
 
       room.connections.forEach((connectionId) => {
         if (!roomIds.includes(connectionId)) {

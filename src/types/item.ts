@@ -1,4 +1,5 @@
 import type { ImageAsset, KeyValueRecord } from "./common";
+import type { MerchantListingDocument } from "./merchant";
 
 export type ItemKind = "resource" | "equipment" | "consumable";
 export type ItemArchetype = "standard" | "weapon_chassis";
@@ -52,6 +53,7 @@ export interface ItemDocument {
   bulkBu: number;
   powerW: number;
   acquisition: ItemAcquisitionDocument;
+  merchant: MerchantListingDocument;
   weaponChassis: WeaponChassisDocument;
   iconAsset?: ImageAsset;
   metadata: KeyValueRecord;

@@ -5,6 +5,66 @@ function isWithinBounds(x: number, y: number, width: number, height: number) {
   return x >= 0 && y >= 0 && x < width && y < height;
 }
 
+function getMapTile(document: MapDocument, x: number, y: number) {
+  return document.tiles[y]?.[x] ?? null;
+}
+
+const ZONE_ROUTE_METADATA_KEYS = [
+  "fieldMapId",
+  "technicaFieldMapId",
+  "targetImportedMapId",
+  "targetMapId",
+  "doorId",
+  "portalId",
+  "fieldMapRouteSource",
+  "routeSource",
+  "entryPointId",
+  "fieldMapEntryPointId",
+  "spawnAnchorId"
+];
+
+function readMetadataText(metadata: Record<string, string> | undefined, key: string) {
+  const value = metadata?.[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function hasRouteMetadata(metadata: Record<string, string> | undefined) {
+  return ZONE_ROUTE_METADATA_KEYS.some((key) => readMetadataText(metadata, key));
+}
+
+function getZoneRouteTargetMapId(metadata: Record<string, string> | undefined) {
+  return (
+    readMetadataText(metadata, "fieldMapId") ||
+    readMetadataText(metadata, "technicaFieldMapId") ||
+    readMetadataText(metadata, "targetImportedMapId") ||
+    readMetadataText(metadata, "targetMapId")
+  );
+}
+
+function getZoneRouteSource(metadata: Record<string, string> | undefined) {
+  const explicitSource =
+    readMetadataText(metadata, "fieldMapRouteSource") ||
+    readMetadataText(metadata, "routeSource");
+
+  if (explicitSource === "door" || explicitSource === "portal") {
+    return explicitSource;
+  }
+
+  if (readMetadataText(metadata, "portalId")) {
+    return "portal";
+  }
+
+  if (readMetadataText(metadata, "doorId")) {
+    return "door";
+  }
+
+  return "";
+}
+
+function getZoneRouteId(metadata: Record<string, string> | undefined, source: string) {
+  return source === "portal" ? readMetadataText(metadata, "portalId") : readMetadataText(metadata, "doorId");
+}
+
 export function validateMapDocument(document: MapDocument) {
   const issues: ValidationIssue[] = [];
 
@@ -94,6 +154,7 @@ export function validateMapDocument(document: MapDocument) {
   });
 
   const zoneIds = new Set<string>();
+  const zoneRouteIds = new Set<string>();
   document.zones.forEach((zone) => {
     if (zoneIds.has(zone.id)) {
       issues.push({
@@ -109,7 +170,211 @@ export function validateMapDocument(document: MapDocument) {
         message: `Zone '${zone.id}' starts outside the map bounds.`
       });
     }
+
+    if (hasRouteMetadata(zone.metadata)) {
+      const targetMapId = getZoneRouteTargetMapId(zone.metadata);
+      const source = getZoneRouteSource(zone.metadata);
+      const routeId = getZoneRouteId(zone.metadata, source);
+
+      if (!targetMapId) {
+        issues.push({
+          severity: "warning",
+          field: "zones",
+          message: `Route zone '${zone.id}' should include a target field map id.`
+        });
+      }
+
+      if (!source) {
+        issues.push({
+          severity: "warning",
+          field: "zones",
+          message: `Route zone '${zone.id}' should be marked as a door or portal route.`
+        });
+      }
+
+      if (source === "door" && !routeId) {
+        issues.push({
+          severity: "warning",
+          field: "zones",
+          message: `Door route zone '${zone.id}' should include a door id.`
+        });
+      }
+
+      if (source === "portal" && !routeId) {
+        issues.push({
+          severity: "warning",
+          field: "zones",
+          message: `Portal route zone '${zone.id}' should include a portal id.`
+        });
+      }
+
+      if (source && routeId) {
+        const routeKey = `${source}:${routeId.trim().toLowerCase()}`;
+        if (zoneRouteIds.has(routeKey)) {
+          issues.push({
+            severity: "warning",
+            field: "zones",
+            message: `Multiple route zones use ${source} id '${routeId}'. Door and portal ids should be unique per source map.`
+          });
+        }
+        zoneRouteIds.add(routeKey);
+      }
+    }
   });
+
+  const spawnAnchorIds = new Set<string>();
+  const spawnAnchorKindById = new Map<string, string>();
+  document.spawnAnchors?.forEach((anchor) => {
+    if (!anchor.id.trim()) {
+      issues.push({
+        severity: "error",
+        field: "spawnAnchors",
+        message: "Every spawn anchor needs an id."
+      });
+    }
+
+    if (spawnAnchorIds.has(anchor.id)) {
+      issues.push({
+        severity: "error",
+        field: "spawnAnchors",
+        message: `Spawn anchor id '${anchor.id}' is duplicated.`
+      });
+    }
+    spawnAnchorIds.add(anchor.id);
+    spawnAnchorKindById.set(anchor.id, anchor.kind);
+
+    if (!isWithinBounds(anchor.x, anchor.y, document.width, document.height)) {
+      issues.push({
+        severity: "error",
+        field: "spawnAnchors",
+        message: `Spawn anchor '${anchor.id}' is outside the map bounds.`
+      });
+    } else {
+      const anchorTile = getMapTile(document, anchor.x, anchor.y);
+      if (anchorTile && (!anchorTile.walkable || anchorTile.wall)) {
+        issues.push({
+          severity: "warning",
+          field: "spawnAnchors",
+          message: `Spawn anchor '${anchor.id}' is on a blocked tile. Entry routes should land on walkable floor.`
+        });
+      }
+    }
+  });
+
+  const entryRuleIds = new Set<string>();
+  document.entryRules?.forEach((entryRule) => {
+    if (!entryRule.id.trim()) {
+      issues.push({
+        severity: "error",
+        field: "entryRules",
+        message: "Every entry rule needs an id."
+      });
+    }
+
+    if (entryRuleIds.has(entryRule.id)) {
+      issues.push({
+        severity: "error",
+        field: "entryRules",
+        message: `Entry rule id '${entryRule.id}' is duplicated.`
+      });
+    }
+    entryRuleIds.add(entryRule.id);
+
+    if (!entryRule.entryPointId.trim()) {
+      issues.push({
+        severity: "warning",
+        field: "entryRules",
+        message: `Entry rule '${entryRule.id}' should point at a spawn anchor.`
+      });
+    } else if (!spawnAnchorIds.has(entryRule.entryPointId)) {
+      issues.push({
+        severity: "warning",
+        field: "entryRules",
+        message: `Entry rule '${entryRule.id}' points to missing spawn anchor '${entryRule.entryPointId}'.`
+      });
+    } else {
+      const targetKind = spawnAnchorKindById.get(entryRule.entryPointId);
+      if (targetKind === "enemy" || targetKind === "npc") {
+        issues.push({
+          severity: "warning",
+          field: "entryRules",
+          message: `Entry rule '${entryRule.id}' points to a ${targetKind} anchor. Player entries usually target player, portal exit, or generic anchors.`
+        });
+      }
+    }
+
+    if (entryRule.source === "floor_region" && entryRule.floorOrdinal !== undefined && entryRule.floorOrdinal < 0) {
+      issues.push({
+        severity: "error",
+        field: "entryRules",
+        message: `Entry rule '${entryRule.id}' has an invalid floor number.`
+      });
+    }
+
+    if (entryRule.source === "floor_region" && entryRule.floorOrdinal === undefined && !entryRule.regionId?.trim()) {
+      issues.push({
+        severity: "warning",
+        field: "entryRules",
+        message: `Floor-region entry rule '${entryRule.id}' should include a floor number or region id.`
+      });
+    }
+
+    if (entryRule.source === "atlas_theater" && !entryRule.theaterScreenId?.trim()) {
+      issues.push({
+        severity: "warning",
+        field: "entryRules",
+        message: `Atlas theater entry rule '${entryRule.id}' should include the target theater room/screen id.`
+      });
+    }
+
+    if (entryRule.source === "door" && !entryRule.doorId?.trim()) {
+      issues.push({
+        severity: "warning",
+        field: "entryRules",
+        message: `Door entry rule '${entryRule.id}' should include the source door id.`
+      });
+    }
+
+    if (entryRule.source === "door" && !entryRule.sourceMapId?.trim()) {
+      issues.push({
+        severity: "warning",
+        field: "entryRules",
+        message: `Door entry rule '${entryRule.id}' should include the source map id so Chaos Core knows which door leads here.`
+      });
+    }
+
+    if (entryRule.source === "portal" && !entryRule.portalId?.trim()) {
+      issues.push({
+        severity: "warning",
+        field: "entryRules",
+        message: `Portal entry rule '${entryRule.id}' should include the source portal id.`
+      });
+    }
+
+    if (entryRule.source === "portal" && !entryRule.sourceMapId?.trim()) {
+      issues.push({
+        severity: "warning",
+        field: "entryRules",
+        message: `Portal entry rule '${entryRule.id}' should include the source map id so Chaos Core knows which portal leads here.`
+      });
+    }
+  });
+
+  if ((document.renderMode === "simple_3d" || document.renderMode === "bespoke_3d") && (document.entryRules?.length ?? 0) === 0) {
+    issues.push({
+      severity: "warning",
+      field: "entryRules",
+      message: "3D maps should usually have at least one entry route so they can be reached from theater, floor, door, or portal flows."
+    });
+  }
+
+  if ((document.renderMode === "simple_3d" || document.renderMode === "bespoke_3d") && !document.vertical) {
+    issues.push({
+      severity: "warning",
+      field: "renderMode",
+      message: "3D maps can export from flat 2D data, but vertical layers give Chaos Core better height and traversal hints."
+    });
+  }
 
   if (document.vertical) {
     if (document.vertical.elevationStep <= 0 || !Number.isFinite(document.vertical.elevationStep)) {
