@@ -19,7 +19,7 @@ jobs:
         include:
           - platform: macos-latest
             target: universal-apple-darwin
-            args: "--target universal-apple-darwin --bundles dmg"
+            args: "--target universal-apple-darwin --bundles app,dmg"
             rustTargets: "aarch64-apple-darwin,x86_64-apple-darwin"
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
@@ -108,4 +108,5 @@ jobs:
           prerelease: false
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
+          updaterJsonKeepUniversal: true
           args: ${{ matrix.args }}
