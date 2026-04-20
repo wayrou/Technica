@@ -17,8 +17,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - platform: macos-latest
+            target: universal-apple-darwin
+            args: "--target universal-apple-darwin --bundles dmg"
+            rustTargets: "aarch64-apple-darwin,x86_64-apple-darwin"
           - platform: windows-latest
+            target: x86_64-pc-windows-msvc
             args: "--bundles nsis"
+            rustTargets: ""
 
     runs-on: ${{ matrix.platform }}
 
@@ -33,11 +39,14 @@ jobs:
 
       - name: install Rust stable
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rustTargets }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
           workspaces: "./src-tauri -> target"
+          key: ${{ matrix.target }}
 
       - name: install frontend dependencies
         run: npm ci

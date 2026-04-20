@@ -4,8 +4,8 @@ Technica desktop builds update from signed GitHub Releases. The installed app ch
 
 ## Release Flow
 
-- Pushes to `main` build a Windows release automatically.
-- Version tags like `v1.2.2` also build a Windows release for that exact version.
+- Pushes to `main` build Windows and universal macOS releases automatically.
+- Version tags like `v1.2.2` also build Windows and universal macOS releases for that exact version.
 - GitHub Releases publish `latest.json`, which the installed app reads from `https://github.com/wayrou/Technica/releases/latest/download/latest.json`.
 
 ## Signing Key
