@@ -214,7 +214,7 @@ export function buildMapBundle(document: MapDocument): ExportBundle {
     exportedAt: isoNow(),
     contentId: runtimeId(document.id || document.name, "map"),
     title: document.name,
-    description: "Tile-based map export containing terrain, passability, objects, and interaction zones.",
+    description: "Tile-based map export containing terrain, passability, objects, 3D scene props, and interaction zones.",
     entryFile: "map.json",
     dependencies: [],
     files: ["manifest.json", "map.json", "README.md"]
@@ -227,9 +227,10 @@ Id: ${document.id}
 
 Importer notes:
 - \`tiles\` are stored as rows from top to bottom.
-- Objects and zones use top-left coordinates with width and height in tile units.
+- Objects, 3D scene props, and zones use top-left coordinates with width and height in tile units.
 - Terrain, wall, walkable, and metadata fields are intentionally explicit to support multiple downstream adapters.
 - Optional \`vertical\` data is sparse authoring metadata for 3D field-map layers, elevation, and connectors.
+- Optional \`sceneProps\` data stores authored bespoke 3D setpieces, cover, portals, stairs, and lighting markers.
 - Preserve ids and metadata when converting into Chaos Core runtime formats.
 `;
 

@@ -118,6 +118,9 @@ export interface OperationRoomDocument {
   tacticalEncounter?: string;
   fieldMapId?: string;
   fieldMapEntryPointId?: string;
+  fieldMapEncounterVolumeId?: string;
+  fieldMapReturnAnchorId?: string;
+  fieldMapExtractionAnchorId?: string;
   fieldMapRouteSource: OperationFieldMapRouteSource;
   fieldMapDoorId?: string;
   fieldMapPortalId?: string;
@@ -444,6 +447,18 @@ export function createOperationRoomDocument(seed: Partial<OperationRoomDocument>
     fieldMapEntryPointId: normalizeText(
       seed.fieldMapEntryPointId,
       normalizedMetadata.fieldMapEntryPointId || normalizedMetadata.entryPointId
+    ),
+    fieldMapEncounterVolumeId: normalizeText(
+      seed.fieldMapEncounterVolumeId,
+      normalizedMetadata.fieldMapEncounterVolumeId || normalizedMetadata.encounterVolumeId
+    ),
+    fieldMapReturnAnchorId: normalizeText(
+      seed.fieldMapReturnAnchorId,
+      normalizedMetadata.fieldMapReturnAnchorId || normalizedMetadata.returnAnchorId
+    ),
+    fieldMapExtractionAnchorId: normalizeText(
+      seed.fieldMapExtractionAnchorId,
+      normalizedMetadata.fieldMapExtractionAnchorId || normalizedMetadata.extractionAnchorId
     ),
     fieldMapRouteSource: normalizeFieldMapRouteSource(
       seed.fieldMapRouteSource || normalizedMetadata.fieldMapRouteSource,

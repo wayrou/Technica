@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChaosCoreDatabasePanel } from "../../components/ChaosCoreDatabasePanel";
+import { useChaosCoreDatabase } from "../../hooks/useChaosCoreDatabase";
 import { Panel } from "../../components/Panel";
 import {
   operationFieldMapRouteSources,
@@ -19,7 +20,7 @@ import { buildOperationBundleForTarget } from "../../utils/exporters";
 import { confirmAction, notify } from "../../utils/dialogs";
 import { runtimeId } from "../../utils/id";
 import { parseKeyValueLines, serializeKeyValueLines } from "../../utils/records";
-import type { LoadedChaosCoreDatabaseEntry } from "../../utils/chaosCoreDatabase";
+import type { ChaosCoreDatabaseEntry, LoadedChaosCoreDatabaseEntry } from "../../utils/chaosCoreDatabase";
 import type { StructuredStudioContext } from "../content/StructuredDocumentStudio";
 import {
   applyRoomRolePreset,
@@ -36,6 +37,96 @@ import {
 } from "./operationEditorUtils";
 
 interface OperationWorkspaceProps extends StructuredStudioContext<OperationDocument> {}
+
+interface OperationMapSummaryAnchor {
+  id: string;
+  label: string;
+  kind: string;
+  tags: string[];
+}
+
+interface OperationMapSummaryEncounter {
+  id: string;
+  label: string;
+  triggerMode: string;
+  playerEntryAnchorId: string;
+  fallbackReturnAnchorId: string;
+  extractionAnchorId: string;
+  enemyAnchorTags: string[];
+  linkedFieldEnemyIds: string[];
+  tacticalEncounterId: string;
+}
+
+interface OperationMapSummary {
+  id: string;
+  title: string;
+  origin: "game" | "technica";
+  renderMode: string;
+  width: number;
+  height: number;
+  spawnAnchors: OperationMapSummaryAnchor[];
+  encounterVolumes: OperationMapSummaryEncounter[];
+}
+
+function normalizeSummaryString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeSummaryStringList(value: unknown) {
+  return Array.isArray(value) ? value.map((entry) => String(entry ?? "").trim()).filter(Boolean) : [];
+}
+
+function parseOperationMapSummary(entry: ChaosCoreDatabaseEntry): OperationMapSummary {
+  const summaryData = entry.summaryData ?? {};
+  const spawnAnchors = Array.isArray(summaryData.spawnAnchors)
+    ? summaryData.spawnAnchors
+        .map<OperationMapSummaryAnchor | null>((anchor) => {
+          if (!anchor || typeof anchor !== "object") {
+            return null;
+          }
+
+          return {
+            id: normalizeSummaryString((anchor as Record<string, unknown>).id),
+            label: normalizeSummaryString((anchor as Record<string, unknown>).label) || normalizeSummaryString((anchor as Record<string, unknown>).id),
+            kind: normalizeSummaryString((anchor as Record<string, unknown>).kind) || "generic",
+            tags: normalizeSummaryStringList((anchor as Record<string, unknown>).tags)
+          };
+        })
+        .filter((anchor): anchor is OperationMapSummaryAnchor => Boolean(anchor?.id))
+    : [];
+  const encounterVolumes = Array.isArray(summaryData.encounterVolumes)
+    ? summaryData.encounterVolumes
+        .map<OperationMapSummaryEncounter | null>((encounter) => {
+          if (!encounter || typeof encounter !== "object") {
+            return null;
+          }
+
+          return {
+            id: normalizeSummaryString((encounter as Record<string, unknown>).id),
+            label: normalizeSummaryString((encounter as Record<string, unknown>).label) || normalizeSummaryString((encounter as Record<string, unknown>).id),
+            triggerMode: normalizeSummaryString((encounter as Record<string, unknown>).triggerMode) || "on_enter",
+            playerEntryAnchorId: normalizeSummaryString((encounter as Record<string, unknown>).playerEntryAnchorId),
+            fallbackReturnAnchorId: normalizeSummaryString((encounter as Record<string, unknown>).fallbackReturnAnchorId),
+            extractionAnchorId: normalizeSummaryString((encounter as Record<string, unknown>).extractionAnchorId),
+            enemyAnchorTags: normalizeSummaryStringList((encounter as Record<string, unknown>).enemyAnchorTags),
+            linkedFieldEnemyIds: normalizeSummaryStringList((encounter as Record<string, unknown>).linkedFieldEnemyIds),
+            tacticalEncounterId: normalizeSummaryString((encounter as Record<string, unknown>).tacticalEncounterId)
+          };
+        })
+        .filter((encounter): encounter is OperationMapSummaryEncounter => Boolean(encounter?.id))
+    : [];
+
+  return {
+    id: entry.contentId,
+    title: entry.title.trim() || entry.contentId,
+    origin: entry.origin,
+    renderMode: normalizeSummaryString(summaryData.renderMode) || "classic_2d",
+    width: typeof summaryData.width === "number" ? summaryData.width : 0,
+    height: typeof summaryData.height === "number" ? summaryData.height : 0,
+    spawnAnchors,
+    encounterVolumes
+  };
+}
 
 function getOperationRoomFieldRouteLabel(room: OperationRoomDocument) {
   return room.fieldMapLabel?.trim() || `${room.label} field map`;
@@ -56,6 +147,9 @@ function createFieldRouteHintRows(
     ["Map route source", source],
     ["Operation id", runtimeId(operation.id)],
     ["Entry anchor id", runtimeId(getOperationRoomEntryAnchorId(room), "spawn")],
+    ["Encounter volume id", room.fieldMapEncounterVolumeId?.trim() ? runtimeId(room.fieldMapEncounterVolumeId, "encounter") : "Optional"],
+    ["Return anchor id", room.fieldMapReturnAnchorId?.trim() ? runtimeId(room.fieldMapReturnAnchorId, "spawn") : "Optional"],
+    ["Extraction anchor id", room.fieldMapExtractionAnchorId?.trim() ? runtimeId(room.fieldMapExtractionAnchorId, "spawn") : "Optional"],
     ["Route label", getOperationRoomFieldRouteLabel(room)]
   ];
 
@@ -108,9 +202,18 @@ export function OperationWorkspace({
   isSendingToDesktop,
   sendToDesktop,
 }: OperationWorkspaceProps) {
+  const { desktopEnabled, repoPath, summaryStates, ensureSummaries } = useChaosCoreDatabase();
   const normalizedDocument = useMemo(() => normalizeOperationDocument(document), [document]);
   const [selectedFloorId, setSelectedFloorId] = useState(normalizedDocument.floors[0]?.id ?? "");
   const [selectedRoomId, setSelectedRoomId] = useState(normalizedDocument.floors[0]?.rooms[0]?.id ?? "");
+
+  useEffect(() => {
+    if (!desktopEnabled || !repoPath.trim()) {
+      return;
+    }
+
+    void ensureSummaries("map");
+  }, [desktopEnabled, ensureSummaries, repoPath]);
 
   useEffect(() => {
     const nextFloorId =
@@ -142,8 +245,36 @@ export function OperationWorkspace({
   const floorPathSummary = selectedFloor ? createSelectionPathSummary(selectedFloor) : { reachableCount: 0, pathLengthToObjective: null };
   const selectedRoomFieldRouteHints =
     selectedFloor && selectedRoom ? createFieldRouteHintRows(normalizedDocument, selectedFloor, selectedRoom) : [];
+  const mapSummaries = useMemo(
+    () =>
+      summaryStates.map.entries
+        .map(parseOperationMapSummary)
+        .sort((left, right) => left.title.localeCompare(right.title) || left.id.localeCompare(right.id)),
+    [summaryStates.map.entries]
+  );
+  const selectedFieldMapSummary =
+    mapSummaries.find((mapSummary) => mapSummary.id === selectedRoom?.fieldMapId?.trim()) ?? null;
+  const selectedEncounterSummary =
+    selectedFieldMapSummary?.encounterVolumes.find((encounter) => encounter.id === selectedRoom?.fieldMapEncounterVolumeId?.trim()) ?? null;
+  const selectedRoomFieldRouteEffectiveEntryAnchorId =
+    selectedRoom?.fieldMapEntryPointId?.trim()
+    || selectedEncounterSummary?.playerEntryAnchorId
+    || "player_start";
+  const selectedRoomFieldRouteProofRows = selectedRoom
+    ? [
+        ["Route room", runtimeId(selectedRoom.id)],
+        ["Target map", selectedFieldMapSummary ? runtimeId(selectedFieldMapSummary.id) : selectedRoom.fieldMapId?.trim() || "Select field map"],
+        ["Render mode", selectedFieldMapSummary ? formatChoiceLabel(selectedFieldMapSummary.renderMode) : "Unknown"],
+        ["Encounter volume", selectedEncounterSummary ? runtimeId(selectedEncounterSummary.id, "encounter") : selectedRoom.fieldMapEncounterVolumeId?.trim() || "Optional"],
+        ["Entry anchor", runtimeId(selectedRoomFieldRouteEffectiveEntryAnchorId, "spawn")],
+        ["Return anchor", selectedRoom.fieldMapReturnAnchorId?.trim() ? runtimeId(selectedRoom.fieldMapReturnAnchorId, "spawn") : selectedEncounterSummary?.fallbackReturnAnchorId ? runtimeId(selectedEncounterSummary.fallbackReturnAnchorId, "spawn") : "Optional"],
+        ["Extraction anchor", selectedRoom.fieldMapExtractionAnchorId?.trim() ? runtimeId(selectedRoom.fieldMapExtractionAnchorId, "spawn") : selectedEncounterSummary?.extractionAnchorId ? runtimeId(selectedEncounterSummary.extractionAnchorId, "spawn") : "Optional"],
+        ["Threat package", selectedEncounterSummary?.linkedFieldEnemyIds.length ? selectedEncounterSummary.linkedFieldEnemyIds.map((enemyId) => runtimeId(enemyId)).join(", ") : selectedEncounterSummary?.tacticalEncounterId ? runtimeId(selectedEncounterSummary.tacticalEncounterId) : "Unspecified"]
+      ]
+    : [];
   const selectedRoomFieldRouteReady =
     Boolean(selectedRoom?.fieldMapId?.trim()) &&
+    Boolean(selectedRoomFieldRouteEffectiveEntryAnchorId.trim()) &&
     (!selectedRoom || selectedRoom.fieldMapRouteSource !== "door" || Boolean(selectedRoom.fieldMapDoorId?.trim())) &&
     (!selectedRoom || selectedRoom.fieldMapRouteSource !== "portal" || Boolean(selectedRoom.fieldMapPortalId?.trim()));
 
@@ -180,6 +311,48 @@ export function OperationWorkspace({
     }));
   }
 
+  function setSelectedRoomFieldMapId(fieldMapId: string) {
+    const nextMapSummary = mapSummaries.find((mapSummary) => mapSummary.id === fieldMapId) ?? null;
+    const defaultPlayerAnchor =
+      nextMapSummary?.spawnAnchors.find((anchor) => anchor.kind === "player")?.id
+      ?? nextMapSummary?.encounterVolumes.find((encounter) => encounter.playerEntryAnchorId)?.playerEntryAnchorId
+      ?? nextMapSummary?.spawnAnchors[0]?.id
+      ?? "";
+
+    updateSelectedRoom((room) => ({
+      ...room,
+      fieldMapId,
+      fieldMapEncounterVolumeId:
+        nextMapSummary?.encounterVolumes.some((encounter) => encounter.id === room.fieldMapEncounterVolumeId)
+          ? room.fieldMapEncounterVolumeId
+          : "",
+      fieldMapEntryPointId:
+        room.fieldMapEntryPointId?.trim() && nextMapSummary?.spawnAnchors.some((anchor) => anchor.id === room.fieldMapEntryPointId)
+          ? room.fieldMapEntryPointId
+          : defaultPlayerAnchor,
+      fieldMapReturnAnchorId:
+        room.fieldMapReturnAnchorId?.trim() && nextMapSummary?.spawnAnchors.some((anchor) => anchor.id === room.fieldMapReturnAnchorId)
+          ? room.fieldMapReturnAnchorId
+          : "",
+      fieldMapExtractionAnchorId:
+        room.fieldMapExtractionAnchorId?.trim() && nextMapSummary?.spawnAnchors.some((anchor) => anchor.id === room.fieldMapExtractionAnchorId)
+          ? room.fieldMapExtractionAnchorId
+          : "",
+      fieldMapLabel: room.fieldMapLabel || getOperationRoomFieldRouteLabel(room)
+    }));
+  }
+
+  function applyEncounterVolumeToSelectedRoom(encounterId: string) {
+    const encounter = selectedFieldMapSummary?.encounterVolumes.find((entry) => entry.id === encounterId) ?? null;
+    updateSelectedRoom((room) => ({
+      ...room,
+      fieldMapEncounterVolumeId: encounterId,
+      fieldMapEntryPointId: encounter?.playerEntryAnchorId || room.fieldMapEntryPointId,
+      fieldMapReturnAnchorId: encounter?.fallbackReturnAnchorId || room.fieldMapReturnAnchorId,
+      fieldMapExtractionAnchorId: encounter?.extractionAnchorId || room.fieldMapExtractionAnchorId
+    }));
+  }
+
   function markSelectedRoomAsFieldMapRoute() {
     updateSelectedRoom((room) => ({
       ...room,
@@ -210,6 +383,9 @@ export function OperationWorkspace({
       ...room,
       fieldMapId: "",
       fieldMapEntryPointId: "",
+      fieldMapEncounterVolumeId: "",
+      fieldMapReturnAnchorId: "",
+      fieldMapExtractionAnchorId: "",
       fieldMapRouteSource: "atlas_theater",
       fieldMapDoorId: "",
       fieldMapPortalId: "",
@@ -800,7 +976,24 @@ export function OperationWorkspace({
                     <div className="form-grid compact">
                       <label className="field">
                         <span>Field map id</span>
-                        <input value={selectedRoom.fieldMapId ?? ""} onChange={(event) => updateSelectedRoom((room) => ({ ...room, fieldMapId: event.target.value }))} placeholder="outer_deck_overworld" />
+                        <select value={selectedRoom.fieldMapId ?? ""} onChange={(event) => setSelectedRoomFieldMapId(event.target.value)}>
+                          <option value="">Select published field map...</option>
+                          {selectedRoom.fieldMapId?.trim() && !selectedFieldMapSummary ? (
+                            <option value={selectedRoom.fieldMapId}>{`Custom (${selectedRoom.fieldMapId})`}</option>
+                          ) : null}
+                          {mapSummaries.map((mapSummary) => (
+                            <option key={mapSummary.id} value={mapSummary.id}>
+                              {`${mapSummary.title} (${mapSummary.id})`}
+                            </option>
+                          ))}
+                        </select>
+                        <small className="muted">
+                          {selectedFieldMapSummary
+                            ? `${formatChoiceLabel(selectedFieldMapSummary.renderMode)} • ${selectedFieldMapSummary.width} x ${selectedFieldMapSummary.height} • ${selectedFieldMapSummary.spawnAnchors.length} anchor(s) • ${selectedFieldMapSummary.encounterVolumes.length} encounter volume(s)`
+                            : mapSummaries.length > 0
+                              ? `${mapSummaries.length} published field map option(s) detected from Chaos Core.`
+                              : "Open the map database or publish a map first to pick from structured route targets."}
+                        </small>
                       </label>
                       <label className="field">
                         <span>Route source</span>
@@ -813,8 +1006,80 @@ export function OperationWorkspace({
                         </select>
                       </label>
                       <label className="field">
+                        <span>Encounter volume</span>
+                        <select
+                          value={selectedRoom.fieldMapEncounterVolumeId ?? ""}
+                          onChange={(event) => applyEncounterVolumeToSelectedRoom(event.target.value)}
+                        >
+                          <option value="">No staged encounter volume</option>
+                          {selectedRoom.fieldMapEncounterVolumeId?.trim() && !selectedEncounterSummary ? (
+                            <option value={selectedRoom.fieldMapEncounterVolumeId}>{`Custom (${selectedRoom.fieldMapEncounterVolumeId})`}</option>
+                          ) : null}
+                          {(selectedFieldMapSummary?.encounterVolumes ?? []).map((encounter) => (
+                            <option key={encounter.id} value={encounter.id}>
+                              {`${encounter.label} (${encounter.id})`}
+                            </option>
+                          ))}
+                        </select>
+                        <small className="muted">
+                          {selectedEncounterSummary
+                            ? `${formatChoiceLabel(selectedEncounterSummary.triggerMode)} trigger${selectedEncounterSummary.enemyAnchorTags.length ? ` • enemy tags: ${selectedEncounterSummary.enemyAnchorTags.join(", ")}` : ""}`
+                            : "Optional, but useful for bespoke 3D encounter staging and proofing."}
+                        </small>
+                      </label>
+                      <label className="field">
                         <span>Entry spawn anchor id</span>
-                        <input value={selectedRoom.fieldMapEntryPointId ?? ""} onChange={(event) => updateSelectedRoom((room) => ({ ...room, fieldMapEntryPointId: event.target.value }))} placeholder="player_start" />
+                        <select
+                          value={selectedRoom.fieldMapEntryPointId ?? ""}
+                          onChange={(event) => updateSelectedRoom((room) => ({ ...room, fieldMapEntryPointId: event.target.value }))}
+                        >
+                          <option value="">Select entry anchor...</option>
+                          {selectedRoom.fieldMapEntryPointId?.trim() &&
+                          !selectedFieldMapSummary?.spawnAnchors.some((anchor) => anchor.id === selectedRoom.fieldMapEntryPointId) ? (
+                            <option value={selectedRoom.fieldMapEntryPointId}>{`Custom (${selectedRoom.fieldMapEntryPointId})`}</option>
+                          ) : null}
+                          {(selectedFieldMapSummary?.spawnAnchors ?? []).map((anchor) => (
+                            <option key={anchor.id} value={anchor.id}>
+                              {`${anchor.label} (${anchor.id})${anchor.kind ? ` • ${formatChoiceLabel(anchor.kind)}` : ""}`}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="field">
+                        <span>Return anchor id</span>
+                        <select
+                          value={selectedRoom.fieldMapReturnAnchorId ?? ""}
+                          onChange={(event) => updateSelectedRoom((room) => ({ ...room, fieldMapReturnAnchorId: event.target.value }))}
+                        >
+                          <option value="">No explicit return anchor</option>
+                          {selectedRoom.fieldMapReturnAnchorId?.trim() &&
+                          !selectedFieldMapSummary?.spawnAnchors.some((anchor) => anchor.id === selectedRoom.fieldMapReturnAnchorId) ? (
+                            <option value={selectedRoom.fieldMapReturnAnchorId}>{`Custom (${selectedRoom.fieldMapReturnAnchorId})`}</option>
+                          ) : null}
+                          {(selectedFieldMapSummary?.spawnAnchors ?? []).map((anchor) => (
+                            <option key={anchor.id} value={anchor.id}>
+                              {`${anchor.label} (${anchor.id})`}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="field">
+                        <span>Extraction anchor id</span>
+                        <select
+                          value={selectedRoom.fieldMapExtractionAnchorId ?? ""}
+                          onChange={(event) => updateSelectedRoom((room) => ({ ...room, fieldMapExtractionAnchorId: event.target.value }))}
+                        >
+                          <option value="">No explicit extraction anchor</option>
+                          {selectedRoom.fieldMapExtractionAnchorId?.trim() &&
+                          !selectedFieldMapSummary?.spawnAnchors.some((anchor) => anchor.id === selectedRoom.fieldMapExtractionAnchorId) ? (
+                            <option value={selectedRoom.fieldMapExtractionAnchorId}>{`Custom (${selectedRoom.fieldMapExtractionAnchorId})`}</option>
+                          ) : null}
+                          {(selectedFieldMapSummary?.spawnAnchors ?? []).map((anchor) => (
+                            <option key={anchor.id} value={anchor.id}>
+                              {`${anchor.label} (${anchor.id})`}
+                            </option>
+                          ))}
+                        </select>
                       </label>
                       <label className="field">
                         <span>Route label</span>
@@ -829,9 +1094,30 @@ export function OperationWorkspace({
                         <input value={selectedRoom.fieldMapPortalId ?? ""} onChange={(event) => updateSelectedRoom((room) => ({ ...room, fieldMapPortalId: event.target.value }))} placeholder="portal id for portal routes" />
                       </label>
                     </div>
+                    <div className="operation-field-route-contract">
+                      <div className="operation-field-route-contract__header">
+                        <strong>Publish proof</strong>
+                      </div>
+                      <div className="operation-field-route-contract__grid">
+                        {selectedRoomFieldRouteProofRows.map(([label, value]) => (
+                          <div key={`proof-${label}-${value}`}>
+                            <span>{label}</span>
+                            <code>{value}</code>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                     <div className="toolbar">
                       <button type="button" className="ghost-button" onClick={markSelectedRoomAsFieldMapRoute}>
                         Use this room as theater route
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        onClick={() => applyEncounterVolumeToSelectedRoom(selectedRoom.fieldMapEncounterVolumeId ?? "")}
+                        disabled={!selectedEncounterSummary}
+                      >
+                        Apply encounter staging
                       </button>
                       <button type="button" className="ghost-button" onClick={() => setSelectedRoomFieldRoutePreset("floor_region")}>
                         Floor route preset
@@ -847,7 +1133,7 @@ export function OperationWorkspace({
                       </button>
                     </div>
                     <small>
-                      Exported to Chaos Core as an explicit room-to-map route. If the map has a matching spawn anchor, the theater button will enter at that anchor.
+                      Exported to Chaos Core as an explicit room-to-map route plus optional encounter staging hints for entry, return, and extraction.
                     </small>
                   </div>
                   <label className="field">

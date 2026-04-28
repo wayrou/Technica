@@ -1542,6 +1542,49 @@ function buildEntrySummaryData(contentType: ContentType, runtimeData: any, edito
               : 0
       };
     }
+    case "map": {
+      const spawnAnchors = Array.isArray(editorData?.spawnAnchors)
+        ? editorData.spawnAnchors
+        : Array.isArray(runtimeData?.spawnAnchors)
+          ? runtimeData.spawnAnchors
+          : [];
+      const entryRules = Array.isArray(editorData?.entryRules)
+        ? editorData.entryRules
+        : Array.isArray(runtimeData?.entryRules)
+          ? runtimeData.entryRules
+          : [];
+      const encounterVolumes = Array.isArray(editorData?.encounterVolumes)
+        ? editorData.encounterVolumes
+        : Array.isArray(runtimeData?.encounterVolumes)
+          ? runtimeData.encounterVolumes
+          : [];
+
+      return {
+        renderMode: String(editorData?.renderMode ?? runtimeData?.renderMode ?? "classic_2d"),
+        width: Number(editorData?.width ?? runtimeData?.width ?? 0),
+        height: Number(editorData?.height ?? runtimeData?.height ?? 0),
+        spawnAnchorCount: spawnAnchors.length,
+        entryRuleCount: entryRules.length,
+        encounterVolumeCount: encounterVolumes.length,
+        spawnAnchors: spawnAnchors.map((anchor: any) => ({
+          id: String(anchor?.id ?? ""),
+          label: String(anchor?.label ?? anchor?.id ?? "Anchor"),
+          kind: String(anchor?.kind ?? "generic"),
+          tags: Array.isArray(anchor?.tags) ? anchor.tags.map(String) : []
+        })),
+        encounterVolumes: encounterVolumes.map((encounter: any) => ({
+          id: String(encounter?.id ?? ""),
+          label: String(encounter?.label ?? encounter?.id ?? "Encounter"),
+          triggerMode: String(encounter?.triggerMode ?? "on_enter"),
+          playerEntryAnchorId: String(encounter?.playerEntryAnchorId ?? ""),
+          fallbackReturnAnchorId: String(encounter?.fallbackReturnAnchorId ?? ""),
+          extractionAnchorId: String(encounter?.extractionAnchorId ?? ""),
+          enemyAnchorTags: Array.isArray(encounter?.enemyAnchorTags) ? encounter.enemyAnchorTags.map(String) : [],
+          linkedFieldEnemyIds: Array.isArray(encounter?.linkedFieldEnemyIds) ? encounter.linkedFieldEnemyIds.map(String) : [],
+          tacticalEncounterId: String(encounter?.tacticalEncounterId ?? "")
+        }))
+      };
+    }
     case "key_item": {
       return {
         hasIcon: Boolean(editorData?.iconAsset || runtimeData?.iconPath),

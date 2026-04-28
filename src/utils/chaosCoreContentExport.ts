@@ -1079,6 +1079,19 @@ export function buildChaosCoreNpcBundle(
     spriteKey: document.spriteKey || undefined,
     portraitPath: portraitAsset?.runtimePath,
     spritePath: spriteAsset?.runtimePath,
+    presentation: document.presentation
+      ? pruneEmpty({
+          mode: document.presentation.mode,
+          modelKey: document.presentation.modelKey || undefined,
+          modelAssetPath: document.presentation.modelAssetPath || undefined,
+          materialKey: document.presentation.materialKey || undefined,
+          scale: document.presentation.scale,
+          heightOffset: document.presentation.heightOffset,
+          facingMode: document.presentation.facingMode,
+          previewPose: document.presentation.previewPose || undefined,
+          metadata: coerceRecord(document.presentation.metadata)
+        })
+      : undefined,
     metadata: coerceRecord(metadata)
   });
 
@@ -1126,6 +1139,7 @@ Importer notes:
 - Imported NPCs spawn on their declared map id and can use fixed, random, or no movement routes.
 - Dialogue references use \`dialogueId\` so the Dialogue Editor can reuse speaker names and runtime conversations.
 - Portrait and sprite assets resolve through \`portraitPath\` and \`spritePath\` when present.
+- NPC presentation metadata supports billboard sprites or authored 3D model setups for bespoke field maps.
 - \`${sourceFile}\` preserves the original Technica NPC document.
 `;
 
@@ -1533,6 +1547,15 @@ export function buildChaosCoreOperationBundle(
           tacticalEncounter: room.tacticalEncounter,
           fieldMapId: room.fieldMapId ? runtimeId(room.fieldMapId) : undefined,
           fieldMapEntryPointId: room.fieldMapEntryPointId ? runtimeId(room.fieldMapEntryPointId, "spawn") : undefined,
+          fieldMapEncounterVolumeId: room.fieldMapEncounterVolumeId
+            ? runtimeId(room.fieldMapEncounterVolumeId, "encounter")
+            : undefined,
+          fieldMapReturnAnchorId: room.fieldMapReturnAnchorId
+            ? runtimeId(room.fieldMapReturnAnchorId, "spawn")
+            : undefined,
+          fieldMapExtractionAnchorId: room.fieldMapExtractionAnchorId
+            ? runtimeId(room.fieldMapExtractionAnchorId, "spawn")
+            : undefined,
           fieldMapRouteSource: room.fieldMapId ? room.fieldMapRouteSource : undefined,
           fieldMapDoorId: room.fieldMapDoorId ? runtimeId(room.fieldMapDoorId) : undefined,
           fieldMapPortalId: room.fieldMapPortalId ? runtimeId(room.fieldMapPortalId) : undefined,
@@ -1547,6 +1570,15 @@ export function buildChaosCoreOperationBundle(
             ...coerceRecord(room.metadata),
             fieldMapId: room.fieldMapId ? runtimeId(room.fieldMapId) : undefined,
             fieldMapEntryPointId: room.fieldMapEntryPointId ? runtimeId(room.fieldMapEntryPointId, "spawn") : undefined,
+            fieldMapEncounterVolumeId: room.fieldMapEncounterVolumeId
+              ? runtimeId(room.fieldMapEncounterVolumeId, "encounter")
+              : undefined,
+            fieldMapReturnAnchorId: room.fieldMapReturnAnchorId
+              ? runtimeId(room.fieldMapReturnAnchorId, "spawn")
+              : undefined,
+            fieldMapExtractionAnchorId: room.fieldMapExtractionAnchorId
+              ? runtimeId(room.fieldMapExtractionAnchorId, "spawn")
+              : undefined,
             fieldMapRouteSource: room.fieldMapId ? room.fieldMapRouteSource : undefined,
             fieldMapDoorId: room.fieldMapDoorId ? runtimeId(room.fieldMapDoorId) : undefined,
             fieldMapPortalId: room.fieldMapPortalId ? runtimeId(room.fieldMapPortalId) : undefined,

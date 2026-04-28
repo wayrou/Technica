@@ -79,6 +79,77 @@ export function createSampleMap(): MapDocument {
         }
       }
     ],
+    sceneProps: [
+      {
+        id: "oak_square_lantern_cluster",
+        kind: "light",
+        label: "Lantern Cluster",
+        x: 4,
+        y: 2,
+        width: 2,
+        height: 1,
+        layerId: "ground",
+        elevation: 0,
+        heightOffset: 0.2,
+        rotationYaw: 20,
+        scale: 1,
+        modelKey: "lantern_cluster_a",
+        modelAssetPath: "",
+        materialKey: "warm_brass",
+        sceneId: "",
+        blocksMovement: false,
+        providesCover: false,
+        metadata: {
+          lightProfile: "market_warm"
+        }
+      },
+      {
+        id: "oak_square_boarding_crates",
+        kind: "cover",
+        label: "Boarding Crates",
+        x: 7,
+        y: 4,
+        width: 2,
+        height: 1,
+        layerId: "ground",
+        elevation: 0,
+        heightOffset: 0,
+        rotationYaw: 0,
+        scale: 1,
+        modelKey: "crate_stack_a",
+        modelAssetPath: "",
+        materialKey: "weathered_wood",
+        sceneId: "",
+        blocksMovement: true,
+        providesCover: true,
+        metadata: {
+          coverRating: "half"
+        }
+      }
+    ],
+    encounterVolumes: [
+      {
+        id: "oak_square_market_skirmish",
+        label: "Market Skirmish",
+        x: 6,
+        y: 4,
+        width: 3,
+        height: 2,
+        layerId: "ground",
+        triggerMode: "on_enter",
+        startsActive: true,
+        playerEntryAnchorId: "player_start",
+        fallbackReturnAnchorId: "player_start",
+        extractionAnchorId: "",
+        enemyAnchorTags: ["enemy", "field"],
+        linkedFieldEnemyIds: [],
+        tacticalEncounterId: "",
+        clearBehavior: "clear_volume",
+        metadata: {
+          battleLabel: "Square Sweep"
+        }
+      }
+    ],
     renderMode: "simple_3d",
     mapTags: ["settlement", "field"],
     regionTags: ["oak_square"],

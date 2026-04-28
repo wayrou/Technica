@@ -222,6 +222,159 @@ export function validateMapDocument(document: MapDocument) {
     }
   });
 
+  const scenePropIds = new Set<string>();
+  document.sceneProps?.forEach((prop) => {
+    if (!prop.id.trim()) {
+      issues.push({
+        severity: "error",
+        field: "sceneProps",
+        message: "Every 3D prop needs an id."
+      });
+    }
+
+    if (scenePropIds.has(prop.id)) {
+      issues.push({
+        severity: "error",
+        field: "sceneProps",
+        message: `3D prop id '${prop.id}' is duplicated.`
+      });
+    }
+    scenePropIds.add(prop.id);
+
+    if (!isWithinBounds(prop.x, prop.y, document.width, document.height)) {
+      issues.push({
+        severity: "error",
+        field: "sceneProps",
+        message: `3D prop '${prop.id}' starts outside the map bounds.`
+      });
+    }
+
+    if (prop.width <= 0 || prop.height <= 0) {
+      issues.push({
+        severity: "error",
+        field: "sceneProps",
+        message: `3D prop '${prop.id}' must be at least 1x1 tiles.`
+      });
+    }
+
+    if (!Number.isFinite(prop.scale) || prop.scale <= 0) {
+      issues.push({
+        severity: "error",
+        field: "sceneProps",
+        message: `3D prop '${prop.id}' needs a scale greater than 0.`
+      });
+    }
+
+    if (!Number.isFinite(prop.elevation) || !Number.isFinite(prop.heightOffset) || !Number.isFinite(prop.rotationYaw)) {
+      issues.push({
+        severity: "error",
+        field: "sceneProps",
+        message: `3D prop '${prop.id}' has invalid elevation, offset, or rotation values.`
+      });
+    }
+
+    if (!prop.modelKey.trim() && !prop.modelAssetPath.trim() && !prop.sceneId.trim()) {
+      issues.push({
+        severity: "warning",
+        field: "sceneProps",
+        message: `3D prop '${prop.id}' should include a model key, model asset path, or scene id.`
+      });
+    }
+
+    if (prop.blocksMovement) {
+      const overlapsWalkableTile = Array.from({ length: Math.max(1, prop.height) }, (_, yOffset) =>
+        Array.from({ length: Math.max(1, prop.width) }, (_, xOffset) => ({ x: prop.x + xOffset, y: prop.y + yOffset }))
+      )
+        .flat()
+        .some(({ x, y }) => {
+          const tile = getMapTile(document, x, y);
+          return tile && tile.walkable && !tile.wall;
+        });
+
+      if (overlapsWalkableTile) {
+        issues.push({
+          severity: "warning",
+          field: "sceneProps",
+          message: `3D prop '${prop.id}' blocks movement but overlaps walkable floor. Consider blocking those tiles or disabling movement blocking.`
+        });
+      }
+    }
+  });
+
+  const encounterVolumeIds = new Set<string>();
+  document.encounterVolumes?.forEach((volume) => {
+    if (!volume.id.trim()) {
+      issues.push({
+        severity: "error",
+        field: "encounterVolumes",
+        message: "Every encounter volume needs an id."
+      });
+    }
+
+    if (encounterVolumeIds.has(volume.id)) {
+      issues.push({
+        severity: "error",
+        field: "encounterVolumes",
+        message: `Encounter volume id '${volume.id}' is duplicated.`
+      });
+    }
+    encounterVolumeIds.add(volume.id);
+
+    if (!isWithinBounds(volume.x, volume.y, document.width, document.height)) {
+      issues.push({
+        severity: "error",
+        field: "encounterVolumes",
+        message: `Encounter volume '${volume.id}' starts outside the map bounds.`
+      });
+    }
+
+    if (volume.width <= 0 || volume.height <= 0) {
+      issues.push({
+        severity: "error",
+        field: "encounterVolumes",
+        message: `Encounter volume '${volume.id}' must be at least 1x1 tiles.`
+      });
+    }
+
+    if (!volume.playerEntryAnchorId.trim()) {
+      issues.push({
+        severity: "warning",
+        field: "encounterVolumes",
+        message: `Encounter volume '${volume.id}' should point at a player entry anchor.`
+      });
+    } else if (!(document.spawnAnchors ?? []).some((anchor) => anchor.id === volume.playerEntryAnchorId)) {
+      issues.push({
+        severity: "warning",
+        field: "encounterVolumes",
+        message: `Encounter volume '${volume.id}' references missing player entry anchor '${volume.playerEntryAnchorId}'.`
+      });
+    }
+
+    if (volume.fallbackReturnAnchorId.trim() && !(document.spawnAnchors ?? []).some((anchor) => anchor.id === volume.fallbackReturnAnchorId)) {
+      issues.push({
+        severity: "warning",
+        field: "encounterVolumes",
+        message: `Encounter volume '${volume.id}' references missing return anchor '${volume.fallbackReturnAnchorId}'.`
+      });
+    }
+
+    if (volume.extractionAnchorId.trim() && !(document.spawnAnchors ?? []).some((anchor) => anchor.id === volume.extractionAnchorId)) {
+      issues.push({
+        severity: "warning",
+        field: "encounterVolumes",
+        message: `Encounter volume '${volume.id}' references missing extraction anchor '${volume.extractionAnchorId}'.`
+      });
+    }
+
+    if (volume.enemyAnchorTags.length === 0) {
+      issues.push({
+        severity: "warning",
+        field: "encounterVolumes",
+        message: `Encounter volume '${volume.id}' should include enemy anchor tags so Chaos Core can stage hostiles predictably.`
+      });
+    }
+  });
+
   const spawnAnchorIds = new Set<string>();
   const spawnAnchorKindById = new Map<string, string>();
   document.spawnAnchors?.forEach((anchor) => {
@@ -373,6 +526,22 @@ export function validateMapDocument(document: MapDocument) {
       severity: "warning",
       field: "renderMode",
       message: "3D maps can export from flat 2D data, but vertical layers give Chaos Core better height and traversal hints."
+    });
+  }
+
+  if ((document.renderMode ?? document.settings3d?.renderMode) === "classic_2d" && (document.sceneProps?.length ?? 0) > 0) {
+    issues.push({
+      severity: "warning",
+      field: "sceneProps",
+      message: "This map has authored 3D props, but the render mode is still Classic 2D. Switch to Simple 3D or Bespoke 3D to use them fully."
+    });
+  }
+
+  if ((document.renderMode === "simple_3d" || document.renderMode === "bespoke_3d") && (document.encounterVolumes?.length ?? 0) === 0) {
+    issues.push({
+      severity: "warning",
+      field: "encounterVolumes",
+      message: "3D field maps work best with at least one authored encounter volume or explicit safe traversal plan."
     });
   }
 

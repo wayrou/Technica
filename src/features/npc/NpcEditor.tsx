@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, type CSSProperties } from "react";
 import { ChaosCoreDatabasePanel } from "../../components/ChaosCoreDatabasePanel";
 import { ImageAssetField } from "../../components/ImageAssetField";
 import { Panel } from "../../components/Panel";
@@ -6,7 +6,7 @@ import { createBlankNpc, createSampleNpc } from "../../data/sampleNpc";
 import { useChaosCoreDatabase } from "../../hooks/useChaosCoreDatabase";
 import { StructuredDocumentStudio } from "../content/StructuredDocumentStudio";
 import { mergeFactionOptions } from "../../types/faction";
-import type { NpcDocument, NpcRoutePoint } from "../../types/npc";
+import type { NpcDocument, NpcPresentationDocument, NpcRoutePoint } from "../../types/npc";
 import type { LoadedChaosCoreDatabaseEntry } from "../../utils/chaosCoreDatabase";
 import { validateNpcDocument } from "../../utils/contentValidation";
 import { isoNow } from "../../utils/date";
@@ -56,6 +56,10 @@ function readNumber(value: unknown, fallback: number) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
+function getNpcPresentationLabel(presentation: NpcPresentationDocument) {
+  return presentation.mode === "model_3d" ? "3D model" : "Billboard sprite";
+}
+
 function normalizeNpcDocument(value: unknown): NpcDocument {
   const fallback = createBlankNpc();
   const record = toRecord(value);
@@ -64,6 +68,8 @@ function normalizeNpcDocument(value: unknown): NpcDocument {
   }
 
   const metadata = toRecord(record.metadata);
+  const presentation = toRecord(record.presentation);
+  const presentationMetadata = toRecord(presentation?.metadata);
   const { faction: _legacyFaction, ...metadataWithoutFaction } = metadata ?? {};
 
   return {
@@ -101,6 +107,25 @@ function normalizeNpcDocument(value: unknown): NpcDocument {
       record.spriteAsset && typeof record.spriteAsset === "object"
         ? (record.spriteAsset as NpcDocument["spriteAsset"])
         : fallback.spriteAsset,
+    presentation: {
+      mode:
+        presentation?.mode === "model_3d" || presentation?.mode === "billboard_sprite"
+          ? presentation.mode
+          : fallback.presentation?.mode ?? "billboard_sprite",
+      modelKey: readString(presentation?.modelKey, fallback.presentation?.modelKey ?? ""),
+      modelAssetPath: readString(presentation?.modelAssetPath, fallback.presentation?.modelAssetPath ?? ""),
+      materialKey: readString(presentation?.materialKey, fallback.presentation?.materialKey ?? ""),
+      scale: readNumber(presentation?.scale, fallback.presentation?.scale ?? 1),
+      heightOffset: readNumber(presentation?.heightOffset, fallback.presentation?.heightOffset ?? 0),
+      facingMode:
+        presentation?.facingMode === "movement" || presentation?.facingMode === "fixed" || presentation?.facingMode === "camera"
+          ? presentation.facingMode
+          : fallback.presentation?.facingMode ?? "camera",
+      previewPose: readString(presentation?.previewPose, fallback.presentation?.previewPose ?? "idle"),
+      metadata: presentationMetadata
+        ? Object.fromEntries(Object.entries(presentationMetadata).map(([key, entry]) => [key, String(entry)]))
+        : fallback.presentation?.metadata ?? {}
+    },
     metadata: metadata
       ? Object.fromEntries(Object.entries(metadataWithoutFaction).map(([key, entry]) => [key, String(entry)]))
       : fallback.metadata,
@@ -179,9 +204,29 @@ export function NpcEditor() {
         sendToDesktop
       }) => {
         const npc = normalizeNpcDocument(document);
+        const defaultPresentation = createBlankNpc().presentation!;
         const selectedFaction = factionOptions.find((option) => option.id === npc.faction) ?? null;
         const patchNpc = (updater: (current: NpcDocument) => NpcDocument) =>
           patchDocument((current) => updater(normalizeNpcDocument(current)));
+        const patchPresentation = (updater: (current: NpcPresentationDocument) => NpcPresentationDocument) =>
+          patchNpc((current) => ({
+            ...current,
+            presentation: updater(current.presentation ?? defaultPresentation)
+          }));
+        const presentation = npc.presentation ?? defaultPresentation;
+        const spriteMetadataPath = npc.metadata.spritePath?.trim() ?? "";
+        const hasSpriteSource = Boolean(npc.spriteAsset?.dataUrl || npc.spriteKey.trim() || spriteMetadataPath);
+        const hasModelSource = Boolean(presentation.modelKey.trim() || presentation.modelAssetPath.trim());
+        const presentationReady = presentation.mode === "model_3d" ? hasModelSource : hasSpriteSource;
+        const previewScale = Math.max(0.35, Math.min(2.25, Number.isFinite(presentation.scale) ? presentation.scale : 1));
+        const previewWidth = Math.max(34, Math.min(132, 52 * previewScale));
+        const previewHeight = Math.max(34, Math.min(132, 72 * previewScale));
+        const previewLift = Math.max(-28, Math.min(64, presentation.heightOffset * 28));
+        const previewVisualStyle: CSSProperties = {
+          width: `${previewWidth}px`,
+          height: `${previewHeight}px`,
+          transform: `translate(-50%, calc(-50% - ${previewLift}px))`
+        };
 
         return (
           <>
@@ -417,12 +462,204 @@ export function NpcEditor() {
                 />
               </div>
 
+              <div className="subsection">
+                <h4>3D Presentation</h4>
+                <div className="field-enemy-preview-card">
+                  <div className="field-enemy-preview-stage" data-mode={presentation.mode}>
+                    <span className="field-enemy-preview-grid" />
+                    <span className="field-enemy-preview-shadow" />
+                    <div
+                      className={presentation.mode === "model_3d" ? "field-enemy-preview-visual model" : "field-enemy-preview-visual billboard"}
+                      style={previewVisualStyle}
+                    >
+                      {presentation.mode === "model_3d" ? (
+                        <>
+                          <span className="field-enemy-preview-model-core" />
+                          <span className="field-enemy-preview-model-label">
+                            {(presentation.modelKey || presentation.modelAssetPath || npc.name || "NPC").slice(0, 18)}
+                          </span>
+                        </>
+                      ) : npc.spriteAsset?.dataUrl ? (
+                        <img src={npc.spriteAsset.dataUrl} alt={`${npc.name || "NPC"} sprite preview`} />
+                      ) : (
+                        <span className="field-enemy-preview-sprite-fallback">
+                          {(npc.spriteKey || npc.name || "npc").slice(0, 2).toUpperCase()}
+                        </span>
+                      )}
+                    </div>
+                    {presentation.heightOffset !== 0 ? (
+                      <span className="field-enemy-preview-lift" style={{ height: `${Math.abs(previewLift)}px` }} />
+                    ) : null}
+                  </div>
+                  <div className="field-enemy-preview-copy">
+                    <div className="field-enemy-preview-header">
+                      <div>
+                        <span className="eyebrow">Chaos Core Presentation</span>
+                        <strong>{getNpcPresentationLabel(presentation)}</strong>
+                      </div>
+                      <span className={presentationReady ? "pill accent" : "pill warning"}>
+                        {presentationReady ? "Ready" : "Needs source"}
+                      </span>
+                    </div>
+                    <div className="field-enemy-preview-metrics">
+                      <span>Scale {previewScale.toFixed(2)}x</span>
+                      <span>Height offset {presentation.heightOffset}</span>
+                      <span>{presentation.facingMode} facing</span>
+                      <span>{presentation.previewPose || "idle"} pose</span>
+                    </div>
+                    <div className="field-enemy-preview-summary">
+                      <strong>Map placement</strong>
+                      <span>
+                        {npc.mapId || "No map selected"} // tile {npc.tileX}, {npc.tileY} // {npc.routeMode} route
+                      </span>
+                    </div>
+                    <div className="field-enemy-preview-summary">
+                      <strong>Conversation hook</strong>
+                      <span>{npc.dialogueId.trim() || "No dialogue id assigned yet."}</span>
+                    </div>
+                    <div className="toolbar">
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        onClick={() =>
+                          patchPresentation((current) => ({
+                            ...current,
+                            mode: "billboard_sprite",
+                            facingMode: "camera",
+                            scale: current.scale || 1,
+                            previewPose: current.previewPose || "idle"
+                          }))
+                        }
+                      >
+                        Billboard preset
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        onClick={() =>
+                          patchPresentation((current) => ({
+                            ...current,
+                            mode: "model_3d",
+                            facingMode: "movement",
+                            scale: current.scale || 1,
+                            previewPose: current.previewPose || "idle"
+                          }))
+                        }
+                      >
+                        3D model preset
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div className="form-grid">
+                  <label className="field">
+                    <span>Presentation mode</span>
+                    <select
+                      value={presentation.mode}
+                      onChange={(event) =>
+                        patchPresentation((current) => ({
+                          ...current,
+                          mode: event.target.value === "model_3d" ? "model_3d" : "billboard_sprite"
+                        }))
+                      }
+                    >
+                      <option value="billboard_sprite">Billboard sprite</option>
+                      <option value="model_3d">3D model</option>
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Model key</span>
+                    <input
+                      value={presentation.modelKey}
+                      onChange={(event) => patchPresentation((current) => ({ ...current, modelKey: event.target.value }))}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Model asset path</span>
+                    <input
+                      value={presentation.modelAssetPath}
+                      onChange={(event) =>
+                        patchPresentation((current) => ({ ...current, modelAssetPath: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Material key</span>
+                    <input
+                      value={presentation.materialKey}
+                      onChange={(event) =>
+                        patchPresentation((current) => ({ ...current, materialKey: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Scale</span>
+                    <input
+                      type="number"
+                      step="0.05"
+                      value={presentation.scale}
+                      onChange={(event) =>
+                        patchPresentation((current) => ({ ...current, scale: Number(event.target.value || 1) }))
+                      }
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Height offset</span>
+                    <input
+                      type="number"
+                      step="0.05"
+                      value={presentation.heightOffset}
+                      onChange={(event) =>
+                        patchPresentation((current) => ({ ...current, heightOffset: Number(event.target.value || 0) }))
+                      }
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Facing mode</span>
+                    <select
+                      value={presentation.facingMode}
+                      onChange={(event) =>
+                        patchPresentation((current) => ({
+                          ...current,
+                          facingMode:
+                            event.target.value === "movement" || event.target.value === "fixed" ? event.target.value : "camera"
+                        }))
+                      }
+                    >
+                      <option value="camera">Face camera</option>
+                      <option value="movement">Face movement</option>
+                      <option value="fixed">Fixed</option>
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Preview pose</span>
+                    <input
+                      value={presentation.previewPose}
+                      onChange={(event) =>
+                        patchPresentation((current) => ({ ...current, previewPose: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label className="field full">
+                    <span>Presentation metadata</span>
+                    <textarea
+                      rows={3}
+                      value={serializeKeyValueLines(presentation.metadata)}
+                      onChange={(event) =>
+                        patchPresentation((current) => ({ ...current, metadata: parseKeyValueLines(event.target.value) }))
+                      }
+                    />
+                  </label>
+                </div>
+              </div>
+
               <div className="toolbar split">
                 <div className="chip-row">
                   <span className="pill">{npc.mapId}</span>
                   {npc.faction ? <span className="pill">{npc.faction}</span> : null}
                   <span className="pill">{npc.routeMode}</span>
                   <span className="pill">{npc.routePoints.length} route point(s)</span>
+                  <span className="pill">{getNpcPresentationLabel(presentation)}</span>
                   <span className="pill accent">Chaos Core export</span>
                 </div>
                 <div className="toolbar">

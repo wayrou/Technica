@@ -1074,6 +1074,36 @@ export function validateOperationFieldMapLinks(
         });
       }
 
+      const expectedEncounterVolumeId = normalizeRouteText(room.fieldMapEncounterVolumeId);
+      const linkedEncounterVolume = expectedEncounterVolumeId
+        ? (linkedMap.encounterVolumes ?? []).find((encounter) => encounter.id === expectedEncounterVolumeId)
+        : null;
+      if (expectedEncounterVolumeId && !linkedEncounterVolume) {
+        issues.push({
+          severity: "warning",
+          field: `${fieldPrefix}.fieldMapEncounterVolumeId`,
+          message: `Room '${room.id}' expects encounter volume '${expectedEncounterVolumeId}', but map '${fieldMapId}' does not define that encounter volume.`
+        });
+      }
+
+      const expectedReturnAnchorId = normalizeRouteText(room.fieldMapReturnAnchorId);
+      if (expectedReturnAnchorId && !(linkedMap.spawnAnchors ?? []).some((anchor) => anchor.id === expectedReturnAnchorId)) {
+        issues.push({
+          severity: "warning",
+          field: `${fieldPrefix}.fieldMapReturnAnchorId`,
+          message: `Room '${room.id}' expects return anchor '${expectedReturnAnchorId}', but map '${fieldMapId}' does not define that anchor.`
+        });
+      }
+
+      const expectedExtractionAnchorId = normalizeRouteText(room.fieldMapExtractionAnchorId);
+      if (expectedExtractionAnchorId && !(linkedMap.spawnAnchors ?? []).some((anchor) => anchor.id === expectedExtractionAnchorId)) {
+        issues.push({
+          severity: "warning",
+          field: `${fieldPrefix}.fieldMapExtractionAnchorId`,
+          message: `Room '${room.id}' expects extraction anchor '${expectedExtractionAnchorId}', but map '${fieldMapId}' does not define that anchor.`
+        });
+      }
+
       const matchingRoute = (linkedMap.entryRules ?? []).find((entryRule) =>
         mapRouteLooksLinkedToOperationRoom(entryRule, document, floor, room)
       );
@@ -1395,6 +1425,7 @@ export function validateClassDocument(document: ClassDocument): ValidationIssue[
 
 export function validateNpcDocument(document: NpcDocument): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
+  const presentation = document.presentation;
 
   requireText(document.id, "id", "NPC id", issues);
   requireText(document.name, "name", "NPC name", issues);
@@ -1420,6 +1451,32 @@ export function validateNpcDocument(document: NpcDocument): ValidationIssue[] {
   warnOnDuplicates(document.routePoints.map((point) => point.id), "routePoints", "Route points", issues);
   validateImageAsset(document.portraitAsset, "portraitAsset", "NPC portrait", issues);
   validateImageAsset(document.spriteAsset, "spriteAsset", "NPC sprite", issues);
+
+  if (presentation) {
+    requirePositive(presentation.scale, "presentation.scale", "NPC presentation scale", issues, false);
+    requireFiniteNumber(
+      presentation.heightOffset,
+      "presentation.heightOffset",
+      "NPC presentation height offset",
+      issues
+    );
+
+    if (presentation.mode === "model_3d" && !presentation.modelKey.trim() && !presentation.modelAssetPath.trim()) {
+      issues.push({
+        severity: "warning",
+        field: "presentation.modelKey",
+        message: "3D model presentation works best when you provide a model key or model asset path."
+      });
+    }
+
+    if (presentation.mode === "billboard_sprite" && !document.spriteKey.trim() && !document.spriteAsset) {
+      issues.push({
+        severity: "warning",
+        field: "spriteKey",
+        message: "Billboard sprite presentation works best when you provide a sprite key or sprite image."
+      });
+    }
+  }
 
   return issues;
 }

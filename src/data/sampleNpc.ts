@@ -17,6 +17,17 @@ export function createBlankNpc(): NpcDocument {
     dialogueId: "npc_new_arrival",
     portraitKey: "",
     spriteKey: "",
+    presentation: {
+      mode: "billboard_sprite",
+      modelKey: "",
+      modelAssetPath: "",
+      materialKey: "",
+      scale: 1,
+      heightOffset: 0,
+      facingMode: "camera",
+      previewPose: "idle",
+      metadata: {}
+    },
     metadata: {},
     createdAt: isoNow(),
     updatedAt: isoNow()
@@ -42,6 +53,19 @@ export function createSampleNpc(): NpcDocument {
     dialogueId: "village_guide_intro",
     portraitKey: "guide_smile",
     spriteKey: "guide_field_sprite",
+    presentation: {
+      mode: "billboard_sprite",
+      modelKey: "",
+      modelAssetPath: "",
+      materialKey: "",
+      scale: 1,
+      heightOffset: 0,
+      facingMode: "camera",
+      previewPose: "idle",
+      metadata: {
+        interactionRadius: "1.25"
+      }
+    },
     metadata: {
       role: "mentor"
     },

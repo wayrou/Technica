@@ -14,8 +14,11 @@ import type { GearDocument } from "../types/gear";
 import type { ItemDocument } from "../types/item";
 import type {
   MapDocument,
+  MapEncounterClearBehavior,
+  MapEncounterTriggerMode,
   MapEntryRule,
   MapObject,
+  MapSceneProp,
   MapSpawnAnchor,
   MapTile,
   MapVerticalConnectorKind,
@@ -106,6 +109,8 @@ interface ChaosCoreFieldMap {
   height: number;
   tiles: ChaosCoreFieldTile[][];
   objects: ChaosCoreFieldObject[];
+  sceneProps?: ChaosCoreFieldSceneProp[];
+  encounterVolumes?: ChaosCoreFieldEncounterVolume[];
   interactionZones: ChaosCoreInteractionZone[];
   renderMode?: MapDocument["renderMode"];
   mapTags?: string[];
@@ -132,6 +137,48 @@ interface ChaosCoreFieldMapSpawnAnchor extends Omit<MapSpawnAnchor, "id" | "meta
 }
 
 interface ChaosCoreFieldMap3DSettings extends Omit<NonNullable<MapDocument["settings3d"]>, "metadata"> {
+  metadata?: Record<string, unknown>;
+}
+
+interface ChaosCoreFieldSceneProp {
+  id: string;
+  kind: MapSceneProp["kind"];
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  layerId?: string;
+  elevation: number;
+  heightOffset: number;
+  rotationYaw: number;
+  scale: number;
+  modelKey?: string;
+  modelAssetPath?: string;
+  materialKey?: string;
+  sceneId?: string;
+  blocksMovement: boolean;
+  providesCover: boolean;
+  metadata?: Record<string, unknown>;
+}
+
+interface ChaosCoreFieldEncounterVolume {
+  id: string;
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  layerId?: string;
+  triggerMode: MapEncounterTriggerMode;
+  startsActive: boolean;
+  playerEntryAnchorId?: string;
+  fallbackReturnAnchorId?: string;
+  extractionAnchorId?: string;
+  enemyAnchorTags?: string[];
+  linkedFieldEnemyIds?: string[];
+  tacticalEncounterId?: string;
+  clearBehavior: MapEncounterClearBehavior;
   metadata?: Record<string, unknown>;
 }
 
@@ -670,7 +717,7 @@ function shareZoneRect(zone: MapZone, object: MapObject) {
   );
 }
 
-function buildMapDependencies(objects: MapObject[], zones: MapZone[]): ExportDependency[] {
+function buildMapDependencies(objects: MapObject[], zones: MapZone[], sceneProps: MapSceneProp[] = []): ExportDependency[] {
   const dependencies: ExportDependency[] = [];
 
   const appendMetadataDependencies = (metadata: KeyValueRecord, relationPrefix: string) => {
@@ -690,6 +737,12 @@ function buildMapDependencies(objects: MapObject[], zones: MapZone[]): ExportDep
 
   objects.forEach((object) => appendMetadataDependencies(object.metadata, `object:${runtimeId(object.id)}`));
   zones.forEach((zone) => appendMetadataDependencies(zone.metadata, `interaction:${runtimeId(zone.id)}`));
+  sceneProps.forEach((prop) => {
+    appendMetadataDependencies(prop.metadata, `scene_prop:${runtimeId(prop.id)}`);
+    if (prop.sceneId) {
+      dependencies.push({ contentType: "scene", id: runtimeId(prop.sceneId), relation: `scene_prop:${runtimeId(prop.id)}-scene` });
+    }
+  });
 
   return dependencies;
 }
@@ -798,7 +851,7 @@ export function buildChaosCoreMapBundle(document: MapDocument, references = crea
   ensureUnique(normalizedObjectIds, "Map objects");
   ensureUnique(normalizedZoneIds, "Interaction zones");
 
-  buildMapDependencies(document.objects, mergedZones).forEach((dependency) => {
+  buildMapDependencies(document.objects, mergedZones, document.sceneProps ?? []).forEach((dependency) => {
     if (dependency.contentType === "dialogue") {
       assertKnownReference(dependency.id, references.dialogueIds, "Map export", "dialogue id");
     }
@@ -851,6 +904,50 @@ export function buildChaosCoreMapBundle(document: MapDocument, references = crea
         }
       })
     ),
+    sceneProps: (document.sceneProps ?? []).map((prop) =>
+      pruneEmpty({
+        id: runtimeId(prop.id, "scene_prop"),
+        kind: prop.kind,
+        label: prop.label,
+        x: prop.x,
+        y: prop.y,
+        width: prop.width,
+        height: prop.height,
+        layerId: prop.layerId ? runtimeId(prop.layerId) : undefined,
+        elevation: prop.elevation,
+        heightOffset: prop.heightOffset,
+        rotationYaw: prop.rotationYaw,
+        scale: prop.scale,
+        modelKey: prop.modelKey || undefined,
+        modelAssetPath: prop.modelAssetPath || undefined,
+        materialKey: prop.materialKey || undefined,
+        sceneId: prop.sceneId ? runtimeId(prop.sceneId) : undefined,
+        blocksMovement: prop.blocksMovement,
+        providesCover: prop.providesCover,
+        metadata: coerceRecord(prop.metadata)
+      })
+    ),
+    encounterVolumes: (document.encounterVolumes ?? []).map((volume) =>
+      pruneEmpty({
+        id: runtimeId(volume.id, "encounter"),
+        label: volume.label,
+        x: volume.x,
+        y: volume.y,
+        width: volume.width,
+        height: volume.height,
+        layerId: volume.layerId ? runtimeId(volume.layerId) : undefined,
+        triggerMode: volume.triggerMode,
+        startsActive: volume.startsActive,
+        playerEntryAnchorId: volume.playerEntryAnchorId ? runtimeId(volume.playerEntryAnchorId, "spawn") : undefined,
+        fallbackReturnAnchorId: volume.fallbackReturnAnchorId ? runtimeId(volume.fallbackReturnAnchorId, "spawn") : undefined,
+        extractionAnchorId: volume.extractionAnchorId ? runtimeId(volume.extractionAnchorId, "spawn") : undefined,
+        enemyAnchorTags: volume.enemyAnchorTags,
+        linkedFieldEnemyIds: volume.linkedFieldEnemyIds.map((enemyId) => runtimeId(enemyId)),
+        tacticalEncounterId: volume.tacticalEncounterId ? runtimeId(volume.tacticalEncounterId) : undefined,
+        clearBehavior: volume.clearBehavior,
+        metadata: coerceRecord(volume.metadata)
+      })
+    ),
     interactionZones: mergedZones.map((zone) =>
       pruneEmpty({
         id: runtimeId(zone.id),
@@ -893,7 +990,7 @@ export function buildChaosCoreMapBundle(document: MapDocument, references = crea
     "Chaos Core runtime field map export.",
     entryFile,
     ["manifest.json", entryFile, sourceFile, "README.md"],
-    buildMapDependencies(document.objects, mergedZones)
+    buildMapDependencies(document.objects, mergedZones, document.sceneProps ?? [])
   );
 
   const readme = `# Chaos Core Map Export
@@ -904,6 +1001,8 @@ Content id: \`${contentId}\`
 Importer notes:
 - The runtime file already matches Chaos Core's field map shape closely.
 - \`interactionZones\` are exported explicitly for all interactive map content.
+- Authored 3D setpieces and cover now publish through \`sceneProps\` for bespoke-map runtime adapters.
+- Encounter staging volumes publish through \`encounterVolumes\` with trigger, entry, return, extraction, and enemy-anchor targeting metadata.
 - Optional \`vertical\` layer data is present only when enabled in Technica and can be ignored by the 2D runtime.
 - \`${sourceFile}\` preserves the original Technica authoring model.
 `;

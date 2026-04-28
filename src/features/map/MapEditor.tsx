@@ -22,10 +22,12 @@ import type {
   MapBrushState,
   Map3DSettings,
   MapDocument,
+  MapEncounterVolume,
   MapEntryRule,
   MapEntrySource,
   MapObject,
   MapRenderMode,
+  MapSceneProp,
   MapSpawnAnchor,
   MapSpawnAnchorKind,
   MapVerticalConnector,
@@ -73,7 +75,7 @@ import {
   upsertMapVerticalCell
 } from "./mapUtils";
 
-type MapTool = "paint" | "erase" | "select" | "move" | "object" | "zone" | "npc" | "enemy" | "pan";
+type MapTool = "paint" | "erase" | "select" | "move" | "object" | "prop" | "zone" | "encounter" | "npc" | "enemy" | "pan";
 
 type MapNpcMarker = {
   entryKey: string;
@@ -135,7 +137,9 @@ const MAP_TOOL_OPTIONS: Array<{
   { id: "select", label: "Select", shortcut: "V", hint: "Inspect a tile, object, zone, or NPC marker." },
   { id: "move", label: "Move", shortcut: "G", hint: "Reposition the selected object or zone." },
   { id: "object", label: "Object", shortcut: "O", hint: "Drop a new object onto the clicked tile." },
+  { id: "prop", label: "3D Prop", shortcut: "P", hint: "Place a bespoke 3D prop or setpiece onto the clicked tile." },
   { id: "zone", label: "Zone", shortcut: "Z", hint: "Drag out a trigger or interaction rectangle." },
+  { id: "encounter", label: "Encounter", shortcut: "C", hint: "Drag an encounter staging volume with entry, enemy, and extraction metadata." },
   { id: "npc", label: "NPC", shortcut: "N", hint: "Place the chosen NPC onto a clicked tile." },
   { id: "enemy", label: "Enemy", shortcut: "L", hint: "Place a light field enemy that flips Chaos Core into combat mode." },
   { id: "pan", label: "Pan", shortcut: "Space", hint: "Drag the map viewport around." }
@@ -147,7 +151,9 @@ const MAP_TOOL_SHORTCUTS: Partial<Record<string, MapTool>> = {
   v: "select",
   g: "move",
   o: "object",
+  p: "prop",
   z: "zone",
+  c: "encounter",
   n: "npc",
   l: "enemy",
   h: "pan"
@@ -357,7 +363,7 @@ function getCoordinateInterval(length: number, zoom: number) {
   return length > 120 ? 20 : length > 80 ? 16 : 10;
 }
 
-function getOverlayBadge(kind: "object" | "enemy" | "zone" | "npc") {
+function getOverlayBadge(kind: "object" | "enemy" | "zone" | "npc" | "prop" | "encounter") {
   switch (kind) {
     case "enemy":
       return "EN";
@@ -365,6 +371,10 @@ function getOverlayBadge(kind: "object" | "enemy" | "zone" | "npc") {
       return "ZN";
     case "npc":
       return "NP";
+    case "prop":
+      return "3D";
+    case "encounter":
+      return "FX";
     default:
       return "OB";
   }
@@ -418,6 +428,60 @@ function createDefaultZone(x: number, y: number, width: number, height: number, 
     y,
     width,
     height,
+    metadata: {}
+  };
+}
+
+function createDefaultSceneProp(x: number, y: number, existingIds: string[], layerId?: string): MapSceneProp {
+  return {
+    id: createSequentialId("scene_prop", existingIds),
+    kind: "setpiece",
+    label: "New setpiece",
+    x,
+    y,
+    width: 1,
+    height: 1,
+    layerId,
+    elevation: 0,
+    heightOffset: 0,
+    rotationYaw: 0,
+    scale: 1,
+    modelKey: "prop_model_key",
+    modelAssetPath: "",
+    materialKey: "",
+    sceneId: "",
+    blocksMovement: false,
+    providesCover: false,
+    metadata: {}
+  };
+}
+
+function createDefaultEncounterVolume(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  existingIds: string[],
+  playerEntryAnchorId = "player_start",
+  layerId?: string
+): MapEncounterVolume {
+  return {
+    id: createSequentialId("encounter", existingIds),
+    label: "New encounter",
+    x,
+    y,
+    width,
+    height,
+    layerId,
+    triggerMode: "on_enter",
+    startsActive: true,
+    playerEntryAnchorId,
+    fallbackReturnAnchorId: playerEntryAnchorId,
+    extractionAnchorId: "",
+    enemyAnchorTags: ["enemy"],
+    linkedFieldEnemyIds: [],
+    tacticalEncounterId: "",
+    clearBehavior: "clear_volume",
     metadata: {}
   };
 }
@@ -852,6 +916,8 @@ export function MapEditor() {
   const [zoom, setZoom] = useState(1);
   const [selectedCell, setSelectedCell] = useState<{ x: number; y: number } | null>(null);
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
+  const [selectedScenePropId, setSelectedScenePropId] = useState<string | null>(null);
+  const [selectedEncounterId, setSelectedEncounterId] = useState<string | null>(null);
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
   const [routeBuilderDraft, setRouteBuilderDraft] = useState<MapRouteBuilderDraft>(DEFAULT_ROUTE_BUILDER_DRAFT);
   const [activeVerticalLayerId, setActiveVerticalLayerId] = useState("ground");
@@ -867,7 +933,9 @@ export function MapEditor() {
     walkable: true,
     walls: true,
     objects: true,
+    props: true,
     zones: true,
+    encounters: true,
     npcs: true,
     enemies: true,
     vertical: true
@@ -1070,6 +1138,10 @@ export function MapEditor() {
   }, [map3dAdapter]);
   const selectedObject = map.objects.find((item) => item.id === selectedObjectId) ?? null;
   const selectedEnemyObject = selectedObject && isEnemyObject(selectedObject) ? selectedObject : null;
+  const mapSceneProps = map.sceneProps ?? [];
+  const selectedSceneProp = mapSceneProps.find((item) => item.id === selectedScenePropId) ?? null;
+  const mapEncounterVolumes = map.encounterVolumes ?? [];
+  const selectedEncounterVolume = mapEncounterVolumes.find((item) => item.id === selectedEncounterId) ?? null;
   const verticalLayerSystem = map.vertical ?? null;
   const verticalLayers = verticalLayerSystem?.layers ?? [];
   const verticalCellCount = useMemo(
@@ -1102,6 +1174,36 @@ export function MapEditor() {
   const mapNonEnemyObjects = useMemo(
     () => map.objects.filter((item) => !isEnemyObject(item)),
     [map.objects]
+  );
+  const minimapScenePropRects = useMemo(
+    () =>
+      mapSceneProps.map((item) => (
+        <rect
+          key={`mini-scene-prop-${item.id}`}
+          x={item.x}
+          y={item.y}
+          width={item.width}
+          height={item.height}
+          fill="rgba(151, 176, 255, 0.95)"
+        />
+      )),
+    [mapSceneProps]
+  );
+  const minimapEncounterRects = useMemo(
+    () =>
+      mapEncounterVolumes.map((item) => (
+        <rect
+          key={`mini-encounter-${item.id}`}
+          x={item.x}
+          y={item.y}
+          width={item.width}
+          height={item.height}
+          fill="rgba(255, 215, 110, 0.45)"
+          stroke="rgba(255, 215, 110, 0.95)"
+          strokeWidth={0.08}
+        />
+      )),
+    [mapEncounterVolumes]
   );
   const npcEntries = summaryStates.npc.entries;
   const mapNpcMarkers = useMemo(
@@ -1165,6 +1267,24 @@ export function MapEditor() {
       };
     }
 
+    if (selectedSceneProp) {
+      return {
+        x: selectedSceneProp.x,
+        y: selectedSceneProp.y,
+        width: selectedSceneProp.width,
+        height: selectedSceneProp.height
+      };
+    }
+
+    if (selectedEncounterVolume) {
+      return {
+        x: selectedEncounterVolume.x,
+        y: selectedEncounterVolume.y,
+        width: selectedEncounterVolume.width,
+        height: selectedEncounterVolume.height
+      };
+    }
+
     if (selectedZone) {
       return {
         x: selectedZone.x,
@@ -1193,7 +1313,7 @@ export function MapEditor() {
     }
 
     return null;
-  }, [selectedCell, selectedNpcMarker, selectedObject, selectedZone]);
+  }, [selectedCell, selectedEncounterVolume, selectedNpcMarker, selectedObject, selectedSceneProp, selectedZone]);
   const topRulerMarks = useMemo(
     () => Array.from({ length: Math.ceil(map.width / coordinateInterval) }, (_, index) => index * coordinateInterval).filter((value) => value < map.width),
     [coordinateInterval, map.width]
@@ -1417,10 +1537,10 @@ export function MapEditor() {
       return;
     }
 
-    if (selectedCell || selectedObject || selectedZone || selectedNpcMarker) {
+    if (selectedCell || selectedObject || selectedSceneProp || selectedEncounterVolume || selectedZone || selectedNpcMarker) {
       setFocusTraySection("inspector");
     }
-  }, [isFocusMode, selectedCell, selectedNpcMarker, selectedObject, selectedZone]);
+  }, [isFocusMode, selectedCell, selectedEncounterVolume, selectedNpcMarker, selectedObject, selectedSceneProp, selectedZone]);
 
   useEffect(() => {
     if (!isPainting && !zoneDrag && !panState) {
@@ -1432,23 +1552,44 @@ export function MapEditor() {
       setPanState(null);
       if (zoneDrag) {
         const rect = normalizeRect(zoneDrag.start, zoneDrag.end);
-        const zone = createDefaultZone(rect.x, rect.y, rect.width, rect.height, map.zones.map((item) => item.id));
-        setMap((current) =>
-          touchMap({
-            ...current,
-            zones: [...current.zones, zone]
-          })
-        );
-        setSelectedZoneId(zone.id);
+        if (tool === "encounter") {
+          const encounter = createDefaultEncounterVolume(
+            rect.x,
+            rect.y,
+            rect.width,
+            rect.height,
+            map.encounterVolumes?.map((item) => item.id) ?? [],
+            playerSpawnAnchor?.id ?? "player_start",
+            activeVerticalLayer?.id
+          );
+          setMap((current) =>
+            touchMap({
+              ...current,
+              encounterVolumes: [...(current.encounterVolumes ?? []), encounter]
+            })
+          );
+          setSelectedEncounterId(encounter.id);
+        } else {
+          const zone = createDefaultZone(rect.x, rect.y, rect.width, rect.height, map.zones.map((item) => item.id));
+          setMap((current) =>
+            touchMap({
+              ...current,
+              zones: [...current.zones, zone]
+            })
+          );
+          setSelectedZoneId(zone.id);
+        }
         setSelectedObjectId(null);
+        setSelectedScenePropId(null);
         setSelectedCell(null);
+        setSelectedNpcMarkerEntryKey(null);
       }
       setZoneDrag(null);
     }
 
     window.addEventListener("pointerup", finishInteractions);
     return () => window.removeEventListener("pointerup", finishInteractions);
-  }, [isPainting, panState, setMap, zoneDrag]);
+  }, [activeVerticalLayer?.id, isPainting, map.encounterVolumes, map.zones, panState, playerSpawnAnchor?.id, setMap, tool, zoneDrag]);
 
   useEffect(() => {
     if (!desktopEnabled || !repoPath.trim()) {
@@ -2410,6 +2551,20 @@ export function MapEditor() {
     }));
   }
 
+  function updateScenePropById(scenePropId: string, updater: (item: MapSceneProp) => MapSceneProp) {
+    patchMap((current) => ({
+      ...current,
+      sceneProps: (current.sceneProps ?? []).map((item) => (item.id === scenePropId ? updater(item) : item))
+    }));
+  }
+
+  function updateEncounterVolumeById(encounterId: string, updater: (item: MapEncounterVolume) => MapEncounterVolume) {
+    patchMap((current) => ({
+      ...current,
+      encounterVolumes: (current.encounterVolumes ?? []).map((item) => (item.id === encounterId ? updater(item) : item))
+    }));
+  }
+
   function updateZoneById(zoneId: string, updater: (item: MapZone) => MapZone) {
     patchMap((current) => ({
       ...current,
@@ -2572,6 +2727,55 @@ export function MapEditor() {
     setSelectedCell(null);
   }
 
+  function duplicateSelectedSceneProp() {
+    if (!selectedSceneProp) {
+      return;
+    }
+
+    const nextSceneProp: MapSceneProp = {
+      ...selectedSceneProp,
+      id: createSequentialId("scene_prop", mapSceneProps.map((item) => item.id)),
+      label: selectedSceneProp.label ? `${selectedSceneProp.label} Copy` : selectedSceneProp.label,
+      x: Math.min(map.width - selectedSceneProp.width, selectedSceneProp.x + 1),
+      y: Math.min(map.height - selectedSceneProp.height, selectedSceneProp.y + 1)
+    };
+
+    patchMap((current) => ({
+      ...current,
+      sceneProps: [...(current.sceneProps ?? []), nextSceneProp]
+    }));
+    setSelectedScenePropId(nextSceneProp.id);
+    setSelectedObjectId(null);
+    setSelectedZoneId(null);
+    setSelectedCell(null);
+    setSelectedNpcMarkerEntryKey(null);
+  }
+
+  function duplicateSelectedEncounterVolume() {
+    if (!selectedEncounterVolume) {
+      return;
+    }
+
+    const nextEncounter: MapEncounterVolume = {
+      ...selectedEncounterVolume,
+      id: createSequentialId("encounter", mapEncounterVolumes.map((item) => item.id)),
+      label: selectedEncounterVolume.label ? `${selectedEncounterVolume.label} Copy` : selectedEncounterVolume.label,
+      x: Math.min(map.width - selectedEncounterVolume.width, selectedEncounterVolume.x + 1),
+      y: Math.min(map.height - selectedEncounterVolume.height, selectedEncounterVolume.y + 1)
+    };
+
+    patchMap((current) => ({
+      ...current,
+      encounterVolumes: [...(current.encounterVolumes ?? []), nextEncounter]
+    }));
+    setSelectedEncounterId(nextEncounter.id);
+    setSelectedObjectId(null);
+    setSelectedScenePropId(null);
+    setSelectedZoneId(null);
+    setSelectedCell(null);
+    setSelectedNpcMarkerEntryKey(null);
+  }
+
   function duplicateSelectedZone() {
     if (!selectedZone) {
       return;
@@ -2636,7 +2840,7 @@ export function MapEditor() {
     });
   }
 
-  function shouldShowOverlayLabel(kind: "object" | "enemy" | "zone" | "npc", rect: MapRect, isSelected: boolean) {
+  function shouldShowOverlayLabel(kind: "object" | "enemy" | "zone" | "npc" | "prop" | "encounter", rect: MapRect, isSelected: boolean) {
     if (labelDensity === "always" || isSelected) {
       return true;
     }
@@ -2656,6 +2860,14 @@ export function MapEditor() {
 
     if (kind === "enemy") {
       return zoom >= 1.2 || footprint > 1;
+    }
+
+    if (kind === "prop") {
+      return zoom >= 1.05 || footprint > 1;
+    }
+
+    if (kind === "encounter") {
+      return zoom >= 0.95 || footprint > 2;
     }
 
     return zoom >= 1.35 || footprint > 1;
@@ -2789,6 +3001,8 @@ export function MapEditor() {
     if (tool === "select") {
       setSelectedCell({ x, y });
       setSelectedObjectId(null);
+      setSelectedScenePropId(null);
+      setSelectedEncounterId(null);
       setSelectedZoneId(null);
       setSelectedNpcMarkerEntryKey(null);
       return;
@@ -2811,6 +3025,26 @@ export function MapEditor() {
         return;
       }
 
+      if (selectedSceneProp) {
+        patchMap((current) => ({
+          ...current,
+          sceneProps: (current.sceneProps ?? []).map((item) =>
+            item.id === selectedSceneProp.id ? { ...item, x, y } : item
+          )
+        }));
+        return;
+      }
+
+      if (selectedEncounterVolume) {
+        patchMap((current) => ({
+          ...current,
+          encounterVolumes: (current.encounterVolumes ?? []).map((item) =>
+            item.id === selectedEncounterVolume.id ? { ...item, x, y } : item
+          )
+        }));
+        return;
+      }
+
       setSelectedCell({ x, y });
       return;
     }
@@ -2822,6 +3056,23 @@ export function MapEditor() {
         objects: [...current.objects, object]
       }));
       setSelectedObjectId(object.id);
+      setSelectedScenePropId(null);
+      setSelectedEncounterId(null);
+      setSelectedZoneId(null);
+      setSelectedCell(null);
+      setSelectedNpcMarkerEntryKey(null);
+      return;
+    }
+
+    if (tool === "prop") {
+      const sceneProp = createDefaultSceneProp(x, y, mapSceneProps.map((item) => item.id), activeVerticalLayer?.id);
+      patchMap((current) => ({
+        ...current,
+        sceneProps: [...(current.sceneProps ?? []), sceneProp]
+      }));
+      setSelectedScenePropId(sceneProp.id);
+      setSelectedObjectId(null);
+      setSelectedEncounterId(null);
       setSelectedZoneId(null);
       setSelectedCell(null);
       setSelectedNpcMarkerEntryKey(null);
@@ -2835,18 +3086,22 @@ export function MapEditor() {
         objects: [...current.objects, object]
       }));
       setSelectedObjectId(object.id);
+      setSelectedScenePropId(null);
+      setSelectedEncounterId(null);
       setSelectedZoneId(null);
       setSelectedCell(null);
       setSelectedNpcMarkerEntryKey(null);
       return;
     }
 
-    if (tool === "zone") {
+    if (tool === "zone" || tool === "encounter") {
       setZoneDrag({
         start: { x, y },
         end: { x, y }
       });
       setSelectedObjectId(null);
+      setSelectedScenePropId(null);
+      setSelectedEncounterId(null);
       setSelectedCell(null);
       setSelectedNpcMarkerEntryKey(null);
       return;
@@ -2874,7 +3129,7 @@ export function MapEditor() {
       eraseTile(x, y);
     }
 
-    if (tool === "zone" && zoneDrag) {
+    if ((tool === "zone" || tool === "encounter") && zoneDrag) {
       setZoneDrag((current) => (current ? { ...current, end: { x, y } } : current));
     }
   }
@@ -3714,6 +3969,507 @@ export function MapEditor() {
                 value={serializeKeyValueLines(selectedObject.metadata)}
                 onChange={(event) =>
                   updateObjectById(selectedObject.id, (item) => ({
+                    ...item,
+                    metadata: parseKeyValueLines(event.target.value)
+                  }))
+                }
+              />
+            </label>
+          </div>
+        </article>
+      ) : null}
+
+      {selectedSceneProp && !selectedObject ? (
+        <article className="item-card">
+          <div className="item-card-header">
+            <h3>{selectedSceneProp.label || selectedSceneProp.id}</h3>
+            <div className="toolbar">
+              <button type="button" className="ghost-button" onClick={duplicateSelectedSceneProp}>
+                Duplicate
+              </button>
+              <button
+                type="button"
+                className="ghost-button danger"
+                onClick={() => {
+                  if (confirmAction(`Remove 3D prop '${selectedSceneProp.id}'?`)) {
+                    patchMap((current) => ({
+                      ...current,
+                      sceneProps: (current.sceneProps ?? []).filter((item) => item.id !== selectedSceneProp.id)
+                    }));
+                    setSelectedScenePropId(null);
+                  }
+                }}
+              >
+                Remove 3D prop
+              </button>
+            </div>
+          </div>
+          <div className="form-grid">
+            <label className="field">
+              <span>Prop id</span>
+              <input
+                value={selectedSceneProp.id}
+                onChange={(event) =>
+                  updateScenePropById(selectedSceneProp.id, (item) => ({ ...item, id: event.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Kind</span>
+              <select
+                value={selectedSceneProp.kind}
+                onChange={(event) =>
+                  updateScenePropById(selectedSceneProp.id, (item) => ({ ...item, kind: event.target.value as MapSceneProp["kind"] }))
+                }
+              >
+                <option value="setpiece">Setpiece</option>
+                <option value="cover">Cover</option>
+                <option value="door">Door</option>
+                <option value="stairs">Stairs</option>
+                <option value="portal">Portal</option>
+                <option value="light">Light</option>
+                <option value="decal">Decal</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Label</span>
+              <input
+                value={selectedSceneProp.label}
+                onChange={(event) =>
+                  updateScenePropById(selectedSceneProp.id, (item) => ({ ...item, label: event.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Layer id</span>
+              <input
+                value={selectedSceneProp.layerId ?? ""}
+                onChange={(event) =>
+                  updateScenePropById(selectedSceneProp.id, (item) => ({
+                    ...item,
+                    layerId: event.target.value.trim() || undefined
+                  }))
+                }
+                placeholder={activeVerticalLayer?.id ?? "ground"}
+              />
+            </label>
+            <label className="field">
+              <span>Model key</span>
+              <input
+                value={selectedSceneProp.modelKey}
+                onChange={(event) =>
+                  updateScenePropById(selectedSceneProp.id, (item) => ({ ...item, modelKey: event.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Model asset path</span>
+              <input
+                value={selectedSceneProp.modelAssetPath}
+                onChange={(event) =>
+                  updateScenePropById(selectedSceneProp.id, (item) => ({ ...item, modelAssetPath: event.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Material key</span>
+              <input
+                value={selectedSceneProp.materialKey}
+                onChange={(event) =>
+                  updateScenePropById(selectedSceneProp.id, (item) => ({ ...item, materialKey: event.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Scene id</span>
+              <input
+                value={selectedSceneProp.sceneId}
+                onChange={(event) =>
+                  updateScenePropById(selectedSceneProp.id, (item) => ({ ...item, sceneId: event.target.value }))
+                }
+                placeholder="Optional linked scene id"
+              />
+            </label>
+            <label className="field">
+              <span>X</span>
+              <input
+                type="number"
+                min={0}
+                max={Math.max(0, map.width - selectedSceneProp.width)}
+                value={selectedSceneProp.x}
+                onChange={(event) =>
+                  updateScenePropById(selectedSceneProp.id, (item) => ({
+                    ...item,
+                    x: Math.max(0, Math.min(map.width - item.width, Number(event.target.value || 0)))
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Y</span>
+              <input
+                type="number"
+                min={0}
+                max={Math.max(0, map.height - selectedSceneProp.height)}
+                value={selectedSceneProp.y}
+                onChange={(event) =>
+                  updateScenePropById(selectedSceneProp.id, (item) => ({
+                    ...item,
+                    y: Math.max(0, Math.min(map.height - item.height, Number(event.target.value || 0)))
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Width</span>
+              <input
+                type="number"
+                min={1}
+                value={selectedSceneProp.width}
+                onChange={(event) =>
+                  updateScenePropById(selectedSceneProp.id, (item) => ({
+                    ...item,
+                    width: Math.max(1, Math.min(map.width - item.x, Number(event.target.value || 1)))
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Height</span>
+              <input
+                type="number"
+                min={1}
+                value={selectedSceneProp.height}
+                onChange={(event) =>
+                  updateScenePropById(selectedSceneProp.id, (item) => ({
+                    ...item,
+                    height: Math.max(1, Math.min(map.height - item.y, Number(event.target.value || 1)))
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Scale</span>
+              <input
+                type="number"
+                step="0.05"
+                min={0.05}
+                value={selectedSceneProp.scale}
+                onChange={(event) =>
+                  updateScenePropById(selectedSceneProp.id, (item) => ({ ...item, scale: Number(event.target.value || 1) }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Yaw</span>
+              <input
+                type="number"
+                step="1"
+                value={selectedSceneProp.rotationYaw}
+                onChange={(event) =>
+                  updateScenePropById(selectedSceneProp.id, (item) => ({ ...item, rotationYaw: Number(event.target.value || 0) }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Elevation</span>
+              <input
+                type="number"
+                step="0.25"
+                value={selectedSceneProp.elevation}
+                onChange={(event) =>
+                  updateScenePropById(selectedSceneProp.id, (item) => ({ ...item, elevation: Number(event.target.value || 0) }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Height offset</span>
+              <input
+                type="number"
+                step="0.05"
+                value={selectedSceneProp.heightOffset}
+                onChange={(event) =>
+                  updateScenePropById(selectedSceneProp.id, (item) => ({ ...item, heightOffset: Number(event.target.value || 0) }))
+                }
+              />
+            </label>
+            <label className="field field-inline">
+              <span>Blocks movement</span>
+              <input
+                type="checkbox"
+                checked={selectedSceneProp.blocksMovement}
+                onChange={(event) =>
+                  updateScenePropById(selectedSceneProp.id, (item) => ({ ...item, blocksMovement: event.target.checked }))
+                }
+              />
+            </label>
+            <label className="field field-inline">
+              <span>Provides cover</span>
+              <input
+                type="checkbox"
+                checked={selectedSceneProp.providesCover}
+                onChange={(event) =>
+                  updateScenePropById(selectedSceneProp.id, (item) => ({ ...item, providesCover: event.target.checked }))
+                }
+              />
+            </label>
+            <label className="field full">
+              <span>Metadata</span>
+              <textarea
+                rows={4}
+                value={serializeKeyValueLines(selectedSceneProp.metadata)}
+                onChange={(event) =>
+                  updateScenePropById(selectedSceneProp.id, (item) => ({
+                    ...item,
+                    metadata: parseKeyValueLines(event.target.value)
+                  }))
+                }
+              />
+            </label>
+          </div>
+        </article>
+      ) : null}
+
+      {selectedEncounterVolume && !selectedObject && !selectedSceneProp ? (
+        <article className="item-card">
+          <div className="item-card-header">
+            <h3>{selectedEncounterVolume.label || selectedEncounterVolume.id}</h3>
+            <div className="toolbar">
+              <button type="button" className="ghost-button" onClick={duplicateSelectedEncounterVolume}>
+                Duplicate
+              </button>
+              <button
+                type="button"
+                className="ghost-button danger"
+                onClick={() => {
+                  if (confirmAction(`Remove encounter volume '${selectedEncounterVolume.id}'?`)) {
+                    patchMap((current) => ({
+                      ...current,
+                      encounterVolumes: (current.encounterVolumes ?? []).filter((item) => item.id !== selectedEncounterVolume.id)
+                    }));
+                    setSelectedEncounterId(null);
+                  }
+                }}
+              >
+                Remove encounter
+              </button>
+            </div>
+          </div>
+          <div className="form-grid">
+            <label className="field">
+              <span>Encounter id</span>
+              <input
+                value={selectedEncounterVolume.id}
+                onChange={(event) =>
+                  updateEncounterVolumeById(selectedEncounterVolume.id, (item) => ({ ...item, id: event.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Label</span>
+              <input
+                value={selectedEncounterVolume.label}
+                onChange={(event) =>
+                  updateEncounterVolumeById(selectedEncounterVolume.id, (item) => ({ ...item, label: event.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Trigger mode</span>
+              <select
+                value={selectedEncounterVolume.triggerMode}
+                onChange={(event) =>
+                  updateEncounterVolumeById(selectedEncounterVolume.id, (item) => ({
+                    ...item,
+                    triggerMode: event.target.value as MapEncounterVolume["triggerMode"]
+                  }))
+                }
+              >
+                <option value="on_enter">On enter</option>
+                <option value="proximity">Proximity</option>
+                <option value="interact">Interact</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Clear behavior</span>
+              <select
+                value={selectedEncounterVolume.clearBehavior}
+                onChange={(event) =>
+                  updateEncounterVolumeById(selectedEncounterVolume.id, (item) => ({
+                    ...item,
+                    clearBehavior: event.target.value as MapEncounterVolume["clearBehavior"]
+                  }))
+                }
+              >
+                <option value="clear_volume">Clear volume</option>
+                <option value="clear_room">Clear room</option>
+                <option value="scripted">Scripted</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>X</span>
+              <input
+                type="number"
+                min={0}
+                max={Math.max(0, map.width - selectedEncounterVolume.width)}
+                value={selectedEncounterVolume.x}
+                onChange={(event) =>
+                  updateEncounterVolumeById(selectedEncounterVolume.id, (item) => ({
+                    ...item,
+                    x: Math.max(0, Math.min(map.width - item.width, Number(event.target.value || 0)))
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Y</span>
+              <input
+                type="number"
+                min={0}
+                max={Math.max(0, map.height - selectedEncounterVolume.height)}
+                value={selectedEncounterVolume.y}
+                onChange={(event) =>
+                  updateEncounterVolumeById(selectedEncounterVolume.id, (item) => ({
+                    ...item,
+                    y: Math.max(0, Math.min(map.height - item.height, Number(event.target.value || 0)))
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Width</span>
+              <input
+                type="number"
+                min={1}
+                value={selectedEncounterVolume.width}
+                onChange={(event) =>
+                  updateEncounterVolumeById(selectedEncounterVolume.id, (item) => ({
+                    ...item,
+                    width: Math.max(1, Math.min(map.width - item.x, Number(event.target.value || 1)))
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Height</span>
+              <input
+                type="number"
+                min={1}
+                value={selectedEncounterVolume.height}
+                onChange={(event) =>
+                  updateEncounterVolumeById(selectedEncounterVolume.id, (item) => ({
+                    ...item,
+                    height: Math.max(1, Math.min(map.height - item.y, Number(event.target.value || 1)))
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Layer id</span>
+              <input
+                value={selectedEncounterVolume.layerId ?? ""}
+                onChange={(event) =>
+                  updateEncounterVolumeById(selectedEncounterVolume.id, (item) => ({
+                    ...item,
+                    layerId: event.target.value.trim() || undefined
+                  }))
+                }
+              />
+            </label>
+            <label className="field field-inline">
+              <span>Starts active</span>
+              <input
+                type="checkbox"
+                checked={selectedEncounterVolume.startsActive}
+                onChange={(event) =>
+                  updateEncounterVolumeById(selectedEncounterVolume.id, (item) => ({
+                    ...item,
+                    startsActive: event.target.checked
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Player entry anchor</span>
+              <input
+                value={selectedEncounterVolume.playerEntryAnchorId}
+                onChange={(event) =>
+                  updateEncounterVolumeById(selectedEncounterVolume.id, (item) => ({
+                    ...item,
+                    playerEntryAnchorId: event.target.value
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Return anchor</span>
+              <input
+                value={selectedEncounterVolume.fallbackReturnAnchorId}
+                onChange={(event) =>
+                  updateEncounterVolumeById(selectedEncounterVolume.id, (item) => ({
+                    ...item,
+                    fallbackReturnAnchorId: event.target.value
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Extraction anchor</span>
+              <input
+                value={selectedEncounterVolume.extractionAnchorId}
+                onChange={(event) =>
+                  updateEncounterVolumeById(selectedEncounterVolume.id, (item) => ({
+                    ...item,
+                    extractionAnchorId: event.target.value
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Tactical encounter id</span>
+              <input
+                value={selectedEncounterVolume.tacticalEncounterId}
+                onChange={(event) =>
+                  updateEncounterVolumeById(selectedEncounterVolume.id, (item) => ({
+                    ...item,
+                    tacticalEncounterId: event.target.value
+                  }))
+                }
+              />
+            </label>
+            <label className="field full">
+              <span>Enemy anchor tags</span>
+              <textarea
+                rows={3}
+                value={serializeMultilineList(selectedEncounterVolume.enemyAnchorTags)}
+                onChange={(event) =>
+                  updateEncounterVolumeById(selectedEncounterVolume.id, (item) => ({
+                    ...item,
+                    enemyAnchorTags: parseMultilineList(event.target.value)
+                  }))
+                }
+              />
+            </label>
+            <label className="field full">
+              <span>Linked field enemy ids</span>
+              <textarea
+                rows={3}
+                value={serializeMultilineList(selectedEncounterVolume.linkedFieldEnemyIds)}
+                onChange={(event) =>
+                  updateEncounterVolumeById(selectedEncounterVolume.id, (item) => ({
+                    ...item,
+                    linkedFieldEnemyIds: parseMultilineList(event.target.value)
+                  }))
+                }
+              />
+            </label>
+            <label className="field full">
+              <span>Metadata</span>
+              <textarea
+                rows={4}
+                value={serializeKeyValueLines(selectedEncounterVolume.metadata)}
+                onChange={(event) =>
+                  updateEncounterVolumeById(selectedEncounterVolume.id, (item) => ({
                     ...item,
                     metadata: parseKeyValueLines(event.target.value)
                   }))
@@ -5367,6 +6123,7 @@ export function MapEditor() {
                         onClick={(event) => {
                           event.stopPropagation();
                           setSelectedObjectId(item.id);
+                          setSelectedScenePropId(null);
                           setSelectedZoneId(null);
                           setSelectedCell(null);
                           setSelectedNpcMarkerEntryKey(null);
@@ -5376,6 +6133,38 @@ export function MapEditor() {
                         <span className="map-overlay-badge">{getOverlayBadge("object")}</span>
                         <span className="map-overlay-label">{item.label || item.id}</span>
                         <span className="map-overlay-meta">{item.type}</span>
+                      </button>
+                    );
+                  })
+                : null}
+
+              {layerVisibility.props
+                ? mapSceneProps.map((item) => {
+                    const rect = { x: item.x, y: item.y, width: item.width, height: item.height };
+                    const showLabel = shouldShowOverlayLabel("prop", rect, item.id === selectedScenePropId);
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={
+                          item.id === selectedScenePropId
+                            ? `map-overlay prop selected${showLabel ? " show-label" : ""}`
+                            : `map-overlay prop${showLabel ? " show-label" : ""}`
+                        }
+                        style={getOverlayRectStyle(item.x, item.y, item.width, item.height)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setSelectedScenePropId(item.id);
+                          setSelectedObjectId(null);
+                          setSelectedZoneId(null);
+                          setSelectedCell(null);
+                          setSelectedNpcMarkerEntryKey(null);
+                          setTool("select");
+                        }}
+                      >
+                        <span className="map-overlay-badge">{getOverlayBadge("prop")}</span>
+                        <span className="map-overlay-label">{item.label || item.id}</span>
+                        <span className="map-overlay-meta">{item.kind}</span>
                       </button>
                     );
                   })
@@ -5398,6 +6187,7 @@ export function MapEditor() {
                         onClick={(event) => {
                           event.stopPropagation();
                           setSelectedObjectId(item.id);
+                          setSelectedScenePropId(null);
                           setSelectedZoneId(null);
                           setSelectedCell(null);
                           setSelectedNpcMarkerEntryKey(null);
@@ -5430,6 +6220,7 @@ export function MapEditor() {
                           event.stopPropagation();
                           setSelectedZoneId(item.id);
                           setSelectedObjectId(null);
+                          setSelectedScenePropId(null);
                           setSelectedCell(null);
                           setSelectedNpcMarkerEntryKey(null);
                           setTool("select");
@@ -5440,6 +6231,39 @@ export function MapEditor() {
                         <span className="map-overlay-meta">
                           {item.width} x {item.height}
                         </span>
+                      </button>
+                    );
+                  })
+                : null}
+
+              {layerVisibility.encounters
+                ? mapEncounterVolumes.map((item) => {
+                    const rect = { x: item.x, y: item.y, width: item.width, height: item.height };
+                    const showLabel = shouldShowOverlayLabel("encounter", rect, item.id === selectedEncounterId);
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={
+                          item.id === selectedEncounterId
+                            ? `map-overlay encounter selected${showLabel ? " show-label" : ""}`
+                            : `map-overlay encounter${showLabel ? " show-label" : ""}`
+                        }
+                        style={getOverlayRectStyle(item.x, item.y, item.width, item.height)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setSelectedEncounterId(item.id);
+                          setSelectedObjectId(null);
+                          setSelectedScenePropId(null);
+                          setSelectedZoneId(null);
+                          setSelectedCell(null);
+                          setSelectedNpcMarkerEntryKey(null);
+                          setTool("select");
+                        }}
+                      >
+                        <span className="map-overlay-badge">{getOverlayBadge("encounter")}</span>
+                        <span className="map-overlay-label">{item.label || item.id}</span>
+                        <span className="map-overlay-meta">{item.triggerMode}</span>
                       </button>
                     );
                   })
@@ -5463,6 +6287,7 @@ export function MapEditor() {
                           event.stopPropagation();
                           setSelectedNpcMarkerEntryKey(npc.entryKey);
                           setSelectedObjectId(null);
+                          setSelectedScenePropId(null);
                           setSelectedZoneId(null);
                           setSelectedCell(null);
                           setTool("select");
@@ -5501,6 +6326,13 @@ export function MapEditor() {
                 </div>
               ) : null}
 
+              {hoverCell && tool === "prop" ? (
+                <div className="map-overlay prop preview ghost show-label" style={getOverlayRectStyle(hoverCell.x, hoverCell.y, 1, 1)}>
+                  <span className="map-overlay-badge">{getOverlayBadge("prop")}</span>
+                  <span className="map-overlay-label">New 3D prop</span>
+                </div>
+              ) : null}
+
               {hoverCell && tool === "enemy" ? (
                 <div className="map-overlay enemy preview ghost show-label" style={getOverlayRectStyle(hoverCell.x, hoverCell.y, 1, 1)}>
                   <span className="map-overlay-badge">{getOverlayBadge("enemy")}</span>
@@ -5517,7 +6349,7 @@ export function MapEditor() {
 
               {zoneDragRect ? (
                 <div
-                  className="map-overlay zone draft show-label"
+                  className={tool === "encounter" ? "map-overlay encounter draft show-label" : "map-overlay zone draft show-label"}
                   style={getOverlayRectStyle(
                     zoneDragRect.x,
                     zoneDragRect.y,
@@ -5525,7 +6357,7 @@ export function MapEditor() {
                     zoneDragRect.height
                   )}
                 >
-                  <span className="map-overlay-badge">{getOverlayBadge("zone")}</span>
+                  <span className="map-overlay-badge">{getOverlayBadge(tool === "encounter" ? "encounter" : "zone")}</span>
                   <span className="map-overlay-label">
                     {zoneDragRect.width} x {zoneDragRect.height}
                   </span>
@@ -5553,7 +6385,9 @@ export function MapEditor() {
             {minimapTileRects}
             {layerVisibility.zones ? minimapZoneRects : null}
             {layerVisibility.objects ? minimapObjectRects : null}
+            {layerVisibility.props ? minimapScenePropRects : null}
             {layerVisibility.enemies ? minimapEnemyRects : null}
+            {layerVisibility.encounters ? minimapEncounterRects : null}
             {layerVisibility.npcs ? minimapNpcMarkers : null}
             <rect
               className="map-minimap-viewport"
@@ -6414,6 +7248,14 @@ export function MapEditor() {
               <label className="inline-toggle">
                 <input
                   type="checkbox"
+                  checked={layerVisibility.props}
+                  onChange={(event) => setLayerVisibility((current) => ({ ...current, props: event.target.checked }))}
+                />
+                3D props
+              </label>
+              <label className="inline-toggle">
+                <input
+                  type="checkbox"
                   checked={layerVisibility.enemies}
                   onChange={(event) => setLayerVisibility((current) => ({ ...current, enemies: event.target.checked }))}
                 />
@@ -6426,6 +7268,14 @@ export function MapEditor() {
                   onChange={(event) => setLayerVisibility((current) => ({ ...current, zones: event.target.checked }))}
                 />
                 Zones
+              </label>
+              <label className="inline-toggle">
+                <input
+                  type="checkbox"
+                  checked={layerVisibility.encounters}
+                  onChange={(event) => setLayerVisibility((current) => ({ ...current, encounters: event.target.checked }))}
+                />
+                Encounters
               </label>
               <label className="inline-toggle">
                 <input
@@ -6443,6 +7293,8 @@ export function MapEditor() {
               <button type="button" className="ghost-button" onClick={() => {
                 setSelectedCell(null);
                 setSelectedObjectId(null);
+                setSelectedScenePropId(null);
+                setSelectedEncounterId(null);
                 setSelectedZoneId(null);
                 setSelectedNpcMarkerEntryKey(null);
               }}>
@@ -6631,6 +7483,8 @@ export function MapEditor() {
               {hoverCell ? <span className="pill">Hover {hoverCell!.x}, {hoverCell!.y}</span> : null}
               {selectedCell ? <span className="pill">Tile {selectedCell!.x}, {selectedCell!.y}</span> : null}
               {selectedObject ? <span className="pill">Object {selectedObject!.id}</span> : null}
+              {selectedSceneProp ? <span className="pill">3D Prop {selectedSceneProp!.id}</span> : null}
+              {selectedEncounterVolume ? <span className="pill">Encounter {selectedEncounterVolume!.id}</span> : null}
               {selectedZone ? <span className="pill">Zone {selectedZone!.id}</span> : null}
               {selectedNpcMarker ? <span className="pill">NPC {selectedNpcMarker!.name}</span> : null}
               {selectedEnemyObject ? <span className="pill">Enemy {selectedEnemyObject!.id}</span> : null}
@@ -6643,7 +7497,9 @@ export function MapEditor() {
               <span className="map-legend-chip wall">Wall</span>
               <span className="map-legend-chip blocked">Blocked</span>
               <span className="map-legend-chip object">Object</span>
+              <span className="map-legend-chip prop">3D Prop</span>
               <span className="map-legend-chip enemy">Enemy</span>
+              <span className="map-legend-chip encounter">Encounter</span>
               <span className="map-legend-chip zone">Zone</span>
               <span className="map-legend-chip npc">NPC</span>
             </div>
@@ -6757,6 +7613,29 @@ export function MapEditor() {
                     ))
                   : null}
 
+                {layerVisibility.encounters
+                  ? mapEncounterVolumes.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={item.id === selectedEncounterId ? "map-overlay encounter selected" : "map-overlay encounter"}
+                        style={getOverlayRectStyle(item.x, item.y, item.width, item.height)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setSelectedEncounterId(item.id);
+                          setSelectedObjectId(null);
+                          setSelectedScenePropId(null);
+                          setSelectedZoneId(null);
+                          setSelectedCell(null);
+                          setSelectedNpcMarkerEntryKey(null);
+                          setTool("select");
+                        }}
+                      >
+                        {item.label || item.id}
+                      </button>
+                    ))
+                  : null}
+
                 {layerVisibility.npcs
                   ? mapNpcMarkers.map((npc) => (
                       <button
@@ -6782,7 +7661,7 @@ export function MapEditor() {
 
                 {zoneDrag ? (
                   <div
-                    className="map-overlay zone draft"
+                    className={tool === "encounter" ? "map-overlay encounter draft" : "map-overlay zone draft"}
                     style={getOverlayRectStyle(
                       normalizeRect(zoneDrag!.start, zoneDrag!.end).x,
                       normalizeRect(zoneDrag!.start, zoneDrag!.end).y,

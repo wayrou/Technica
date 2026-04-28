@@ -73,6 +73,16 @@ export type MapRenderMode = "classic_2d" | "simple_3d" | "bespoke_3d";
 export type MapEntrySource = "atlas_theater" | "floor_region" | "door" | "portal";
 export type MapSpawnAnchorKind = "player" | "enemy" | "npc" | "portal_exit" | "generic";
 export type MapPreviewCameraMode = "isometric" | "third_person" | "top_down";
+export type MapScenePropKind =
+  | "setpiece"
+  | "cover"
+  | "door"
+  | "stairs"
+  | "portal"
+  | "light"
+  | "decal";
+export type MapEncounterTriggerMode = "on_enter" | "proximity" | "interact";
+export type MapEncounterClearBehavior = "clear_volume" | "clear_room" | "scripted";
 
 export interface MapEntryRule {
   id: string;
@@ -134,6 +144,48 @@ export interface MapZone {
   metadata: KeyValueRecord;
 }
 
+export interface MapSceneProp {
+  id: string;
+  kind: MapScenePropKind;
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  layerId?: string;
+  elevation: number;
+  heightOffset: number;
+  rotationYaw: number;
+  scale: number;
+  modelKey: string;
+  modelAssetPath: string;
+  materialKey: string;
+  sceneId: string;
+  blocksMovement: boolean;
+  providesCover: boolean;
+  metadata: KeyValueRecord;
+}
+
+export interface MapEncounterVolume {
+  id: string;
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  layerId?: string;
+  triggerMode: MapEncounterTriggerMode;
+  startsActive: boolean;
+  playerEntryAnchorId: string;
+  fallbackReturnAnchorId: string;
+  extractionAnchorId: string;
+  enemyAnchorTags: string[];
+  linkedFieldEnemyIds: string[];
+  tacticalEncounterId: string;
+  clearBehavior: MapEncounterClearBehavior;
+  metadata: KeyValueRecord;
+}
+
 export interface MapDocument {
   schemaVersion: string;
   sourceApp: "Technica";
@@ -145,6 +197,8 @@ export interface MapDocument {
   tiles: MapTile[][];
   objects: MapObject[];
   zones: MapZone[];
+  sceneProps?: MapSceneProp[];
+  encounterVolumes?: MapEncounterVolume[];
   renderMode?: MapRenderMode;
   mapTags?: string[];
   regionTags?: string[];

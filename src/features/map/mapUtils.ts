@@ -1,5 +1,5 @@
 import { TECHNICA_SCHEMA_VERSION, TECHNICA_SOURCE_APP } from "../../types/common";
-import type { MapDocument, MapTile, MapVerticalCell, MapVerticalLayer, MapVerticalLayerSystem, TerrainType } from "../../types/map";
+import type { MapDocument, MapEncounterVolume, MapSceneProp, MapTile, MapVerticalCell, MapVerticalLayer, MapVerticalLayerSystem, TerrainType } from "../../types/map";
 import { isoNow } from "../../utils/date";
 import { slugify } from "../../utils/id";
 
@@ -44,6 +44,8 @@ export function createBlankMapDocument(name = "New Field Map", width = 16, heigh
     tiles: Array.from({ length: height }, () => Array.from({ length: width }, () => createDefaultTile())),
     objects: [],
     zones: [],
+    sceneProps: [],
+    encounterVolumes: [],
     renderMode: "classic_2d",
     mapTags: [],
     regionTags: [],
@@ -81,6 +83,20 @@ export function resizeMapDocument(document: MapDocument, width: number, height: 
     tiles: Array.from({ length: height }, (_, rowIndex) =>
       Array.from({ length: width }, (_, columnIndex) => document.tiles[rowIndex]?.[columnIndex] ?? createDefaultTile())
     ),
+    sceneProps: (document.sceneProps ?? []).filter(
+      (prop) => prop.x >= 0 && prop.y >= 0 && prop.x < width && prop.y < height
+    ).map((prop) => ({
+      ...prop,
+      width: Math.max(1, Math.min(prop.width, width - prop.x)),
+      height: Math.max(1, Math.min(prop.height, height - prop.y))
+    })),
+    encounterVolumes: (document.encounterVolumes ?? []).filter(
+      (volume) => volume.x >= 0 && volume.y >= 0 && volume.x < width && volume.y < height
+    ).map((volume) => ({
+      ...volume,
+      width: Math.max(1, Math.min(volume.width, width - volume.x)),
+      height: Math.max(1, Math.min(volume.height, height - volume.y))
+    })),
     vertical: document.vertical ? resizeVerticalLayerSystem(document.vertical, width, height) : undefined
   };
 }
