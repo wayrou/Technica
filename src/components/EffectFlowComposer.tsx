@@ -222,7 +222,7 @@ export function EffectFlowComposer({ value, onChange, mode }: EffectFlowComposer
                             value={getBranchTargetId(flow, node.id, "true")}
                             onChange={(event) => onChange(setBranchTarget(flow, node.id, "true", event.target.value || null))}
                           >
-                            <option value="">None</option>
+                            <option value="">Do nothing</option>
                             {flow.nodes.filter((candidate) => candidate.id !== node.id).map((candidate) => (
                               <option key={candidate.id} value={candidate.id}>{candidate.label}</option>
                             ))}
@@ -234,7 +234,7 @@ export function EffectFlowComposer({ value, onChange, mode }: EffectFlowComposer
                             value={getBranchTargetId(flow, node.id, "false")}
                             onChange={(event) => onChange(setBranchTarget(flow, node.id, "false", event.target.value || null))}
                           >
-                            <option value="">None</option>
+                            <option value="">Do nothing</option>
                             {flow.nodes.filter((candidate) => candidate.id !== node.id).map((candidate) => (
                               <option key={candidate.id} value={candidate.id}>{candidate.label}</option>
                             ))}

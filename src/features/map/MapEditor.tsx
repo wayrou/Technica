@@ -74,6 +74,13 @@ import {
   terrainPalette,
   upsertMapVerticalCell
 } from "./mapUtils";
+import {
+  applyScenePropPreset,
+  findScenePropPreset,
+  getScenePropMaterialSuggestions,
+  getScenePropPresets
+} from "./scenePropCatalog";
+import { describeVerticalConnector, getVerticalConnectorAdvisories } from "./verticalTraversal";
 
 type MapTool = "paint" | "erase" | "select" | "move" | "object" | "prop" | "zone" | "encounter" | "npc" | "enemy" | "pan";
 
@@ -239,6 +246,23 @@ const MAP_ZONE_ROUTE_METADATA_KEYS = [
   "fieldMapLabel",
   "routeLabel"
 ] as const;
+const MAP_SCENE_PROP_ROUTE_TARGET_KEYS = [
+  "fieldMapId",
+  "technicaFieldMapId",
+  "targetImportedMapId",
+  "targetMapId"
+] as const;
+const MAP_SCENE_PROP_ROUTE_METADATA_KEYS = [
+  ...MAP_SCENE_PROP_ROUTE_TARGET_KEYS,
+  "entryPointId",
+  "fieldMapEntryPointId",
+  "spawnAnchorId",
+  "doorId",
+  "portalId",
+  "targetAnchorId",
+  "targetX",
+  "targetY"
+] as const;
 
 const MAP_SPAWN_ANCHOR_LABELS: Record<MapSpawnAnchorKind, string> = {
   player: "Player",
@@ -311,6 +335,120 @@ function clampTileCoordinate(value: number, maxExclusive: number) {
 function getAdapterTileTerrain(tile: Map3DAdapterTile): TerrainType {
   const terrain = tile.metadata.terrain;
   return typeof terrain === "string" && terrain in terrainColorMap ? (terrain as TerrainType) : "grass";
+}
+
+function formatPreviewConnectorKind(kind: string) {
+  return kind.replace(/_/g, " ");
+}
+
+function formatPreviewScenePropKind(kind: MapSceneProp["kind"]) {
+  return kind.replace(/_/g, " ");
+}
+
+function getPreviewScenePropGlyph(kind: MapSceneProp["kind"]) {
+  if (kind === "door") {
+    return "D";
+  }
+  if (kind === "portal") {
+    return "O";
+  }
+  if (kind === "stairs") {
+    return "S";
+  }
+  return "P";
+}
+
+function describePreviewScenePropTarget(prop: MapSceneProp) {
+  if (prop.kind === "door" || prop.kind === "portal") {
+    const targetMapId = readScenePropTargetMapId(prop);
+    const routeId = readScenePropSourceId(prop);
+    const entryPointId = readScenePropEntryPointId(prop);
+    return targetMapId
+      ? `map ${targetMapId}${routeId ? ` via ${routeId}` : ""}${entryPointId ? ` -> ${entryPointId}` : ""}`
+      : "missing route target";
+  }
+
+  if (prop.kind === "stairs") {
+    const targetAnchorId = readScenePropTargetAnchorId(prop);
+    const targetX = readScenePropTargetCoordinate(prop, "x");
+    const targetY = readScenePropTargetCoordinate(prop, "y");
+    if (targetAnchorId) {
+      return `anchor ${targetAnchorId}`;
+    }
+    if (targetX !== "" && targetY !== "") {
+      return `tile ${targetX},${targetY}`;
+    }
+    return "missing traversal target";
+  }
+
+  return prop.label || prop.id;
+}
+
+function getScenePropPublishProof(
+  prop: MapSceneProp,
+  options?: {
+    knownMapIds?: Set<string>;
+    knownAnchorIds?: Set<string>;
+  }
+) {
+  const targetMapId = readScenePropTargetMapId(prop);
+  const routeId = readScenePropSourceId(prop);
+  const entryPointId = readScenePropEntryPointId(prop);
+  const targetAnchorId = readScenePropTargetAnchorId(prop);
+  const targetX = readScenePropTargetCoordinate(prop, "x");
+  const targetY = readScenePropTargetCoordinate(prop, "y");
+
+  if (prop.kind === "door" || prop.kind === "portal") {
+    const routeReady = Boolean(targetMapId && (routeId || entryPointId));
+    const targetMapKnown = !targetMapId || !options?.knownMapIds ? true : options.knownMapIds.has(targetMapId);
+    return {
+      ready: routeReady && targetMapKnown,
+      tone: routeReady && targetMapKnown ? "accent" : "warning",
+      headline: [
+        "Outbound route",
+        targetMapId ? `map ${targetMapId}` : "missing target map",
+        routeId ? `${prop.kind} ${routeId}` : `missing ${prop.kind} id`,
+        entryPointId ? `spawn ${entryPointId}` : "default spawn"
+      ].join(" -> "),
+      detail: !targetMapId
+        ? "Pick a target map so Chaos Core can resolve this authored route."
+        : !targetMapKnown
+          ? "The selected target map is not in the loaded Chaos Core database yet."
+          : routeId || entryPointId
+            ? "Chaos Core will publish this prop as an imported-map route contract."
+            : "Add a route id or spawn anchor so the contract is explicit before publish."
+    };
+  }
+
+  if (prop.kind === "stairs") {
+    const hasTileTarget = targetX !== "" && targetY !== "";
+    const hasAnchorTarget = Boolean(targetAnchorId);
+    const anchorKnown = !targetAnchorId || !options?.knownAnchorIds ? true : options.knownAnchorIds.has(targetAnchorId);
+    const traversalReady = hasAnchorTarget ? anchorKnown : hasTileTarget;
+    return {
+      ready: traversalReady,
+      tone: traversalReady ? "accent" : "warning",
+      headline: `Local traversal -> ${
+        hasAnchorTarget
+          ? `anchor ${targetAnchorId}`
+          : hasTileTarget
+            ? `tile ${targetX},${targetY}`
+            : "missing traversal target"
+      }`,
+      detail: !hasAnchorTarget && !hasTileTarget
+        ? "Choose an anchor or both tile coordinates so this stairs prop can move the player."
+        : hasAnchorTarget && !anchorKnown
+          ? "The authored target anchor is not on this map yet."
+          : "Chaos Core will use this same-map traversal target directly from the published prop."
+    };
+  }
+
+  return {
+    ready: true,
+    tone: "accent",
+    headline: prop.label || prop.id,
+    detail: "No authored traversal contract for this prop kind."
+  };
 }
 
 function hexToRgb(color: string) {
@@ -436,6 +574,7 @@ function createDefaultSceneProp(x: number, y: number, existingIds: string[], lay
   return {
     id: createSequentialId("scene_prop", existingIds),
     kind: "setpiece",
+    assetPresetId: "",
     label: "New setpiece",
     x,
     y,
@@ -452,6 +591,11 @@ function createDefaultSceneProp(x: number, y: number, existingIds: string[], lay
     sceneId: "",
     blocksMovement: false,
     providesCover: false,
+    routeTargetMapId: "",
+    routeEntryPointId: "",
+    doorId: "",
+    portalId: "",
+    targetAnchorId: "",
     metadata: {}
   };
 }
@@ -482,6 +626,9 @@ function createDefaultEncounterVolume(
     linkedFieldEnemyIds: [],
     tacticalEncounterId: "",
     clearBehavior: "clear_volume",
+    proximityRadiusTiles: 2,
+    repeatable: false,
+    announceOnActivate: true,
     metadata: {}
   };
 }
@@ -663,6 +810,48 @@ function describeRuntimeZoneRoute(zone: unknown): string | null {
   return `zone ${zoneId} -> map ${targetMapId || "missing target"} via ${source || "missing source"} ${routeId || "missing id"}${spawnLabel}`;
 }
 
+function describeRuntimeScenePropProof(prop: unknown): string | null {
+  if (!prop || typeof prop !== "object") {
+    return null;
+  }
+
+  const sceneProp = prop as Record<string, unknown>;
+  const kind = readStringProperty(sceneProp, "kind");
+  const propId = readStringProperty(sceneProp, "id") || readStringProperty(sceneProp, "label") || "prop";
+  const metadata =
+    "metadata" in sceneProp && sceneProp.metadata && typeof sceneProp.metadata === "object"
+      ? (sceneProp.metadata as Record<string, unknown>)
+      : null;
+  const readFromProp = (key: string) => readStringProperty(sceneProp, key) || (metadata ? readStringProperty(metadata, key) : "");
+
+  if (kind === "door" || kind === "portal") {
+    const targetMapId =
+      readFromProp("routeTargetMapId") ||
+      readFromProp("fieldMapId") ||
+      readFromProp("technicaFieldMapId") ||
+      readFromProp("targetImportedMapId") ||
+      readFromProp("targetMapId");
+    const routeId = kind === "portal" ? readFromProp("portalId") : readFromProp("doorId");
+    const entryPointId =
+      readFromProp("routeEntryPointId") ||
+      readFromProp("fieldMapEntryPointId") ||
+      readFromProp("entryPointId") ||
+      readFromProp("spawnAnchorId");
+    return `${kind} ${propId} -> map ${targetMapId || "missing target"} via ${routeId || "missing id"}${entryPointId ? ` -> spawn ${entryPointId}` : ""}`;
+  }
+
+  if (kind === "stairs") {
+    const targetAnchorId = readFromProp("targetAnchorId");
+    const targetX = readFromProp("targetX");
+    const targetY = readFromProp("targetY");
+    return `stairs ${propId} -> ${
+      targetAnchorId ? `anchor ${targetAnchorId}` : targetX && targetY ? `tile ${targetX},${targetY}` : "missing target"
+    }`;
+  }
+
+  return null;
+}
+
 function describeMapPublishReceipt(context: {
   bundle: Awaited<ReturnType<typeof buildMapBundleForTarget>>;
   loadedEntry: LoadedChaosCoreDatabaseEntry | null;
@@ -679,9 +868,13 @@ function describeMapPublishReceipt(context: {
   const entryRules = Array.isArray(runtimeMap.entryRules) ? runtimeMap.entryRules : [];
   const spawnAnchors = Array.isArray(runtimeMap.spawnAnchors) ? runtimeMap.spawnAnchors : [];
   const interactionZones = Array.isArray(runtimeMap.interactionZones) ? runtimeMap.interactionZones : [];
+  const sceneProps = Array.isArray(runtimeMap.sceneProps) ? runtimeMap.sceneProps : [];
   const outboundRoutes = interactionZones
     .map((zone) => describeRuntimeZoneRoute(zone))
     .filter((route): route is string => Boolean(route));
+  const scenePropProofs = sceneProps
+    .map((prop) => describeRuntimeScenePropProof(prop))
+    .filter((proof): proof is string => Boolean(proof));
   const adapter3d = runtimeMap.adapter3d && typeof runtimeMap.adapter3d === "object" ? (runtimeMap.adapter3d as Record<string, unknown>) : null;
   const adapterTiles = Array.isArray(adapter3d?.tiles) ? adapter3d.tiles.length : 0;
   const traversalLinks = Array.isArray(adapter3d?.traversalLinks) ? adapter3d.traversalLinks.length : 0;
@@ -714,6 +907,10 @@ function describeMapPublishReceipt(context: {
     ...(outboundRoutes.length > 0
       ? outboundRoutes.slice(0, 5).map((route) => `Outbound preview: ${route}`)
       : ["Outbound preview: no door/portal route zones configured"]),
+    `Traversal props: ${scenePropProofs.length}`,
+    ...(scenePropProofs.length > 0
+      ? scenePropProofs.slice(0, 5).map((proof) => `Traversal preview: ${proof}`)
+      : ["Traversal preview: no authored door/portal/stairs props configured"]),
     `Spawn anchors: ${spawnAnchors.length}${anchorIds.length ? ` (${anchorIds.join(", ")})` : ""}`,
     `Chaos route handshake: ${routeHandshake}`,
     `3D adapter: ${adapterTiles} tiles, ${traversalLinks} traversal links`
@@ -750,6 +947,108 @@ function isMapDocumentPayload(value: unknown): value is MapDocument {
 function readMetadataText(record: Record<string, string> | undefined, key: string): string {
   const value = record?.[key];
   return typeof value === "string" ? value.trim() : "";
+}
+
+function readScenePropTargetMapId(prop: MapSceneProp): string {
+  return (
+    prop.routeTargetMapId?.trim() ||
+    readMetadataText(prop.metadata, "fieldMapId") ||
+    readMetadataText(prop.metadata, "technicaFieldMapId") ||
+    readMetadataText(prop.metadata, "targetImportedMapId") ||
+    readMetadataText(prop.metadata, "targetMapId")
+  );
+}
+
+function readScenePropEntryPointId(prop: MapSceneProp): string {
+  return (
+    prop.routeEntryPointId?.trim() ||
+    readMetadataText(prop.metadata, "fieldMapEntryPointId") ||
+    readMetadataText(prop.metadata, "entryPointId") ||
+    readMetadataText(prop.metadata, "spawnAnchorId")
+  );
+}
+
+function readScenePropSourceId(prop: MapSceneProp): string {
+  if (prop.kind === "portal") {
+    return prop.portalId?.trim() || readMetadataText(prop.metadata, "portalId");
+  }
+
+  if (prop.kind === "door") {
+    return prop.doorId?.trim() || readMetadataText(prop.metadata, "doorId");
+  }
+
+  return "";
+}
+
+function readScenePropTargetAnchorId(prop: MapSceneProp): string {
+  return prop.targetAnchorId?.trim() || readMetadataText(prop.metadata, "targetAnchorId");
+}
+
+function readScenePropTargetCoordinate(prop: MapSceneProp, axis: "x" | "y"): string {
+  const propertyValue = axis === "x" ? prop.targetX : prop.targetY;
+  if (typeof propertyValue === "number" && Number.isFinite(propertyValue)) {
+    return String(propertyValue);
+  }
+
+  return readMetadataText(prop.metadata, axis === "x" ? "targetX" : "targetY");
+}
+
+function getScenePropMetadataWithoutControlledFields(prop: MapSceneProp): Record<string, string> {
+  const nextMetadata = { ...(prop.metadata ?? {}) };
+  MAP_SCENE_PROP_ROUTE_METADATA_KEYS.forEach((key) => {
+    delete nextMetadata[key];
+  });
+  return nextMetadata;
+}
+
+function syncScenePropMetadata(prop: MapSceneProp): MapSceneProp {
+  let metadata = getScenePropMetadataWithoutControlledFields(prop);
+
+  const routeTargetMapId = readScenePropTargetMapId(prop);
+  const routeEntryPointId = readScenePropEntryPointId(prop);
+  const doorId =
+    prop.kind === "door" ? readScenePropSourceId(prop) : prop.doorId?.trim() || readMetadataText(prop.metadata, "doorId");
+  const portalId =
+    prop.kind === "portal"
+      ? readScenePropSourceId(prop)
+      : prop.portalId?.trim() || readMetadataText(prop.metadata, "portalId");
+  const targetAnchorId = readScenePropTargetAnchorId(prop);
+  const targetX = readScenePropTargetCoordinate(prop, "x");
+  const targetY = readScenePropTargetCoordinate(prop, "y");
+
+  if (routeTargetMapId) {
+    metadata = setRouteMetadataValue(metadata, "fieldMapId", routeTargetMapId);
+  }
+  if (routeEntryPointId) {
+    metadata = setRouteMetadataValue(metadata, "entryPointId", routeEntryPointId);
+  }
+  if (doorId) {
+    metadata = setRouteMetadataValue(metadata, "doorId", doorId);
+  }
+  if (portalId) {
+    metadata = setRouteMetadataValue(metadata, "portalId", portalId);
+  }
+  if (targetAnchorId) {
+    metadata = setRouteMetadataValue(metadata, "targetAnchorId", targetAnchorId);
+  }
+  if (targetX) {
+    metadata = setRouteMetadataValue(metadata, "targetX", targetX);
+  }
+  if (targetY) {
+    metadata = setRouteMetadataValue(metadata, "targetY", targetY);
+  }
+
+  return {
+    ...prop,
+    routeTargetMapId,
+    routeEntryPointId,
+    doorId,
+    portalId,
+    targetAnchorId,
+    targetX: targetX ? Number(targetX) : undefined,
+    targetY: targetY ? Number(targetY) : undefined,
+    metadata
+  };
 }
 
 function readZoneTargetMapId(zone: MapZone): string {
@@ -1061,6 +1360,10 @@ export function MapEditor() {
     const maxElevation = Math.max(0, ...map3dAdapter.tiles.map((tile) => tile.elevation));
     const previewStep = Math.max(1, Math.ceil(Math.sqrt(Math.max(1, map3dAdapter.tiles.length) / MAP_3D_PREVIEW_MAX_TILES)));
     const tileByCoordinate = new Map(map3dAdapter.tiles.map((tile) => [`${tile.x},${tile.y}`, tile]));
+    const anchorById = new Map(map3dAdapter.spawnAnchors.map((anchor) => [anchor.id.trim(), anchor]));
+    const routeTargetAnchorIds = new Set(
+      map3dAdapter.entryRules.map((entryRule) => entryRule.entryPointId?.trim() ?? "").filter(Boolean)
+    );
     const stageWidth = Math.max(
       360,
       (map3dAdapter.width + map3dAdapter.height) * MAP_3D_PREVIEW_ISO_X + MAP_3D_PREVIEW_TILE_WIDTH + 96
@@ -1105,6 +1408,9 @@ export function MapEditor() {
       const point = getPreviewPoint(anchor.x, anchor.y);
       return {
         anchor,
+        isSelected: selectedCell?.x === anchor.x && selectedCell?.y === anchor.y,
+        isRouteTarget: routeTargetAnchorIds.has(anchor.id.trim()),
+        label: anchor.label || anchor.id,
         style: {
           left: `${point.x}px`,
           top: `${point.y}px`
@@ -1114,17 +1420,111 @@ export function MapEditor() {
     const connectorLines = map3dAdapter.traversalLinks.map((connector) => {
       const from = getPreviewPoint(connector.from.x, connector.from.y);
       const to = getPreviewPoint(connector.to.x, connector.to.y);
+      const fromTile = tileByCoordinate.get(`${connector.from.x},${connector.from.y}`);
+      const toTile = tileByCoordinate.get(`${connector.to.x},${connector.to.y}`);
+      const deltaElevation = (toTile?.elevation ?? 0) - (fromTile?.elevation ?? 0);
       return {
         connector,
         from,
-        to
+        to,
+        midpoint: {
+          x: (from.x + to.x) / 2,
+          y: (from.y + to.y) / 2
+        },
+        isSelected:
+          selectedCell !== null &&
+          (
+            (connector.from.x === selectedCell.x && connector.from.y === selectedCell.y) ||
+            (connector.to.x === selectedCell.x && connector.to.y === selectedCell.y)
+          ),
+        label: `${formatPreviewConnectorKind(connector.kind)} ${deltaElevation > 0 ? "+" : ""}${deltaElevation.toFixed(2)}z`
       };
     });
+    const connectorKindCounts = Array.from(
+      map3dAdapter.traversalLinks.reduce((counts, connector) => {
+        counts.set(connector.kind, (counts.get(connector.kind) ?? 0) + 1);
+        return counts;
+      }, new Map<string, number>())
+    );
+    const traversalProps = (map.sceneProps ?? [])
+      .filter((prop) => prop.kind === "door" || prop.kind === "portal" || prop.kind === "stairs")
+      .map((prop) => {
+        const point = getPreviewPoint(prop.x + Math.max(0, prop.width - 1) / 2, prop.y + Math.max(0, prop.height - 1) / 2);
+        const targetMapId = readScenePropTargetMapId(prop);
+        const routeId = readScenePropSourceId(prop);
+        const entryPointId = readScenePropEntryPointId(prop);
+        const targetAnchorId = readScenePropTargetAnchorId(prop);
+        const targetX = readScenePropTargetCoordinate(prop, "x");
+        const targetY = readScenePropTargetCoordinate(prop, "y");
+        const localTargetAnchor = targetAnchorId ? anchorById.get(targetAnchorId) : undefined;
+        const parsedTargetX = targetX === "" ? Number.NaN : Number(targetX);
+        const parsedTargetY = targetY === "" ? Number.NaN : Number(targetY);
+        const localTargetTilePoint =
+          Number.isFinite(parsedTargetX) && Number.isFinite(parsedTargetY)
+            ? getPreviewPoint(parsedTargetX, parsedTargetY)
+            : null;
+        const localGuidePoint = localTargetAnchor
+          ? getPreviewPoint(localTargetAnchor.x, localTargetAnchor.y)
+          : localTargetTilePoint;
+        const status =
+          prop.kind === "stairs"
+            ? localTargetAnchor || localTargetTilePoint
+              ? "ready"
+              : "warning"
+            : targetMapId && (routeId || entryPointId)
+              ? "ready"
+              : "warning";
+        const proofBits =
+          prop.kind === "stairs"
+            ? [
+                targetAnchorId ? `anchor ${targetAnchorId}` : "",
+                targetX !== "" && targetY !== "" ? `tile ${targetX},${targetY}` : ""
+              ].filter(Boolean)
+            : [
+                targetMapId ? `map ${targetMapId}` : "",
+                routeId ? `route ${routeId}` : "",
+                entryPointId ? `spawn ${entryPointId}` : ""
+              ].filter(Boolean);
+
+        return {
+          prop,
+          isSelected: selectedScenePropId === prop.id,
+          label: formatPreviewScenePropKind(prop.kind),
+          targetSummary: describePreviewScenePropTarget(prop),
+          proofSummary: proofBits.join(" | "),
+          status,
+          guidePoint: localGuidePoint,
+          style: {
+            left: `${point.x}px`,
+            top: `${point.y}px`
+          } as CSSProperties,
+          point
+        };
+      });
+    const traversalPropGuides = traversalProps
+      .filter((item) => item.guidePoint !== null)
+      .map((item) => ({
+        prop: item.prop,
+        from: item.point,
+        to: item.guidePoint!,
+        isSelected: item.isSelected,
+        status: item.status
+      }));
+    const traversalPropKindCounts = Array.from(
+      traversalProps.reduce((counts, item) => {
+        counts.set(item.prop.kind, (counts.get(item.prop.kind) ?? 0) + 1);
+        return counts;
+      }, new Map<MapSceneProp["kind"], number>())
+    );
 
     return {
       tiles,
       anchors,
       connectorLines,
+      connectorKindCounts,
+      traversalProps,
+      traversalPropGuides,
+      traversalPropKindCounts,
       previewStep,
       stageWidth,
       stageHeight,
@@ -1133,9 +1533,13 @@ export function MapEditor() {
       wallTileCount: map3dAdapter.tiles.filter((tile) => tile.wall).length,
       blockedTileCount: map3dAdapter.tiles.filter((tile) => !tile.walkable).length,
       noFloorTileCount: map3dAdapter.tiles.filter((tile) => !tile.floor).length,
-      elevatedTileCount: map3dAdapter.tiles.filter((tile) => tile.elevation > 0).length
+      elevatedTileCount: map3dAdapter.tiles.filter((tile) => tile.elevation > 0).length,
+      routeTargetAnchorCount: anchors.filter((anchor) => anchor.isRouteTarget).length,
+      selectedAnchorCount: anchors.filter((anchor) => anchor.isSelected).length,
+      traversalPropCount: traversalProps.length,
+      unresolvedTraversalPropCount: traversalProps.filter((item) => item.status !== "ready").length
     };
-  }, [map3dAdapter]);
+  }, [map.sceneProps, map3dAdapter, selectedCell, selectedScenePropId]);
   const selectedObject = map.objects.find((item) => item.id === selectedObjectId) ?? null;
   const selectedEnemyObject = selectedObject && isEnemyObject(selectedObject) ? selectedObject : null;
   const mapSceneProps = map.sceneProps ?? [];
@@ -1167,6 +1571,33 @@ export function MapEditor() {
         : [],
     [activeVerticalLayer?.id, selectedCell, verticalLayerSystem]
   );
+  const verticalConnectorPreview = useMemo(() => {
+    if (!selectedCell || !activeVerticalLayer || !verticalLayerSystem) {
+      return null;
+    }
+
+    const connector: MapVerticalConnector = {
+      id: "preview",
+      kind: connectorDraft.kind,
+      from: {
+        layerId: activeVerticalLayer.id,
+        x: selectedCell.x,
+        y: selectedCell.y,
+      },
+      to: {
+        layerId: connectorDraft.toLayerId || activeVerticalLayer.id,
+        x: Math.max(0, Math.min(map.width - 1, Number(connectorDraft.toX || 0))),
+        y: Math.max(0, Math.min(map.height - 1, Number(connectorDraft.toY || 0))),
+      },
+      bidirectional: connectorDraft.bidirectional,
+      metadata: {},
+    };
+
+    return {
+      label: describeVerticalConnector(map, connector),
+      advisories: getVerticalConnectorAdvisories(map, connector),
+    };
+  }, [activeVerticalLayer, connectorDraft, map, selectedCell, verticalLayerSystem]);
   const mapEnemyObjects = useMemo(
     () => map.objects.filter((item) => isEnemyObject(item)),
     [map.objects]
@@ -2554,8 +2985,17 @@ export function MapEditor() {
   function updateScenePropById(scenePropId: string, updater: (item: MapSceneProp) => MapSceneProp) {
     patchMap((current) => ({
       ...current,
-      sceneProps: (current.sceneProps ?? []).map((item) => (item.id === scenePropId ? updater(item) : item))
+      sceneProps: (current.sceneProps ?? []).map((item) => (item.id === scenePropId ? syncScenePropMetadata(updater(item)) : item))
     }));
+  }
+
+  function applyScenePropCatalogPreset(scenePropId: string, presetId: string) {
+    const preset = findScenePropPreset(presetId);
+    if (!preset) {
+      return;
+    }
+
+    updateScenePropById(scenePropId, (item) => applyScenePropPreset(item, preset));
   }
 
   function updateEncounterVolumeById(encounterId: string, updater: (item: MapEncounterVolume) => MapEncounterVolume) {
@@ -3393,6 +3833,89 @@ export function MapEditor() {
   const selectedZoneTargetMapInOptions = selectedZoneTargetMapId
     ? mapEntries.some((entry) => entry.contentId === selectedZoneTargetMapId)
     : false;
+  const selectedScenePropTargetMapId = selectedSceneProp ? readScenePropTargetMapId(selectedSceneProp) : "";
+  const selectedScenePropEntryPointId = selectedSceneProp ? readScenePropEntryPointId(selectedSceneProp) : "";
+  const selectedScenePropRouteId = selectedSceneProp ? readScenePropSourceId(selectedSceneProp) : "";
+  const selectedScenePropTargetAnchorId = selectedSceneProp ? readScenePropTargetAnchorId(selectedSceneProp) : "";
+  const selectedScenePropTargetX = selectedSceneProp ? readScenePropTargetCoordinate(selectedSceneProp, "x") : "";
+  const selectedScenePropTargetY = selectedSceneProp ? readScenePropTargetCoordinate(selectedSceneProp, "y") : "";
+  const selectedScenePropPresetOptions = useMemo(
+    () => getScenePropPresets(selectedSceneProp?.kind ?? null),
+    [selectedSceneProp?.kind]
+  );
+  const selectedScenePropPreset = selectedSceneProp ? findScenePropPreset(selectedSceneProp.assetPresetId) : null;
+  const selectedScenePropModelSuggestions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          selectedScenePropPresetOptions
+            .map((preset) => preset.modelKey.trim())
+            .filter(Boolean)
+        )
+      ),
+    [selectedScenePropPresetOptions]
+  );
+  const selectedScenePropMaterialSuggestions = useMemo(
+    () =>
+      getScenePropMaterialSuggestions(
+        selectedSceneProp?.kind ?? null,
+        selectedSceneProp?.assetPresetId,
+        selectedSceneProp?.modelKey,
+        selectedSceneProp?.materialKey
+      ),
+    [selectedSceneProp?.assetPresetId, selectedSceneProp?.kind, selectedSceneProp?.materialKey, selectedSceneProp?.modelKey]
+  );
+  const selectedScenePropAssetReady = Boolean(
+    selectedSceneProp &&
+      (selectedSceneProp.modelKey.trim() || selectedSceneProp.modelAssetPath.trim() || selectedSceneProp.sceneId.trim())
+  );
+  const selectedScenePropAssetSummary = selectedScenePropPreset
+    ? selectedScenePropPreset.summary
+    : selectedSceneProp
+      ? selectedSceneProp.modelKey.trim()
+        ? `Manual model '${selectedSceneProp.modelKey.trim()}'`
+        : selectedSceneProp.modelAssetPath.trim()
+          ? `Manual asset path '${selectedSceneProp.modelAssetPath.trim()}'`
+          : selectedSceneProp.sceneId.trim()
+            ? `Scene-linked prop '${selectedSceneProp.sceneId.trim()}'`
+            : "No authored 3D source selected yet."
+      : "";
+  const selectedScenePropTargetMapInOptions = selectedScenePropTargetMapId
+    ? mapEntries.some((entry) => entry.contentId === selectedScenePropTargetMapId)
+    : false;
+  const mapEntryIdSet = useMemo(() => new Set(mapEntries.map((entry) => entry.contentId)), [mapEntries]);
+  const mapAnchorIdSet = useMemo(
+    () => new Set((map.spawnAnchors ?? []).map((anchor) => anchor.id.trim()).filter(Boolean)),
+    [map.spawnAnchors]
+  );
+  const selectedScenePropPublishProof = selectedSceneProp
+    ? getScenePropPublishProof(selectedSceneProp, {
+        knownMapIds: mapEntryIdSet,
+        knownAnchorIds: mapAnchorIdSet
+      })
+    : null;
+  const selectedScenePropMetadataText = selectedSceneProp
+    ? serializeKeyValueLines(getScenePropMetadataWithoutControlledFields(selectedSceneProp))
+    : "";
+  const selectedEncounterBehaviorSummary = selectedEncounterVolume
+    ? [
+        selectedEncounterVolume.triggerMode === "proximity"
+          ? `Proximity ${Math.max(0, Number(selectedEncounterVolume.proximityRadiusTiles ?? 0))}t`
+          : selectedEncounterVolume.triggerMode === "interact"
+            ? "Manual interact"
+            : "On enter",
+        selectedEncounterVolume.repeatable ? "repeatable" : "single fire",
+        selectedEncounterVolume.announceOnActivate === false ? "quiet" : "announced",
+      ].join(" • ")
+    : "";
+  const verticalConnectorAdvisoryCount = useMemo(
+    () =>
+      (verticalLayerSystem?.connectors ?? []).reduce(
+        (count, connector) => count + getVerticalConnectorAdvisories(map, connector).length,
+        0
+      ),
+    [map, verticalLayerSystem]
+  );
 
   const selectionInspectorPanel = (
     <Panel title="Selection Inspector" subtitle="Edit the selected tile, object, zone, or NPC marker directly.">
@@ -3649,6 +4172,23 @@ export function MapEditor() {
                         Clear vertical cell
                       </button>
                     </div>
+                    {verticalConnectorPreview ? (
+                      <div className="map-route-proof-card">
+                        <div className="map-route-proof-card__header">
+                          <div>
+                            <h4>Traversal Preview</h4>
+                            <small>{verticalConnectorPreview.label}</small>
+                          </div>
+                        </div>
+                        <div className="map-zone-route-proof">
+                          <span>
+                            {verticalConnectorPreview.advisories.length === 0
+                              ? "Connector preview looks traversable."
+                              : verticalConnectorPreview.advisories.join(" ")}
+                          </span>
+                        </div>
+                      </div>
+                    ) : null}
                     {selectedCellVerticalConnectors.length > 0 ? (
                       <div className="database-list compact">
                         {selectedCellVerticalConnectors.map((connector) => (
@@ -3659,11 +4199,15 @@ export function MapEditor() {
                             onClick={() => removeVerticalConnector(connector.id)}
                           >
                             <strong>{connector.kind}</strong>
-                            <span>
-                              {connector.from.layerId} {connector.from.x},{connector.from.y} to {connector.to.layerId}{" "}
-                              {connector.to.x},{connector.to.y}
-                            </span>
-                            <small>Click to remove</small>
+                            <span>{describeVerticalConnector(map, connector)}</span>
+                            <small>
+                              {(() => {
+                                const advisories = getVerticalConnectorAdvisories(map, connector);
+                                return advisories.length === 0
+                                  ? "Click to remove"
+                                  : `${advisories.join(" ")} Click to remove.`;
+                              })()}
+                            </small>
                           </button>
                         ))}
                       </div>
@@ -4019,7 +4563,16 @@ export function MapEditor() {
               <select
                 value={selectedSceneProp.kind}
                 onChange={(event) =>
-                  updateScenePropById(selectedSceneProp.id, (item) => ({ ...item, kind: event.target.value as MapSceneProp["kind"] }))
+                  updateScenePropById(selectedSceneProp.id, (item) => {
+                    const nextKind = event.target.value as MapSceneProp["kind"];
+                    return {
+                      ...item,
+                      kind: nextKind,
+                      assetPresetId: item.kind === nextKind ? item.assetPresetId : "",
+                      doorId: nextKind === "door" ? item.doorId || runtimeId(item.id, "door") : item.doorId,
+                      portalId: nextKind === "portal" ? item.portalId || runtimeId(item.id, "portal") : item.portalId
+                    };
+                  })
                 }
               >
                 <option value="setpiece">Setpiece</option>
@@ -4053,9 +4606,81 @@ export function MapEditor() {
                 placeholder={activeVerticalLayer?.id ?? "ground"}
               />
             </label>
+            <div className="map-route-proof-card full">
+              <div className="map-route-proof-card__header">
+                <div>
+                  <h4>3D Asset Workflow</h4>
+                  <small>Choose a prop kit, then fine-tune model, material, and traversal behavior.</small>
+                </div>
+                <span className={selectedScenePropAssetReady ? "pill accent" : "pill warning"}>
+                  {selectedScenePropAssetReady ? "Asset ready" : "Needs source"}
+                </span>
+              </div>
+              <div className="form-grid compact">
+                <label className="field">
+                  <span>Preset kit</span>
+                  <select
+                    value={selectedSceneProp.assetPresetId ?? ""}
+                    onChange={(event) =>
+                      updateScenePropById(selectedSceneProp.id, (item) => ({ ...item, assetPresetId: event.target.value }))
+                    }
+                  >
+                    <option value="">Custom / manual</option>
+                    {selectedSceneProp.assetPresetId &&
+                    !selectedScenePropPresetOptions.some((preset) => preset.id === selectedSceneProp.assetPresetId) ? (
+                      <option value={selectedSceneProp.assetPresetId}>{selectedSceneProp.assetPresetId}</option>
+                    ) : null}
+                    {selectedScenePropPresetOptions.map((preset) => (
+                      <option key={preset.id} value={preset.id}>
+                        {preset.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Suggested material</span>
+                  <input
+                    list="scene-prop-material-suggestions"
+                    value={selectedSceneProp.materialKey}
+                    onChange={(event) =>
+                      updateScenePropById(selectedSceneProp.id, (item) => ({ ...item, materialKey: event.target.value }))
+                    }
+                    placeholder="Pick or type a material key"
+                  />
+                </label>
+                <div className="field full">
+                  <span>Kit summary</span>
+                  <div className="map-zone-route-proof">
+                    <strong>{selectedScenePropPreset ? selectedScenePropPreset.label : "Manual custom prop"}</strong>
+                    <small>{selectedScenePropAssetSummary}</small>
+                    <span>
+                      Footprint {selectedSceneProp.width}x{selectedSceneProp.height} • scale {selectedSceneProp.scale} •{" "}
+                      {selectedSceneProp.blocksMovement ? "blocking" : "pass-through"}
+                      {selectedSceneProp.providesCover ? " • cover" : ""}
+                    </span>
+                  </div>
+                </div>
+                <div className="toolbar full">
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    disabled={!selectedSceneProp.assetPresetId}
+                    onClick={() => applyScenePropCatalogPreset(selectedSceneProp.id, selectedSceneProp.assetPresetId ?? "")}
+                  >
+                    Apply preset values
+                  </button>
+                </div>
+              </div>
+              <datalist id="scene-prop-material-suggestions">
+                {selectedScenePropMaterialSuggestions.map((materialKey) => (
+                  <option key={materialKey} value={materialKey} />
+                ))}
+              </datalist>
+            </div>
             <label className="field">
               <span>Model key</span>
               <input
+                list="scene-prop-model-suggestions"
                 value={selectedSceneProp.modelKey}
                 onChange={(event) =>
                   updateScenePropById(selectedSceneProp.id, (item) => ({ ...item, modelKey: event.target.value }))
@@ -4074,12 +4699,18 @@ export function MapEditor() {
             <label className="field">
               <span>Material key</span>
               <input
+                list="scene-prop-material-suggestions"
                 value={selectedSceneProp.materialKey}
                 onChange={(event) =>
                   updateScenePropById(selectedSceneProp.id, (item) => ({ ...item, materialKey: event.target.value }))
                 }
               />
             </label>
+            <datalist id="scene-prop-model-suggestions">
+              {selectedScenePropModelSuggestions.map((modelKey) => (
+                <option key={modelKey} value={modelKey} />
+              ))}
+            </datalist>
             <label className="field">
               <span>Scene id</span>
               <input
@@ -4213,15 +4844,170 @@ export function MapEditor() {
                 }
               />
             </label>
+            {selectedSceneProp.kind === "door" || selectedSceneProp.kind === "portal" ? (
+              <>
+                <div className="map-route-proof-card full">
+                  <div className="map-route-proof-card__header">
+                    <div>
+                      <h4>Route Target</h4>
+                      <small>Publish this prop as a Chaos Core door/portal route.</small>
+                    </div>
+                  </div>
+                  <div className="form-grid">
+                    <label className="field">
+                      <span>Target map</span>
+                      <select
+                        value={selectedScenePropTargetMapId}
+                        onChange={(event) =>
+                          updateScenePropById(selectedSceneProp.id, (item) => ({ ...item, routeTargetMapId: event.target.value }))
+                        }
+                      >
+                        <option value="">None</option>
+                        {selectedScenePropTargetMapId && !selectedScenePropTargetMapInOptions ? (
+                          <option value={selectedScenePropTargetMapId}>{selectedScenePropTargetMapId}</option>
+                        ) : null}
+                        {mapEntries.map((entry) => (
+                          <option key={entry.entryKey} value={entry.contentId}>
+                            {entry.contentId}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>{selectedSceneProp.kind === "portal" ? "Portal id" : "Door id"}</span>
+                      <input
+                        value={selectedScenePropRouteId}
+                        onChange={(event) =>
+                          updateScenePropById(selectedSceneProp.id, (item) => ({
+                            ...item,
+                            [selectedSceneProp.kind === "portal" ? "portalId" : "doorId"]: event.target.value
+                          }))
+                        }
+                        placeholder={runtimeId(selectedSceneProp.id, selectedSceneProp.kind)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Target spawn anchor</span>
+                      <input
+                        value={selectedScenePropEntryPointId}
+                        onChange={(event) =>
+                          updateScenePropById(selectedSceneProp.id, (item) => ({ ...item, routeEntryPointId: event.target.value }))
+                        }
+                        placeholder="player_start"
+                      />
+                    </label>
+                    <div className="field full">
+                      <span>Route proof</span>
+                      <div className="map-zone-route-proof">
+                        <strong>{selectedScenePropPublishProof?.headline ?? `${selectedSceneProp.kind} ${selectedSceneProp.id}`}</strong>
+                        <small>
+                          {selectedScenePropPublishProof?.detail ??
+                            "Choose a target map so this prop becomes a live authored route."}
+                        </small>
+                      </div>
+                      {selectedScenePropPublishProof ? (
+                        <div className={selectedScenePropPublishProof.ready ? "publish-receipt" : "publish-receipt warning"}>
+                          <div className="publish-receipt-header">
+                            <strong>Publish Contract</strong>
+                            <span>{selectedScenePropPublishProof.ready ? "Ready for Chaos Core" : "Needs authoring fix"}</span>
+                          </div>
+                          <div className="publish-receipt-details">
+                            <span>{selectedScenePropPublishProof.headline}</span>
+                            <span>{selectedScenePropPublishProof.detail}</span>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              </>
+            ) : null}
+            {selectedSceneProp.kind === "stairs" ? (
+              <div className="map-route-proof-card full">
+                <div className="map-route-proof-card__header">
+                  <div>
+                    <h4>Traversal Target</h4>
+                    <small>Move the player to another anchor or tile on this bespoke map.</small>
+                  </div>
+                </div>
+                <div className="form-grid">
+                  <label className="field">
+                    <span>Target anchor id</span>
+                    <input
+                      value={selectedScenePropTargetAnchorId}
+                      onChange={(event) =>
+                        updateScenePropById(selectedSceneProp.id, (item) => ({ ...item, targetAnchorId: event.target.value }))
+                      }
+                      placeholder="upper_landing"
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Target tile X</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={Math.max(0, map.width - 1)}
+                      value={selectedScenePropTargetX}
+                      onChange={(event) =>
+                        updateScenePropById(selectedSceneProp.id, (item) => ({
+                          ...item,
+                          targetX: event.target.value.trim() ? Number(event.target.value) : undefined
+                        }))
+                      }
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Target tile Y</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={Math.max(0, map.height - 1)}
+                      value={selectedScenePropTargetY}
+                      onChange={(event) =>
+                        updateScenePropById(selectedSceneProp.id, (item) => ({
+                          ...item,
+                          targetY: event.target.value.trim() ? Number(event.target.value) : undefined
+                        }))
+                      }
+                    />
+                  </label>
+                  <div className="field full">
+                    <span>Traversal proof</span>
+                    <div className="map-zone-route-proof">
+                      <strong>{selectedScenePropPublishProof?.headline ?? `stairs ${selectedSceneProp.id}`}</strong>
+                      <small>
+                        {selectedScenePropPublishProof?.detail ??
+                          "Choose a target anchor or both tile coordinates so this stairs prop can move the player."}
+                      </small>
+                    </div>
+                    {selectedScenePropPublishProof ? (
+                      <div className={selectedScenePropPublishProof.ready ? "publish-receipt" : "publish-receipt warning"}>
+                        <div className="publish-receipt-header">
+                          <strong>Publish Contract</strong>
+                          <span>{selectedScenePropPublishProof.ready ? "Ready for Chaos Core" : "Needs authoring fix"}</span>
+                        </div>
+                        <div className="publish-receipt-details">
+                          <span>{selectedScenePropPublishProof.headline}</span>
+                          <span>{selectedScenePropPublishProof.detail}</span>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            ) : null}
             <label className="field full">
               <span>Metadata</span>
               <textarea
                 rows={4}
-                value={serializeKeyValueLines(selectedSceneProp.metadata)}
+                value={selectedScenePropMetadataText}
                 onChange={(event) =>
                   updateScenePropById(selectedSceneProp.id, (item) => ({
                     ...item,
-                    metadata: parseKeyValueLines(event.target.value)
+                    metadata: {
+                      ...getScenePropMetadataWithoutControlledFields(item),
+                      ...parseKeyValueLines(event.target.value)
+                    }
                   }))
                 }
               />
@@ -4307,6 +5093,21 @@ export function MapEditor() {
               </select>
             </label>
             <label className="field">
+              <span>Proximity radius (tiles)</span>
+              <input
+                type="number"
+                min={0}
+                step="0.5"
+                value={selectedEncounterVolume.proximityRadiusTiles ?? 0}
+                onChange={(event) =>
+                  updateEncounterVolumeById(selectedEncounterVolume.id, (item) => ({
+                    ...item,
+                    proximityRadiusTiles: Math.max(0, Number(event.target.value || 0))
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
               <span>X</span>
               <input
                 type="number"
@@ -4389,6 +5190,32 @@ export function MapEditor() {
                 }
               />
             </label>
+            <label className="field field-inline">
+              <span>Repeatable</span>
+              <input
+                type="checkbox"
+                checked={selectedEncounterVolume.repeatable === true}
+                onChange={(event) =>
+                  updateEncounterVolumeById(selectedEncounterVolume.id, (item) => ({
+                    ...item,
+                    repeatable: event.target.checked
+                  }))
+                }
+              />
+            </label>
+            <label className="field field-inline">
+              <span>Announce on activate</span>
+              <input
+                type="checkbox"
+                checked={selectedEncounterVolume.announceOnActivate !== false}
+                onChange={(event) =>
+                  updateEncounterVolumeById(selectedEncounterVolume.id, (item) => ({
+                    ...item,
+                    announceOnActivate: event.target.checked
+                  }))
+                }
+              />
+            </label>
             <label className="field">
               <span>Player entry anchor</span>
               <input
@@ -4437,6 +5264,40 @@ export function MapEditor() {
                 }
               />
             </label>
+            <div className="map-route-proof-card full">
+              <div className="map-route-proof-card__header">
+                <div>
+                  <h4>Encounter Behavior</h4>
+                  <small>Preview how Chaos Core will arm and message this staging volume.</small>
+                </div>
+              </div>
+              <div className="form-grid">
+                <div className="field full">
+                  <span>Runtime proof</span>
+                  <div className="map-zone-route-proof">
+                    <strong>
+                      {selectedEncounterVolume.id} - {selectedEncounterBehaviorSummary}
+                    </strong>
+                    <small>
+                      {selectedEncounterVolume.triggerMode === "proximity"
+                        ? `Chaos Core will arm this volume when the player comes within ${Math.max(
+                            0,
+                            Number(selectedEncounterVolume.proximityRadiusTiles ?? 0)
+                          )} tile${Math.max(0, Number(selectedEncounterVolume.proximityRadiusTiles ?? 0)) === 1 ? "" : "s"} of its bounds.`
+                        : selectedEncounterVolume.triggerMode === "interact"
+                          ? "Chaos Core will only arm this volume through the authored field interaction prompt."
+                          : "Chaos Core will arm this volume as soon as the player enters its authored bounds."}
+                      {selectedEncounterVolume.repeatable
+                        ? " Leaving and re-entering will re-arm it."
+                        : " It will only fully trigger once per field load."}
+                      {selectedEncounterVolume.announceOnActivate === false
+                        ? " Activation pings are suppressed."
+                        : " Activation will show the authored encounter ping."}
+                    </small>
+                  </div>
+                </div>
+              </div>
+            </div>
             <label className="field full">
               <span>Enemy anchor tags</span>
               <textarea
@@ -5306,6 +6167,11 @@ export function MapEditor() {
               <span className="pill accent">{activeVerticalLayer?.name || activeVerticalLayer?.id}</span>
               <span className="pill">{verticalLayerSystem.connectors.length} connectors</span>
               <span className="pill">Step {verticalLayerSystem.elevationStep}</span>
+              <span className={verticalConnectorAdvisoryCount === 0 ? "pill accent" : "pill warning"}>
+                {verticalConnectorAdvisoryCount === 0
+                  ? "Traversal ready"
+                  : `${verticalConnectorAdvisoryCount} traversal warning${verticalConnectorAdvisoryCount === 1 ? "" : "s"}`}
+              </span>
             </div>
             <div className="form-grid">
               <label className="field">
@@ -7124,6 +7990,28 @@ export function MapEditor() {
                 <div className="chip-row">
                   <span className="pill accent">Visual adapter</span>
                   <span className="pill">Step {map3dPreview.previewStep}</span>
+                  {map3dPreview.traversalPropCount > 0 ? (
+                    <span className="pill accent">{map3dPreview.traversalPropCount} traversal prop(s)</span>
+                  ) : null}
+                  {map3dPreview.unresolvedTraversalPropCount > 0 ? (
+                    <span className="pill warning">{map3dPreview.unresolvedTraversalPropCount} traversal prop(s) need targets</span>
+                  ) : null}
+                  {map3dPreview.routeTargetAnchorCount > 0 ? (
+                    <span className="pill accent">{map3dPreview.routeTargetAnchorCount} route target anchor(s)</span>
+                  ) : null}
+                  {map3dPreview.selectedAnchorCount > 0 ? (
+                    <span className="pill accent">{map3dPreview.selectedAnchorCount} selected anchor(s)</span>
+                  ) : null}
+                  {map3dPreview.traversalPropKindCounts.map(([kind, count]) => (
+                    <span key={`preview-prop-kind-${kind}`} className="pill">
+                      {count} {formatPreviewScenePropKind(kind)}
+                    </span>
+                  ))}
+                  {map3dPreview.connectorKindCounts.slice(0, 3).map(([kind, count]) => (
+                    <span key={`preview-connector-kind-${kind}`} className="pill">
+                      {count} {formatPreviewConnectorKind(kind)}
+                    </span>
+                  ))}
                   {map3dPreview.hiddenTileCount > 0 ? (
                     <span className="pill">{map3dPreview.hiddenTileCount} tiles sampled out</span>
                   ) : null}
@@ -7135,6 +8023,10 @@ export function MapEditor() {
                   <span><i className="preview-key walkable" /> Walkable</span>
                   <span><i className="preview-key wall" /> Wall</span>
                   <span><i className="preview-key anchor" /> Anchor</span>
+                  <span><i className="preview-key prop" /> Traversal prop</span>
+                  <span><i className="preview-key guide" /> Local target</span>
+                  <span><i className="preview-key route" /> Route target</span>
+                  <span><i className="preview-key selected" /> Selected</span>
                   <span><i className="preview-key connector" /> Connector</span>
                 </div>
               </div>
@@ -7154,15 +8046,67 @@ export function MapEditor() {
                       viewBox={`0 0 ${map3dPreview.stageWidth} ${map3dPreview.stageHeight}`}
                       aria-hidden="true"
                     >
-                      {map3dPreview.connectorLines.map(({ connector, from, to }) => (
-                        <line
-                          key={connector.id}
-                          x1={from.x}
-                          y1={from.y}
-                          x2={to.x}
-                          y2={to.y}
-                          className={connector.bidirectional ? "map-3d-preview-connector two-way" : "map-3d-preview-connector"}
-                        />
+                      {map3dPreview.connectorLines.map(({ connector, from, to, midpoint, isSelected, label }) => (
+                        <g key={connector.id}>
+                          <line
+                            x1={from.x}
+                            y1={from.y}
+                            x2={to.x}
+                            y2={to.y}
+                            className={[
+                              "map-3d-preview-connector",
+                              connector.bidirectional ? "two-way" : "",
+                              isSelected ? "selected" : ""
+                            ].filter(Boolean).join(" ")}
+                          />
+                          <circle
+                            cx={from.x}
+                            cy={from.y}
+                            r={isSelected ? 4.5 : 3.25}
+                            className={isSelected ? "map-3d-preview-connector-node selected" : "map-3d-preview-connector-node"}
+                          />
+                          <circle
+                            cx={to.x}
+                            cy={to.y}
+                            r={isSelected ? 4.5 : 3.25}
+                            className={isSelected ? "map-3d-preview-connector-node target selected" : "map-3d-preview-connector-node target"}
+                          />
+                          <text
+                            x={midpoint.x}
+                            y={midpoint.y - 8}
+                            textAnchor="middle"
+                            className={isSelected ? "map-3d-preview-connector-label selected" : "map-3d-preview-connector-label"}
+                          >
+                            {label}
+                          </text>
+                        </g>
+                      ))}
+                      {map3dPreview.traversalPropGuides.map(({ prop, from, to, isSelected, status }) => (
+                        <g key={`preview-prop-guide-${prop.id}`}>
+                          <line
+                            x1={from.x}
+                            y1={from.y}
+                            x2={to.x}
+                            y2={to.y}
+                            className={[
+                              "map-3d-preview-prop-guide",
+                              prop.kind,
+                              status,
+                              isSelected ? "selected" : ""
+                            ].filter(Boolean).join(" ")}
+                          />
+                          <circle
+                            cx={to.x}
+                            cy={to.y}
+                            r={isSelected ? 5 : 4}
+                            className={[
+                              "map-3d-preview-prop-guide-target",
+                              prop.kind,
+                              status,
+                              isSelected ? "selected" : ""
+                            ].filter(Boolean).join(" ")}
+                          />
+                        </g>
                       ))}
                     </svg>
                   ) : null}
@@ -7194,18 +8138,168 @@ export function MapEditor() {
                       {tile.wall ? <span className="map-3d-preview-wall-face" /> : null}
                     </button>
                   ))}
-                  {map3dPreview.anchors.map(({ anchor, style }) => (
-                    <button
-                      key={`preview-anchor-${anchor.id}`}
-                      type="button"
-                      className={`map-3d-preview-anchor ${anchor.kind}`}
+                  {map3dPreview.traversalProps.map(({ prop, style, isSelected, label, targetSummary, proofSummary, status }) => (
+                    <div
+                      key={`preview-prop-${prop.id}`}
+                      className={[
+                        "map-3d-preview-prop-wrap",
+                        prop.kind,
+                        status,
+                        isSelected ? "selected" : ""
+                      ].filter(Boolean).join(" ")}
                       style={style}
-                      title={`${anchor.kind}: ${anchor.label || anchor.id}`}
-                      onClick={() => focusSpawnAnchor(anchor.x, anchor.y)}
                     >
-                      <span>{anchor.kind === "player" ? "P" : anchor.kind === "enemy" ? "E" : anchor.kind === "portal_exit" ? "X" : "A"}</span>
-                    </button>
+                      <button
+                        type="button"
+                        className={[
+                          "map-3d-preview-prop",
+                          prop.kind,
+                          status,
+                          isSelected ? "selected" : ""
+                        ].filter(Boolean).join(" ")}
+                        title={`${label}: ${prop.label || prop.id} -> ${targetSummary}`}
+                        onClick={() => {
+                          setSelectedScenePropId(prop.id);
+                          setSelectedObjectId(null);
+                          setSelectedEncounterId(null);
+                          setSelectedZoneId(null);
+                          setSelectedCell(null);
+                          setSelectedNpcMarkerEntryKey(null);
+                          setTool("select");
+                        }}
+                      >
+                        <span>{getPreviewScenePropGlyph(prop.kind)}</span>
+                      </button>
+                      <span
+                        className={[
+                          "map-3d-preview-prop-label",
+                          status,
+                          isSelected ? "selected" : ""
+                        ].filter(Boolean).join(" ")}
+                      >
+                        {prop.label || prop.id}
+                      </span>
+                      {(isSelected || status !== "ready") && proofSummary ? (
+                        <span className={isSelected ? "map-3d-preview-prop-target selected" : "map-3d-preview-prop-target"}>
+                          {proofSummary}
+                        </span>
+                      ) : null}
+                    </div>
                   ))}
+                  {map3dPreview.anchors.map(({ anchor, style, isSelected, isRouteTarget, label }) => (
+                    <div
+                      key={`preview-anchor-${anchor.id}`}
+                      className={[
+                        "map-3d-preview-anchor-wrap",
+                        isSelected ? "selected" : "",
+                        isRouteTarget ? "route-target" : ""
+                      ].filter(Boolean).join(" ")}
+                      style={style}
+                    >
+                      <button
+                        type="button"
+                        className={[
+                          "map-3d-preview-anchor",
+                          anchor.kind,
+                          isSelected ? "selected" : "",
+                          isRouteTarget ? "route-target" : ""
+                        ].filter(Boolean).join(" ")}
+                        title={`${anchor.kind}: ${label}`}
+                        onClick={() => focusSpawnAnchor(anchor.x, anchor.y)}
+                      >
+                        <span>{anchor.kind === "player" ? "P" : anchor.kind === "enemy" ? "E" : anchor.kind === "portal_exit" ? "X" : "A"}</span>
+                      </button>
+                      {(isSelected || isRouteTarget || anchor.kind === "player" || anchor.kind === "portal_exit") ? (
+                        <span
+                          className={[
+                            "map-3d-preview-anchor-label",
+                            isSelected ? "selected" : "",
+                            isRouteTarget ? "route-target" : ""
+                          ].filter(Boolean).join(" ")}
+                        >
+                          {label}
+                        </span>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="map-route-proof-card">
+              <div className="map-route-proof-card__header">
+                <div>
+                  <h4>Traversal Callouts</h4>
+                  <small>Preview the authored vertical links and the anchors Chaos Core will target.</small>
+                </div>
+              </div>
+              <div className="form-grid compact">
+                <div className="field full">
+                  <span>Vertical links</span>
+                  <div className="database-list compact">
+                    {map3dPreview.connectorLines.length > 0 ? (
+                      map3dPreview.connectorLines.slice(0, 6).map(({ connector, label, isSelected }) => (
+                        <div
+                          key={`preview-callout-${connector.id}`}
+                          className={isSelected ? "database-entry selected" : "database-entry"}
+                        >
+                          <strong>{label}</strong>
+                          <small>
+                            {connector.from.layerId} {connector.from.x},{connector.from.y} to {connector.to.layerId} {connector.to.x},{connector.to.y}
+                          </small>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="empty-state compact">No vertical connectors published into the adapter yet.</div>
+                    )}
+                  </div>
+                </div>
+                <div className="field full">
+                  <span>Important anchors</span>
+                  <div className="database-list compact">
+                    {map3dPreview.anchors.filter(({ isSelected, isRouteTarget, anchor }) => isSelected || isRouteTarget || anchor.kind === "player" || anchor.kind === "portal_exit").length > 0 ? (
+                      map3dPreview.anchors
+                        .filter(({ isSelected, isRouteTarget, anchor }) => isSelected || isRouteTarget || anchor.kind === "player" || anchor.kind === "portal_exit")
+                        .slice(0, 6)
+                        .map(({ anchor, isSelected, isRouteTarget, label }) => (
+                          <div
+                            key={`preview-anchor-callout-${anchor.id}`}
+                            className={isSelected ? "database-entry selected" : "database-entry"}
+                          >
+                            <strong>{label}</strong>
+                            <small>
+                              {anchor.kind} at {anchor.x},{anchor.y}
+                              {anchor.layerId ? ` on ${anchor.layerId}` : ""}
+                              {isRouteTarget ? " • route target" : ""}
+                              {isSelected ? " • selected" : ""}
+                            </small>
+                          </div>
+                        ))
+                    ) : (
+                      <div className="empty-state compact">No highlighted route-target or selected anchors yet.</div>
+                    )}
+                  </div>
+                </div>
+                <div className="field full">
+                  <span>Traversal props</span>
+                  <div className="database-list compact">
+                    {map3dPreview.traversalProps.length > 0 ? (
+                      map3dPreview.traversalProps.slice(0, 6).map(({ prop, targetSummary, isSelected, label }) => (
+                        <div
+                          key={`preview-prop-callout-${prop.id}`}
+                          className={isSelected ? "database-entry selected" : "database-entry"}
+                        >
+                          <strong>{label}: {prop.label || prop.id}</strong>
+                          <small>
+                            {targetSummary}
+                            {prop.kind === "stairs" ? " | local traversal target" : " | outbound route target"}
+                            {isSelected ? " | selected" : ""}
+                          </small>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="empty-state compact">No authored stairs, doors, or portals are on this map yet.</div>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

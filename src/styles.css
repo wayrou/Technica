@@ -883,6 +883,11 @@ textarea.authoring-editor {
   grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.85fr);
 }
 
+.workspace-grid.blueprint-grid.stacked,
+.workspace-grid.blueprint-grid.stacked.validation-collapsed {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .workspace-grid.blueprint-grid.validation-collapsed {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -919,6 +924,12 @@ textarea.authoring-editor {
 
 .tool-suite-column-narrow {
   align-self: start;
+}
+
+.card-editor-stack {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
 }
 
 .panel {
@@ -2177,9 +2188,30 @@ textarea.authoring-editor {
   background: rgba(216, 194, 128, 0.9);
 }
 
+.preview-key.route {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(130, 235, 207, 0.96);
+  box-shadow: 0 0 0 2px rgba(130, 235, 207, 0.24);
+}
+
+.preview-key.selected {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: rgba(255, 224, 118, 0.96);
+  box-shadow: 0 0 0 2px rgba(255, 224, 118, 0.28);
+}
+
 .preview-key.connector {
   height: 2px;
   background: rgba(126, 219, 255, 0.82);
+}
+
+.preview-key.guide {
+  height: 2px;
+  background: linear-gradient(90deg, rgba(243, 181, 98, 0.95), rgba(255, 224, 118, 0.95));
 }
 
 .map-3d-preview-viewport {
@@ -2227,6 +2259,79 @@ textarea.authoring-editor {
 .map-3d-preview-connector.two-way {
   stroke: rgba(161, 244, 213, 0.82);
   stroke-dasharray: 2 4;
+}
+
+.map-3d-preview-connector.selected {
+  stroke: rgba(255, 224, 118, 0.96);
+  stroke-width: 3.25;
+  stroke-dasharray: none;
+}
+
+.map-3d-preview-connector-node {
+  fill: rgba(126, 219, 255, 0.96);
+  stroke: rgba(5, 15, 22, 0.92);
+  stroke-width: 1.5;
+}
+
+.map-3d-preview-connector-node.target {
+  fill: rgba(243, 181, 98, 0.96);
+}
+
+.map-3d-preview-connector-node.selected {
+  fill: rgba(255, 224, 118, 0.98);
+}
+
+.map-3d-preview-connector-label {
+  fill: rgba(214, 242, 255, 0.92);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  paint-order: stroke;
+  stroke: rgba(3, 11, 15, 0.9);
+  stroke-width: 3px;
+}
+
+.map-3d-preview-connector-label.selected {
+  fill: rgba(255, 233, 153, 0.98);
+}
+
+.map-3d-preview-prop-guide {
+  stroke: rgba(243, 181, 98, 0.84);
+  stroke-dasharray: 3 6;
+  stroke-linecap: round;
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 6px rgba(243, 181, 98, 0.22));
+}
+
+.map-3d-preview-prop-guide.stairs {
+  stroke: rgba(255, 224, 118, 0.9);
+}
+
+.map-3d-preview-prop-guide.warning {
+  stroke: rgba(236, 107, 107, 0.88);
+}
+
+.map-3d-preview-prop-guide.selected {
+  stroke-width: 3.25;
+  stroke-dasharray: none;
+}
+
+.map-3d-preview-prop-guide-target {
+  fill: rgba(243, 181, 98, 0.96);
+  stroke: rgba(5, 15, 22, 0.92);
+  stroke-width: 1.5;
+}
+
+.map-3d-preview-prop-guide-target.stairs {
+  fill: rgba(255, 224, 118, 0.98);
+}
+
+.map-3d-preview-prop-guide-target.warning {
+  fill: rgba(236, 107, 107, 0.96);
+}
+
+.map-3d-preview-prop-guide-target.selected {
+  stroke-width: 2;
 }
 
 .map-3d-preview-tile {
@@ -2292,6 +2397,100 @@ textarea.authoring-editor {
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.38);
 }
 
+.map-3d-preview-prop-wrap {
+  position: absolute;
+  z-index: 970;
+  transform: translate(-50%, -80%);
+}
+
+.map-3d-preview-prop-wrap.selected,
+.map-3d-preview-prop-wrap.warning {
+  z-index: 985;
+}
+
+.map-3d-preview-prop {
+  position: absolute;
+  z-index: 970;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  border-radius: 8px;
+  background: rgba(243, 181, 98, 0.94);
+  color: #1e1205;
+  font-size: 0.64rem;
+  font-weight: 900;
+  transform: translate(-50%, -76%);
+  box-shadow: 0 10px 18px rgba(0, 0, 0, 0.34), 0 0 18px rgba(243, 181, 98, 0.18);
+}
+
+.map-3d-preview-prop.portal {
+  background: rgba(126, 219, 255, 0.94);
+  color: #071720;
+}
+
+.map-3d-preview-prop.stairs {
+  background: rgba(255, 224, 118, 0.96);
+  color: #221602;
+}
+
+.map-3d-preview-prop.warning {
+  box-shadow:
+    0 10px 18px rgba(0, 0, 0, 0.34),
+    0 0 0 3px rgba(236, 107, 107, 0.24),
+    0 0 18px rgba(236, 107, 107, 0.24);
+}
+
+.map-3d-preview-prop.selected {
+  box-shadow:
+    0 10px 18px rgba(0, 0, 0, 0.34),
+    0 0 0 3px rgba(255, 224, 118, 0.34),
+    0 0 20px rgba(255, 224, 118, 0.28);
+}
+
+.map-3d-preview-prop-label,
+.map-3d-preview-prop-target {
+  position: absolute;
+  left: 50%;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(5, 17, 22, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--ink-soft);
+  font-size: 0.68rem;
+  font-weight: 700;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+}
+
+.map-3d-preview-prop-label {
+  top: 26px;
+}
+
+.map-3d-preview-prop-label.warning {
+  color: #ffd7d7;
+  border-color: rgba(236, 107, 107, 0.32);
+}
+
+.map-3d-preview-prop-label.selected {
+  color: #fff3bf;
+  border-color: rgba(255, 224, 118, 0.28);
+}
+
+.map-3d-preview-prop-target {
+  top: 52px;
+  color: var(--text-muted);
+  font-size: 0.62rem;
+  font-weight: 600;
+}
+
+.map-3d-preview-prop-target.selected {
+  color: #ffe7a1;
+  border-color: rgba(255, 224, 118, 0.24);
+}
+
 .map-3d-preview-anchor {
   position: absolute;
   z-index: 980;
@@ -2309,6 +2508,17 @@ textarea.authoring-editor {
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.36), 0 0 18px rgba(216, 194, 128, 0.28);
 }
 
+.map-3d-preview-anchor-wrap {
+  position: absolute;
+  z-index: 980;
+  transform: translate(-50%, -72%);
+}
+
+.map-3d-preview-anchor-wrap.selected,
+.map-3d-preview-anchor-wrap.route-target {
+  z-index: 990;
+}
+
 .map-3d-preview-anchor.enemy {
   background: rgba(236, 107, 107, 0.94);
   color: #260707;
@@ -2322,6 +2532,46 @@ textarea.authoring-editor {
 .map-3d-preview-anchor.portal_exit {
   background: rgba(126, 219, 255, 0.94);
   color: #061824;
+}
+
+.map-3d-preview-anchor.selected {
+  box-shadow:
+    0 8px 16px rgba(0, 0, 0, 0.36),
+    0 0 0 3px rgba(255, 224, 118, 0.44),
+    0 0 20px rgba(255, 224, 118, 0.34);
+}
+
+.map-3d-preview-anchor.route-target {
+  box-shadow:
+    0 8px 16px rgba(0, 0, 0, 0.36),
+    0 0 0 3px rgba(130, 235, 207, 0.34),
+    0 0 18px rgba(130, 235, 207, 0.28);
+}
+
+.map-3d-preview-anchor-label {
+  position: absolute;
+  top: 25px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(5, 17, 22, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--ink-soft);
+  font-size: 0.68rem;
+  font-weight: 700;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+}
+
+.map-3d-preview-anchor-label.selected {
+  color: #fff3bf;
+  border-color: rgba(255, 224, 118, 0.3);
+}
+
+.map-3d-preview-anchor-label.route-target {
+  color: #bff7e8;
+  border-color: rgba(130, 235, 207, 0.28);
 }
 
 .map-3d-readiness-grid {
@@ -4068,6 +4318,13 @@ textarea.authoring-editor {
   height: 100%;
   min-height: 380px;
   width: 100%;
+  touch-action: none;
+  user-select: none;
+}
+
+.operation-preview-svg.dragging,
+.operation-preview-svg.dragging .operation-preview-node {
+  cursor: grabbing;
 }
 
 .operation-preview-edge {
@@ -4077,6 +4334,10 @@ textarea.authoring-editor {
 
 .operation-preview-node {
   cursor: pointer;
+}
+
+.operation-preview-node.dragging circle:first-child {
+  filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.22));
 }
 
 .operation-preview-node-ring {

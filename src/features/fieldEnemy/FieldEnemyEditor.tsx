@@ -3,11 +3,23 @@ import { ChaosCoreDatabasePanel } from "../../components/ChaosCoreDatabasePanel"
 import { ImageAssetField } from "../../components/ImageAssetField";
 import { Panel } from "../../components/Panel";
 import { createBlankFieldEnemy, createSampleFieldEnemy } from "../../data/sampleFieldEnemy";
+import {
+  applyFieldEnemyPresentationPreset,
+  FIELD_ENEMY_PRESENTATION_PRESETS,
+  findFieldEnemyPresentationPreset,
+  getActorMaterialSuggestions
+} from "../presentation/actorPresentationCatalog";
 import { useChaosCoreDatabase } from "../../hooks/useChaosCoreDatabase";
 import { StructuredDocumentStudio } from "../content/StructuredDocumentStudio";
 import type { ExportTarget } from "../../types/common";
 import { mergeFactionOptions } from "../../types/faction";
-import type { FieldEnemyDocument, FieldEnemyItemDropDocument, FieldEnemyPresentationDocument } from "../../types/fieldEnemy";
+import type {
+  FieldEnemyAggressionMode,
+  FieldEnemyDisciplineMode,
+  FieldEnemyDocument,
+  FieldEnemyItemDropDocument,
+  FieldEnemyPresentationDocument
+} from "../../types/fieldEnemy";
 import type { MapDocument } from "../../types/map";
 import { resourceKeys, resourceLabels } from "../../types/resources";
 import type { LoadedChaosCoreDatabaseEntry } from "../../utils/chaosCoreDatabase";
@@ -63,6 +75,32 @@ function readNumber(value: unknown, fallback: number) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
+const fieldEnemyAggressionOptions: Array<{ value: FieldEnemyAggressionMode; label: string }> = [
+  { value: "default", label: "Default" },
+  { value: "guard", label: "Guard" },
+  { value: "rush", label: "Rush" },
+  { value: "ambush", label: "Ambush" },
+];
+
+const fieldEnemyDisciplineOptions: Array<{ value: FieldEnemyDisciplineMode; label: string }> = [
+  { value: "default", label: "Default" },
+  { value: "hold", label: "Hold" },
+  { value: "anchor", label: "Anchor" },
+  { value: "flank", label: "Flank" },
+];
+
+function isFieldEnemyAggressionMode(value: unknown): value is FieldEnemyAggressionMode {
+  return typeof value === "string" && fieldEnemyAggressionOptions.some((option) => option.value === value);
+}
+
+function isFieldEnemyDisciplineMode(value: unknown): value is FieldEnemyDisciplineMode {
+  return typeof value === "string" && fieldEnemyDisciplineOptions.some((option) => option.value === value);
+}
+
+function getFieldEnemyBehaviorLabel(value: FieldEnemyAggressionMode | FieldEnemyDisciplineMode) {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
 function normalizeFieldEnemyDocument(value: unknown): FieldEnemyDocument {
   const fallback = createBlankFieldEnemy();
   const record = toRecord(value);
@@ -98,6 +136,7 @@ function normalizeFieldEnemyDocument(value: unknown): FieldEnemyDocument {
         presentation?.mode === "model_3d" || presentation?.mode === "billboard_sprite"
           ? presentation.mode
           : fallback.presentation?.mode ?? "billboard_sprite",
+      assetPresetId: readString(presentation?.assetPresetId, fallback.presentation?.assetPresetId ?? ""),
       modelKey: readString(presentation?.modelKey, fallback.presentation?.modelKey ?? ""),
       modelAssetPath: readString(presentation?.modelAssetPath, fallback.presentation?.modelAssetPath ?? ""),
       materialKey: readString(presentation?.materialKey, fallback.presentation?.materialKey ?? ""),
@@ -108,6 +147,16 @@ function normalizeFieldEnemyDocument(value: unknown): FieldEnemyDocument {
           ? presentation.facingMode
           : fallback.presentation?.facingMode ?? "camera",
       previewPose: readString(presentation?.previewPose, fallback.presentation?.previewPose ?? "idle"),
+      aggression: isFieldEnemyAggressionMode(presentation?.aggression)
+        ? presentation.aggression
+        : isFieldEnemyAggressionMode(presentationMetadata?.aggression)
+          ? presentationMetadata.aggression
+          : fallback.presentation?.aggression ?? "default",
+      discipline: isFieldEnemyDisciplineMode(presentation?.discipline)
+        ? presentation.discipline
+        : isFieldEnemyDisciplineMode(presentationMetadata?.discipline)
+          ? presentationMetadata.discipline
+          : fallback.presentation?.discipline ?? "default",
       metadata: presentationMetadata
         ? Object.fromEntries(Object.entries(presentationMetadata).map(([key, entry]) => [key, String(entry)]))
         : fallback.presentation?.metadata ?? {}
@@ -388,15 +437,50 @@ export function FieldEnemyEditor() {
           const patchPresentation = (updater: (current: FieldEnemyPresentationDocument) => FieldEnemyPresentationDocument) =>
             patchFieldEnemy((current) => ({
               ...current,
-              presentation: updater(current.presentation ?? defaultPresentation)
+              presentation: (() => {
+                const nextPresentation = updater(current.presentation ?? defaultPresentation);
+                return {
+                  ...nextPresentation,
+                  metadata: {
+                    ...(nextPresentation.metadata ?? {}),
+                    aggression: nextPresentation.aggression,
+                    discipline: nextPresentation.discipline
+                  }
+                };
+              })()
             }));
           const presentation = fieldEnemy.presentation ?? defaultPresentation;
+          const presentationMetadataWithoutBehavior = Object.fromEntries(
+            Object.entries(fieldEnemy.presentation?.metadata ?? {}).filter(([key]) => key !== "aggression" && key !== "discipline")
+          );
           const spriteMetadataPath = fieldEnemy.metadata.spritePath?.trim() ?? "";
           const hasSpriteSource = Boolean(fieldEnemy.spriteAsset?.dataUrl || fieldEnemy.spriteKey.trim() || spriteMetadataPath);
           const hasModelSource = Boolean(presentation.modelKey.trim() || presentation.modelAssetPath.trim());
           const presentationReady = presentation.mode === "model_3d" ? hasModelSource : hasSpriteSource;
+          const presentationPreset = findFieldEnemyPresentationPreset(presentation.assetPresetId);
+          const materialSuggestions = getActorMaterialSuggestions(
+            FIELD_ENEMY_PRESENTATION_PRESETS,
+            presentation.assetPresetId,
+            presentation.modelKey,
+            presentation.materialKey
+          );
+          const modelSuggestions = Array.from(
+            new Set(FIELD_ENEMY_PRESENTATION_PRESETS.map((preset) => preset.modelKey.trim()).filter(Boolean))
+          );
           const spawnTargetSummary = summarizeFieldEnemySpawnTargets(fieldEnemy);
           const dropSummary = summarizeFieldEnemyDrops(fieldEnemy);
+          const behaviorSummary = `${getFieldEnemyBehaviorLabel(presentation.aggression)} aggression // ${getFieldEnemyBehaviorLabel(presentation.discipline)} discipline`;
+          const presentationSummary = presentationPreset
+            ? presentationPreset.summary
+            : presentation.mode === "model_3d"
+              ? presentation.modelKey.trim()
+                ? `Manual model '${presentation.modelKey.trim()}'`
+                : presentation.modelAssetPath.trim()
+                  ? `Manual asset path '${presentation.modelAssetPath.trim()}'`
+                  : "No model source selected yet."
+              : hasSpriteSource
+                ? "Billboard sprite presentation uses the enemy sprite source."
+                : "Billboard sprite presentation still needs a sprite source.";
           const previewScale = Math.max(0.35, Math.min(2.25, Number.isFinite(presentation.scale) ? presentation.scale : 1));
           const previewWidth = Math.max(34, Math.min(132, fieldEnemy.stats.width * previewScale));
           const previewHeight = Math.max(34, Math.min(132, fieldEnemy.stats.height * previewScale));
@@ -1072,12 +1156,20 @@ export function FieldEnemyEditor() {
                     <span>{presentation.previewPose || "idle"} pose</span>
                   </div>
                   <div className="field-enemy-preview-summary">
+                    <strong>Behavior</strong>
+                    <span>{behaviorSummary}</span>
+                  </div>
+                  <div className="field-enemy-preview-summary">
                     <strong>Spawn targets</strong>
                     <span>{spawnTargetSummary.length > 0 ? spawnTargetSummary.join(" // ") : "No spawn target configured yet."}</span>
                   </div>
                   <div className="field-enemy-preview-summary">
                     <strong>Drops</strong>
                     <span>{dropSummary.length > 0 ? dropSummary.join(" // ") : "No drops configured."}</span>
+                  </div>
+                  <div className="field-enemy-preview-summary">
+                    <strong>Asset workflow</strong>
+                    <span>{presentationSummary}</span>
                   </div>
                   <div className="toolbar">
                     <button
@@ -1088,6 +1180,8 @@ export function FieldEnemyEditor() {
                           ...current,
                           mode: "billboard_sprite",
                           facingMode: "camera",
+                          aggression: "guard",
+                          discipline: "hold",
                           scale: current.scale || 1,
                           previewPose: current.previewPose || "idle"
                         }))
@@ -1103,6 +1197,8 @@ export function FieldEnemyEditor() {
                           ...current,
                           mode: "model_3d",
                           facingMode: "movement",
+                          aggression: "rush",
+                          discipline: "flank",
                           scale: current.scale || 1,
                           previewPose: current.previewPose || "idle"
                         }))
@@ -1115,6 +1211,81 @@ export function FieldEnemyEditor() {
                     </button>
                   </div>
                 </div>
+              </div>
+              <div className="map-route-proof-card">
+                <div className="map-route-proof-card__header">
+                  <div>
+                    <h4>Presentation Kit</h4>
+                    <small>Apply curated enemy presentation defaults, then tune behavior and visuals for Chaos Core.</small>
+                  </div>
+                  <span className={presentationReady ? "pill accent" : "pill warning"}>
+                    {presentationReady ? "Ready" : "Needs source"}
+                  </span>
+                </div>
+                <div className="form-grid compact">
+                  <label className="field">
+                    <span>Preset</span>
+                    <select
+                      value={presentation.assetPresetId ?? ""}
+                      onChange={(event) =>
+                        patchPresentation((current) => ({
+                          ...current,
+                          assetPresetId: event.target.value
+                        }))
+                      }
+                    >
+                      <option value="">Custom / manual</option>
+                      {presentation.assetPresetId &&
+                      !FIELD_ENEMY_PRESENTATION_PRESETS.some((preset) => preset.id === presentation.assetPresetId) ? (
+                        <option value={presentation.assetPresetId}>{presentation.assetPresetId}</option>
+                      ) : null}
+                      {FIELD_ENEMY_PRESENTATION_PRESETS.map((preset) => (
+                        <option key={preset.id} value={preset.id}>
+                          {preset.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Suggested material</span>
+                    <input
+                      list="field-enemy-presentation-materials"
+                      value={presentation.materialKey}
+                      onChange={(event) =>
+                        patchPresentation((current) => ({ ...current, materialKey: event.target.value }))
+                      }
+                      placeholder="Pick or type a material key"
+                    />
+                  </label>
+                  <div className="field full">
+                    <span>Kit summary</span>
+                    <div className="map-zone-route-proof">
+                      <strong>{presentationPreset ? presentationPreset.label : "Manual custom presentation"}</strong>
+                      <small>{presentationSummary}</small>
+                    </div>
+                  </div>
+                  <div className="toolbar full">
+                    <button
+                      type="button"
+                      className="ghost-button"
+                      disabled={!presentation.assetPresetId}
+                      onClick={() => {
+                        const preset = findFieldEnemyPresentationPreset(presentation.assetPresetId);
+                        if (!preset) {
+                          return;
+                        }
+                        patchPresentation((current) => applyFieldEnemyPresentationPreset(current, preset));
+                      }}
+                    >
+                      Apply preset values
+                    </button>
+                  </div>
+                </div>
+                <datalist id="field-enemy-presentation-materials">
+                  {materialSuggestions.map((materialKey) => (
+                    <option key={materialKey} value={materialKey} />
+                  ))}
+                </datalist>
               </div>
               <div className="form-grid">
                 <label className="field">
@@ -1135,6 +1306,7 @@ export function FieldEnemyEditor() {
                 <label className="field">
                   <span>Model key</span>
                   <input
+                    list="field-enemy-presentation-models"
                     value={fieldEnemy.presentation?.modelKey ?? ""}
                     onChange={(event) => patchPresentation((current) => ({ ...current, modelKey: event.target.value }))}
                   />
@@ -1149,10 +1321,16 @@ export function FieldEnemyEditor() {
                 <label className="field">
                   <span>Material key</span>
                   <input
+                    list="field-enemy-presentation-materials"
                     value={fieldEnemy.presentation?.materialKey ?? ""}
                     onChange={(event) => patchPresentation((current) => ({ ...current, materialKey: event.target.value }))}
                   />
                 </label>
+                <datalist id="field-enemy-presentation-models">
+                  {modelSuggestions.map((modelKey) => (
+                    <option key={modelKey} value={modelKey} />
+                  ))}
+                </datalist>
                 <label className="field">
                   <span>Scale</span>
                   <input
@@ -1195,12 +1373,57 @@ export function FieldEnemyEditor() {
                     onChange={(event) => patchPresentation((current) => ({ ...current, previewPose: event.target.value }))}
                   />
                 </label>
+                <label className="field">
+                  <span>Aggression</span>
+                  <select
+                    value={fieldEnemy.presentation?.aggression ?? "default"}
+                    onChange={(event) =>
+                      patchPresentation((current) => ({
+                        ...current,
+                        aggression: isFieldEnemyAggressionMode(event.target.value) ? event.target.value : "default"
+                      }))
+                    }
+                  >
+                    {fieldEnemyAggressionOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Discipline</span>
+                  <select
+                    value={fieldEnemy.presentation?.discipline ?? "default"}
+                    onChange={(event) =>
+                      patchPresentation((current) => ({
+                        ...current,
+                        discipline: isFieldEnemyDisciplineMode(event.target.value) ? event.target.value : "default"
+                      }))
+                    }
+                  >
+                    {fieldEnemyDisciplineOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <label className="field full">
                   <span>Presentation metadata</span>
                   <textarea
                     rows={3}
-                    value={serializeKeyValueLines(fieldEnemy.presentation?.metadata ?? {})}
-                    onChange={(event) => patchPresentation((current) => ({ ...current, metadata: parseKeyValueLines(event.target.value) }))}
+                    value={serializeKeyValueLines(presentationMetadataWithoutBehavior)}
+                    onChange={(event) =>
+                      patchPresentation((current) => ({
+                        ...current,
+                        metadata: {
+                          ...parseKeyValueLines(event.target.value),
+                          aggression: current.aggression,
+                          discipline: current.discipline
+                        }
+                      }))
+                    }
                   />
                 </label>
               </div>

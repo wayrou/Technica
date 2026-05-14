@@ -1,4 +1,5 @@
 import { ChaosCoreDatabasePanel } from "../../components/ChaosCoreDatabasePanel";
+import { CardFacePreview } from "../../components/CardFacePreview";
 import { EffectFlowComposer } from "../../components/EffectFlowComposer";
 import { ImageAssetField } from "../../components/ImageAssetField";
 import { Panel } from "../../components/Panel";
@@ -65,14 +66,14 @@ export function CardEditor() {
       touchDocument={(document) => touchCard(normalize(document))}
       replacePrompt="Replace the current card draft with the imported file?"
       invalidImportMessage="That file does not look like a Technica card draft or export."
+      layout="stacked"
       renderWorkspace={({ document, setDocument, patchDocument, loadSample, clearDocument, importDraft, saveDraft, exportBundle, isMobile, canSendToDesktop, isSendingToDesktop, sendToDesktop }) => {
         const card = normalize(document);
         const legacyEffects = createLegacyCardEffectsFromFlow(card.effectFlow);
         const patchCard = (updater: (current: CardDocument) => CardDocument) => patchDocument((current) => touchCard(normalize(updater(normalize(current)))));
 
         return (
-          <div className="tool-suite-grid">
-            <div className="tool-suite-column">
+          <div className="card-editor-stack">
               <Panel
                 title="Card Setup"
                 subtitle="Define battle card identity, metadata, and the shared flow script Chaos Core will execute."
@@ -102,8 +103,13 @@ export function CardEditor() {
                 </div>
               </Panel>
 
-            </div>
-            <div className="tool-suite-column">
+              <Panel
+                title="Live Card Preview"
+                subtitle="See the card face as it will appear in Chaos Core while you edit cost, art, title, and compiled copy."
+              >
+                <CardFacePreview document={card} />
+              </Panel>
+
               <ChaosCoreDatabasePanel
                 contentType="card"
                 currentDocument={card}
@@ -111,12 +117,11 @@ export function CardEditor() {
                 onLoadEntry={(entry) => loadDatabaseEntry(entry, setDocument)}
                 subtitle="Publish card runtime JSON and card art directly into the Chaos Core repo, then reload the live card database here."
               />
-            </div>
 
             <Panel
               title="Effect Flow Composer"
               subtitle="Build card behavior as a deterministic DAG with selectors, conditions, and actions across the full workspace width."
-              className="tool-suite-span-full effect-flow-panel"
+              className="effect-flow-panel"
               actions={<button type="button" className="ghost-button" onClick={() => void openTechnicaPopout("card-flow", "Card Effect Flow")}>Pop out</button>}
             >
               <EffectFlowComposer

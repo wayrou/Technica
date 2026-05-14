@@ -147,6 +147,7 @@ export interface MapZone {
 export interface MapSceneProp {
   id: string;
   kind: MapScenePropKind;
+  assetPresetId?: string;
   label: string;
   x: number;
   y: number;
@@ -163,6 +164,13 @@ export interface MapSceneProp {
   sceneId: string;
   blocksMovement: boolean;
   providesCover: boolean;
+  routeTargetMapId?: string;
+  routeEntryPointId?: string;
+  doorId?: string;
+  portalId?: string;
+  targetAnchorId?: string;
+  targetX?: number;
+  targetY?: number;
   metadata: KeyValueRecord;
 }
 
@@ -183,6 +191,9 @@ export interface MapEncounterVolume {
   linkedFieldEnemyIds: string[];
   tacticalEncounterId: string;
   clearBehavior: MapEncounterClearBehavior;
+  proximityRadiusTiles?: number;
+  repeatable?: boolean;
+  announceOnActivate?: boolean;
   metadata: KeyValueRecord;
 }
 

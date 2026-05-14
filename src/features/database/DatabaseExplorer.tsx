@@ -120,6 +120,7 @@ export function DatabaseExplorer({ onOpenEditor }: DatabaseExplorerProps) {
     desktopEnabled,
     sessionEnabled,
     repoPath,
+    repoTargets,
     repoPathDraft,
     setRepoPathDraft,
     commitRepoPath,
@@ -397,21 +398,36 @@ export function DatabaseExplorer({ onOpenEditor }: DatabaseExplorerProps) {
 
           <div className="form-grid">
             {desktopEnabled ? (
-              <label className="field full">
-                <span>Chaos Core repo path</span>
-                <div className="toolbar repo-path-toolbar">
-                  <input
+              <>
+                <label className="field full">
+                  <span>Publish target</span>
+                  <select
                     value={repoPathDraft}
-                    onChange={(event) => setRepoPathDraft(event.target.value)}
-                    onBlur={() => commitRepoPath()}
-                    onKeyDown={handleRepoPathKeyDown}
-                    placeholder="/absolute/path/to/chaos-core"
-                  />
-                  <button type="button" className="ghost-button" onClick={() => commitRepoPath()}>
-                    Apply
-                  </button>
-                </div>
-              </label>
+                    onChange={(event) => commitRepoPath(event.target.value)}
+                  >
+                    {repoTargets.map((target) => (
+                      <option key={target.path} value={target.path}>
+                        {target.label} - {target.path}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field full">
+                  <span>Chaos Core repo path</span>
+                  <div className="toolbar repo-path-toolbar">
+                    <input
+                      value={repoPathDraft}
+                      onChange={(event) => setRepoPathDraft(event.target.value)}
+                      onBlur={() => commitRepoPath()}
+                      onKeyDown={handleRepoPathKeyDown}
+                      placeholder="/absolute/path/to/chaos-core"
+                    />
+                    <button type="button" className="ghost-button" onClick={() => commitRepoPath()}>
+                      Apply
+                    </button>
+                  </div>
+                </label>
+              </>
             ) : (
               <div className="field full">
                 <span>Database source</span>

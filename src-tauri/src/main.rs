@@ -219,9 +219,45 @@ fn ensure_dir(path: &Path) -> Result<(), String> {
 }
 
 fn technica_root() -> Result<PathBuf, String> {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .map(PathBuf::from)
+    fn looks_like_technica_root(path: &Path) -> bool {
+        let package_json = path.join("package.json");
+        let snapshot_script = path.join("scripts").join("chaosCoreDatabaseSnapshot.ts");
+        if !package_json.exists() || !snapshot_script.exists() {
+            return false;
+        }
+
+        fs::read_to_string(package_json)
+            .map(|content| content.contains("\"name\": \"technica\""))
+            .unwrap_or(false)
+    }
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    if let Ok(current_exe) = env::current_exe() {
+        if let Some(exe_dir) = current_exe.parent() {
+            let mut current = Some(exe_dir.to_path_buf());
+            while let Some(path) = current {
+                candidates.push(path.clone());
+                current = path.parent().map(PathBuf::from);
+            }
+        }
+    }
+
+    if let Ok(current_dir) = env::current_dir() {
+        let mut current = Some(current_dir);
+        while let Some(path) = current {
+            candidates.push(path.clone());
+            current = path.parent().map(PathBuf::from);
+        }
+    }
+
+    if let Some(cargo_root) = PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().map(PathBuf::from) {
+        candidates.push(cargo_root);
+    }
+
+    candidates
+        .into_iter()
+        .find(|path| looks_like_technica_root(path))
         .ok_or_else(|| "Could not resolve the Technica project root.".to_string())
 }
 
@@ -509,6 +545,16 @@ fn discover_from_directory(root: &Path, remaining_depth: usize) -> Option<PathBu
 pub(crate) fn discover_chaos_core_repo_path() -> Result<Option<String>, String> {
     let current_dir = env::current_dir().map_err(|error| format!("Could not read current directory: {}", error))?;
     let home_dir = env::var("HOME").ok().map(PathBuf::from);
+    let preferred_paths = [
+        PathBuf::from(r"C:\Users\alexh\Desktop\Sprawl\CC-experimental"),
+        PathBuf::from(r"C:\Users\alexh\Desktop\Sprawl\chaos-core"),
+    ];
+
+    for preferred_path in preferred_paths {
+        if is_chaos_core_repo(&preferred_path) {
+            return Ok(Some(preferred_path.to_string_lossy().to_string()));
+        }
+    }
 
     let candidates = [
         current_dir.clone(),

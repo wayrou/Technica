@@ -19,6 +19,7 @@ export function createBlankNpc(): NpcDocument {
     spriteKey: "",
     presentation: {
       mode: "billboard_sprite",
+      assetPresetId: "",
       modelKey: "",
       modelAssetPath: "",
       materialKey: "",
@@ -55,6 +56,7 @@ export function createSampleNpc(): NpcDocument {
     spriteKey: "guide_field_sprite",
     presentation: {
       mode: "billboard_sprite",
+      assetPresetId: "guide_billboard",
       modelKey: "",
       modelAssetPath: "",
       materialKey: "",

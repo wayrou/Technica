@@ -652,11 +652,11 @@ export function validateEffectFlowDocument(flow: EffectFlowDocument, fieldPrefix
     const falseEdges = outgoing.filter((edge) => edge.kind === "false");
 
     if (node.family === "condition") {
-      if (trueEdges.length !== 1 || falseEdges.length !== 1) {
+      if (trueEdges.length > 1 || falseEdges.length > 1) {
         issues.push({
           severity: "error",
           field: `${fieldPrefix}.nodes.${index}`,
-          message: `${node.label || "Condition node"} needs exactly one TRUE and one FALSE branch.`,
+          message: `${node.label || "Condition node"} can only use one TRUE and one FALSE branch.`,
         });
       }
 

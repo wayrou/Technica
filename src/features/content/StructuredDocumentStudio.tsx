@@ -53,6 +53,7 @@ interface StructuredDocumentStudioProps<TDocument> {
   getMobileSendSummary?: (document: TDocument) => string;
   replacePrompt: string;
   invalidImportMessage: string;
+  layout?: "columns" | "stacked";
   renderWorkspace: (context: StructuredStudioContext<TDocument>) => ReactNode;
 }
 
@@ -71,6 +72,7 @@ export function StructuredDocumentStudio<TDocument>({
   getMobileSendSummary,
   replacePrompt,
   invalidImportMessage,
+  layout = "columns",
   renderWorkspace
 }: StructuredDocumentStudioProps<TDocument>) {
   const runtime = useTechnicaRuntime();
@@ -243,8 +245,17 @@ export function StructuredDocumentStudio<TDocument>({
     sendToDesktop
   };
 
+  const workspaceClassName = [
+    "workspace-grid",
+    "blueprint-grid",
+    layout === "stacked" ? "stacked" : "",
+    issues.length > 0 ? "" : "validation-collapsed"
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <div className={issues.length > 0 ? "workspace-grid blueprint-grid" : "workspace-grid blueprint-grid validation-collapsed"}>
+    <div className={workspaceClassName}>
       <div className="workspace-column">
         {renderWorkspace(context)}
         <input ref={importRef} hidden type="file" accept=".json" onChange={handleImportFile} />

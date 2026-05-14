@@ -1,5 +1,7 @@
 import type { ValidationIssue } from "../types/common";
 import type { MapDocument } from "../types/map";
+import { findScenePropPreset } from "../features/map/scenePropCatalog";
+import { getVerticalConnectorAdvisories } from "../features/map/verticalTraversal";
 
 function isWithinBounds(x: number, y: number, width: number, height: number) {
   return x >= 0 && y >= 0 && x < width && y < height;
@@ -63,6 +65,60 @@ function getZoneRouteSource(metadata: Record<string, string> | undefined) {
 
 function getZoneRouteId(metadata: Record<string, string> | undefined, source: string) {
   return source === "portal" ? readMetadataText(metadata, "portalId") : readMetadataText(metadata, "doorId");
+}
+
+function getScenePropRouteTargetMapId(prop: NonNullable<MapDocument["sceneProps"]>[number]) {
+  return (
+    typeof prop.routeTargetMapId === "string" && prop.routeTargetMapId.trim()
+      ? prop.routeTargetMapId.trim()
+      : readMetadataText(prop.metadata, "fieldMapId") ||
+        readMetadataText(prop.metadata, "technicaFieldMapId") ||
+        readMetadataText(prop.metadata, "targetImportedMapId") ||
+        readMetadataText(prop.metadata, "targetMapId")
+  );
+}
+
+function getScenePropRouteEntryPointId(prop: NonNullable<MapDocument["sceneProps"]>[number]) {
+  return (
+    typeof prop.routeEntryPointId === "string" && prop.routeEntryPointId.trim()
+      ? prop.routeEntryPointId.trim()
+      : readMetadataText(prop.metadata, "fieldMapEntryPointId") ||
+        readMetadataText(prop.metadata, "entryPointId") ||
+        readMetadataText(prop.metadata, "spawnAnchorId")
+  );
+}
+
+function getScenePropRouteId(prop: NonNullable<MapDocument["sceneProps"]>[number]) {
+  if (prop.kind === "door") {
+    return typeof prop.doorId === "string" && prop.doorId.trim() ? prop.doorId.trim() : readMetadataText(prop.metadata, "doorId");
+  }
+
+  if (prop.kind === "portal") {
+    return typeof prop.portalId === "string" && prop.portalId.trim() ? prop.portalId.trim() : readMetadataText(prop.metadata, "portalId");
+  }
+
+  return "";
+}
+
+function getScenePropTargetAnchorId(prop: NonNullable<MapDocument["sceneProps"]>[number]) {
+  return typeof prop.targetAnchorId === "string" && prop.targetAnchorId.trim()
+    ? prop.targetAnchorId.trim()
+    : readMetadataText(prop.metadata, "targetAnchorId");
+}
+
+function getScenePropTargetCoordinate(prop: NonNullable<MapDocument["sceneProps"]>[number], axis: "x" | "y") {
+  const propertyValue = axis === "x" ? prop.targetX : prop.targetY;
+  if (typeof propertyValue === "number" && Number.isFinite(propertyValue)) {
+    return propertyValue;
+  }
+
+  const metadataValue = readMetadataText(prop.metadata, axis === "x" ? "targetX" : "targetY");
+  if (!metadataValue) {
+    return null;
+  }
+
+  const parsed = Number(metadataValue);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 export function validateMapDocument(document: MapDocument) {
@@ -224,6 +280,7 @@ export function validateMapDocument(document: MapDocument) {
 
   const scenePropIds = new Set<string>();
   document.sceneProps?.forEach((prop) => {
+    const preset = findScenePropPreset(prop.assetPresetId);
     if (!prop.id.trim()) {
       issues.push({
         severity: "error",
@@ -281,6 +338,22 @@ export function validateMapDocument(document: MapDocument) {
       });
     }
 
+    if (prop.assetPresetId?.trim() && !preset) {
+      issues.push({
+        severity: "warning",
+        field: "sceneProps",
+        message: `3D prop '${prop.id}' references missing preset '${prop.assetPresetId}'.`
+      });
+    }
+
+    if (preset && preset.kind !== prop.kind) {
+      issues.push({
+        severity: "warning",
+        field: "sceneProps",
+        message: `3D prop '${prop.id}' uses preset '${preset.id}' for kind '${preset.kind}' but the prop is marked as '${prop.kind}'.`
+      });
+    }
+
     if (prop.blocksMovement) {
       const overlapsWalkableTile = Array.from({ length: Math.max(1, prop.height) }, (_, yOffset) =>
         Array.from({ length: Math.max(1, prop.width) }, (_, xOffset) => ({ x: prop.x + xOffset, y: prop.y + yOffset }))
@@ -296,6 +369,94 @@ export function validateMapDocument(document: MapDocument) {
           severity: "warning",
           field: "sceneProps",
           message: `3D prop '${prop.id}' blocks movement but overlaps walkable floor. Consider blocking those tiles or disabling movement blocking.`
+        });
+      }
+    }
+
+    if (prop.kind === "door" || prop.kind === "portal") {
+      const targetMapId = getScenePropRouteTargetMapId(prop);
+      const routeId = getScenePropRouteId(prop);
+      const entryPointId = getScenePropRouteEntryPointId(prop);
+
+      if (!targetMapId) {
+        issues.push({
+          severity: "warning",
+          field: "sceneProps",
+          message: `${prop.kind === "door" ? "Door" : "Portal"} prop '${prop.id}' should include a target field map id.`
+        });
+      }
+
+      if (!routeId) {
+        issues.push({
+          severity: "warning",
+          field: "sceneProps",
+          message: `${prop.kind === "door" ? "Door" : "Portal"} prop '${prop.id}' should include a ${prop.kind} id for imported-route matching.`
+        });
+      } else {
+        const routeKey = `${prop.kind}:${routeId.trim().toLowerCase()}`;
+        if (zoneRouteIds.has(routeKey)) {
+          issues.push({
+            severity: "warning",
+            field: "sceneProps",
+            message: `Another route on this map already uses ${prop.kind} id '${routeId}'. Door and portal ids should be unique per source map.`
+          });
+        }
+        zoneRouteIds.add(routeKey);
+      }
+
+      if (!entryPointId) {
+        issues.push({
+          severity: "warning",
+          field: "sceneProps",
+          message: `${prop.kind === "door" ? "Door" : "Portal"} prop '${prop.id}' should point at a target spawn anchor id.`
+        });
+      }
+    }
+
+    if (prop.kind === "stairs") {
+      const targetAnchorId = getScenePropTargetAnchorId(prop);
+      const targetX = getScenePropTargetCoordinate(prop, "x");
+      const targetY = getScenePropTargetCoordinate(prop, "y");
+      const hasTileTarget = targetX !== null && targetY !== null;
+      const hasPartialTileTarget = (targetX !== null && targetY === null) || (targetX === null && targetY !== null);
+
+      if (!targetAnchorId && !hasTileTarget) {
+        issues.push({
+          severity: "warning",
+          field: "sceneProps",
+          message: `Stairs prop '${prop.id}' should target a spawn anchor id or both tile coordinates.`
+        });
+      }
+
+      if (targetAnchorId && !(document.spawnAnchors ?? []).some((anchor) => anchor.id === targetAnchorId)) {
+        issues.push({
+          severity: "warning",
+          field: "sceneProps",
+          message: `Stairs prop '${prop.id}' references missing target anchor '${targetAnchorId}'.`
+        });
+      }
+
+      if (hasPartialTileTarget) {
+        issues.push({
+          severity: "warning",
+          field: "sceneProps",
+          message: `Stairs prop '${prop.id}' needs both target tile X and target tile Y when using tile traversal.`
+        });
+      }
+
+      if (targetX !== null && (targetX < 0 || targetX >= document.width)) {
+        issues.push({
+          severity: "warning",
+          field: "sceneProps",
+          message: `Stairs prop '${prop.id}' targets tile X '${targetX}', which is outside the map bounds.`
+        });
+      }
+
+      if (targetY !== null && (targetY < 0 || targetY >= document.height)) {
+        issues.push({
+          severity: "warning",
+          field: "sceneProps",
+          message: `Stairs prop '${prop.id}' targets tile Y '${targetY}', which is outside the map bounds.`
         });
       }
     }
@@ -333,6 +494,25 @@ export function validateMapDocument(document: MapDocument) {
         severity: "error",
         field: "encounterVolumes",
         message: `Encounter volume '${volume.id}' must be at least 1x1 tiles.`
+      });
+    }
+
+    if (
+      volume.proximityRadiusTiles !== undefined &&
+      (!Number.isFinite(volume.proximityRadiusTiles) || volume.proximityRadiusTiles < 0)
+    ) {
+      issues.push({
+        severity: "warning",
+        field: "encounterVolumes",
+        message: `Encounter volume '${volume.id}' should use a proximity radius of 0 or greater.`
+      });
+    }
+
+    if (volume.triggerMode === "proximity" && Number(volume.proximityRadiusTiles ?? 0) <= 0) {
+      issues.push({
+        severity: "warning",
+        field: "encounterVolumes",
+        message: `Encounter volume '${volume.id}' uses proximity triggering but has no radius. Increase the radius or switch to on-enter.`
       });
     }
 
@@ -681,6 +861,14 @@ export function validateMapDocument(document: MapDocument) {
           message: `Vertical connector '${connector.id}' links a tile to itself.`
         });
       }
+
+      getVerticalConnectorAdvisories(document, connector).forEach((advisory) => {
+        issues.push({
+          severity: "warning",
+          field: "vertical.connectors",
+          message: `Vertical connector '${connector.id}': ${advisory}`
+        });
+      });
     });
   }
 

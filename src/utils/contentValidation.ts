@@ -22,6 +22,10 @@ import type { OperationDocument } from "../types/operation";
 import { resourceKeys, resourceLabels, type ResourceWalletDocument } from "../types/resources";
 import type { SchemaDocument } from "../types/schema";
 import type { UnitDocument } from "../types/unit";
+import {
+  findFieldEnemyPresentationPreset,
+  findNpcPresentationPreset
+} from "../features/presentation/actorPresentationCatalog";
 import { mailCategories } from "../types/mail";
 import { createLegacyCardEffectsFromFlow } from "./cardComposer";
 import { validateEffectFlowDocument } from "./effectFlow";
@@ -581,7 +585,38 @@ export function validateFieldEnemyDocument(document: FieldEnemyDocument): Valida
   }
 
   if (document.presentation) {
+    if (document.presentation.assetPresetId?.trim() && !findFieldEnemyPresentationPreset(document.presentation.assetPresetId)) {
+      issues.push({
+        severity: "warning",
+        field: "presentation.assetPresetId",
+        message: `Presentation preset '${document.presentation.assetPresetId}' is not in the current Technica field-enemy catalog.`,
+      });
+    }
     requirePositive(document.presentation.scale, "presentation.scale", "Presentation scale", issues, false);
+    if (
+      document.presentation.aggression !== "default"
+      && document.presentation.aggression !== "guard"
+      && document.presentation.aggression !== "rush"
+      && document.presentation.aggression !== "ambush"
+    ) {
+      issues.push({
+        severity: "error",
+        field: "presentation.aggression",
+        message: "Aggression must be default, guard, rush, or ambush.",
+      });
+    }
+    if (
+      document.presentation.discipline !== "default"
+      && document.presentation.discipline !== "hold"
+      && document.presentation.discipline !== "anchor"
+      && document.presentation.discipline !== "flank"
+    ) {
+      issues.push({
+        severity: "error",
+        field: "presentation.discipline",
+        message: "Discipline must be default, hold, anchor, or flank.",
+      });
+    }
   }
 
   const seenFloorOrdinals = new Set<number>();
@@ -1453,6 +1488,13 @@ export function validateNpcDocument(document: NpcDocument): ValidationIssue[] {
   validateImageAsset(document.spriteAsset, "spriteAsset", "NPC sprite", issues);
 
   if (presentation) {
+    if (presentation.assetPresetId?.trim() && !findNpcPresentationPreset(presentation.assetPresetId)) {
+      issues.push({
+        severity: "warning",
+        field: "presentation.assetPresetId",
+        message: `Presentation preset '${presentation.assetPresetId}' is not in the current Technica NPC catalog.`
+      });
+    }
     requirePositive(presentation.scale, "presentation.scale", "NPC presentation scale", issues, false);
     requireFiniteNumber(
       presentation.heightOffset,

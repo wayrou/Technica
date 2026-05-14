@@ -62,6 +62,7 @@ interface ChaosCoreDatabaseContextValue {
   desktopEnabled: boolean;
   sessionEnabled: boolean;
   repoPath: string;
+  repoTargets: Array<{ label: string; path: string }>;
   repoPathDraft: string;
   setRepoPathDraft: (nextValue: string) => void;
   commitRepoPath: (nextValue?: string) => void;
@@ -85,6 +86,17 @@ const EMPTY_SUMMARY_STATE: ChaosCoreSummaryState = {
   stale: false,
   error: null
 };
+
+const DESKTOP_REPO_TARGETS = [
+  {
+    label: "CC-experimental (Preferred)",
+    path: "C:\\Users\\alexh\\Desktop\\Sprawl\\CC-experimental"
+  },
+  {
+    label: "chaos-core",
+    path: "C:\\Users\\alexh\\Desktop\\Sprawl\\chaos-core"
+  }
+] as const;
 
 function createInitialSummaryStates() {
   return Object.fromEntries(
@@ -121,6 +133,14 @@ export function ChaosCoreDatabaseProvider({ children }: ChaosCoreDatabaseProvide
     null
   );
   const loadRequestRef = useRef(new Map<string, Promise<LoadedChaosCoreDatabaseEntry>>());
+  const repoTargets = useMemo(() => {
+    const currentPath = repoPath.trim() || repoPathDraft.trim();
+    if (!currentPath || DESKTOP_REPO_TARGETS.some((target) => target.path === currentPath)) {
+      return [...DESKTOP_REPO_TARGETS];
+    }
+
+    return [{ label: "Custom", path: currentPath }, ...DESKTOP_REPO_TARGETS];
+  }, [repoPath, repoPathDraft]);
 
   useEffect(() => {
     repoPathRef.current = repoPath;
@@ -129,6 +149,14 @@ export function ChaosCoreDatabaseProvider({ children }: ChaosCoreDatabaseProvide
   useEffect(() => {
     setRepoPathDraft(repoPath);
   }, [repoPath]);
+
+  useEffect(() => {
+    if (!desktopEnabled || repoPath || repoPathDraft.trim()) {
+      return;
+    }
+
+    setRepoPathDraft(DESKTOP_REPO_TARGETS[0].path);
+  }, [desktopEnabled, repoPath, repoPathDraft]);
 
   useEffect(() => {
     summaryStatesRef.current = summaryStates;
@@ -433,6 +461,7 @@ export function ChaosCoreDatabaseProvider({ children }: ChaosCoreDatabaseProvide
       desktopEnabled,
       sessionEnabled,
       repoPath,
+      repoTargets,
       repoPathDraft,
       setRepoPathDraft,
       commitRepoPath,
@@ -453,6 +482,7 @@ export function ChaosCoreDatabaseProvider({ children }: ChaosCoreDatabaseProvide
       loadEntry,
       markStale,
       repoPath,
+      repoTargets,
       repoPathDraft,
       sessionEnabled,
       summaryStates

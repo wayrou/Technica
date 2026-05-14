@@ -1,6 +1,7 @@
 use crate::{DatabaseEntrySummary, LoadedDatabaseEntry};
 use serde::de::DeserializeOwned;
 use std::collections::BTreeMap;
+use std::fs;
 use std::env;
 use std::path::PathBuf;
 use std::process::Command;
@@ -29,9 +30,45 @@ const DATABASE_CONTENT_TYPES: [&str; 20] = [
 ];
 
 fn technica_root() -> Result<PathBuf, String> {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .map(PathBuf::from)
+    fn looks_like_technica_root(path: &PathBuf) -> bool {
+        let package_json = path.join("package.json");
+        let snapshot_script = path.join("scripts").join("chaosCoreDatabaseSnapshot.ts");
+        if !package_json.exists() || !snapshot_script.exists() {
+            return false;
+        }
+
+        fs::read_to_string(package_json)
+            .map(|content| content.contains("\"name\": \"technica\""))
+            .unwrap_or(false)
+    }
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    if let Ok(current_exe) = env::current_exe() {
+        if let Some(exe_dir) = current_exe.parent() {
+            let mut current = Some(exe_dir.to_path_buf());
+            while let Some(path) = current {
+                candidates.push(path.clone());
+                current = path.parent().map(PathBuf::from);
+            }
+        }
+    }
+
+    if let Ok(current_dir) = env::current_dir() {
+        let mut current = Some(current_dir);
+        while let Some(path) = current {
+            candidates.push(path.clone());
+            current = path.parent().map(PathBuf::from);
+        }
+    }
+
+    if let Some(cargo_root) = PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().map(PathBuf::from) {
+        candidates.push(cargo_root);
+    }
+
+    candidates
+        .into_iter()
+        .find(looks_like_technica_root)
         .ok_or_else(|| "Could not resolve the Technica project root.".to_string())
 }
 

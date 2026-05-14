@@ -61,6 +61,7 @@ export function ChaosCoreDatabasePanel<TDocument>({
     databaseEnabled,
     desktopEnabled,
     repoPath,
+    repoTargets,
     repoPathDraft,
     setRepoPathDraft,
     commitRepoPath,
@@ -343,6 +344,19 @@ export function ChaosCoreDatabasePanel<TDocument>({
 
       {desktopEnabled ? (
         <div className="form-grid">
+          <label className="field full">
+            <span>Publish target</span>
+            <select
+              value={repoPathDraft}
+              onChange={(event) => commitRepoPath(event.target.value)}
+            >
+              {repoTargets.map((target) => (
+                <option key={target.path} value={target.path}>
+                  {target.label} - {target.path}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="field full">
             <span>Chaos Core repo path</span>
             <div className="toolbar repo-path-toolbar">

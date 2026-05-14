@@ -16,6 +16,7 @@ function createBaseFieldEnemy(): FieldEnemyDocument {
     spriteKey: "",
     presentation: {
       mode: "billboard_sprite",
+      assetPresetId: "",
       modelKey: "",
       modelAssetPath: "",
       materialKey: "",
@@ -23,6 +24,8 @@ function createBaseFieldEnemy(): FieldEnemyDocument {
       heightOffset: 0,
       facingMode: "camera",
       previewPose: "idle",
+      aggression: "default",
+      discipline: "default",
       metadata: {},
     },
     stats: {
@@ -68,6 +71,18 @@ export function createSampleFieldEnemy(): FieldEnemyDocument {
     description: "A light skirmisher that prowls collapsed survey corridors and stripped relay rooms.",
     faction: "scrap",
     spriteKey: "enemy_brass_scuttler",
+    presentation: {
+      ...createBaseFieldEnemy().presentation!,
+      assetPresetId: "brass_scuttler_3d",
+      mode: "model_3d",
+      modelKey: "brass_scuttler",
+      facingMode: "movement",
+      aggression: "rush",
+      discipline: "flank",
+      metadata: {
+        squad: "salvage_advance",
+      },
+    },
     stats: {
       maxHp: 8,
       speed: 105,

@@ -23,9 +23,12 @@ export interface FieldEnemySpawnDocument {
 
 export type FieldEnemyPresentationMode = "billboard_sprite" | "model_3d";
 export type FieldEnemyFacingMode = "camera" | "movement" | "fixed";
+export type FieldEnemyAggressionMode = "default" | "guard" | "rush" | "ambush";
+export type FieldEnemyDisciplineMode = "default" | "hold" | "anchor" | "flank";
 
 export interface FieldEnemyPresentationDocument {
   mode: FieldEnemyPresentationMode;
+  assetPresetId?: string;
   modelKey: string;
   modelAssetPath: string;
   materialKey: string;
@@ -33,6 +36,8 @@ export interface FieldEnemyPresentationDocument {
   heightOffset: number;
   facingMode: FieldEnemyFacingMode;
   previewPose: string;
+  aggression: FieldEnemyAggressionMode;
+  discipline: FieldEnemyDisciplineMode;
   metadata: KeyValueRecord;
 }
 

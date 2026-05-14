@@ -83,6 +83,7 @@ export function createSampleMap(): MapDocument {
       {
         id: "oak_square_lantern_cluster",
         kind: "light",
+        assetPresetId: "lantern_cluster",
         label: "Lantern Cluster",
         x: 4,
         y: 2,
@@ -106,6 +107,7 @@ export function createSampleMap(): MapDocument {
       {
         id: "oak_square_boarding_crates",
         kind: "cover",
+        assetPresetId: "cargo_crates",
         label: "Boarding Crates",
         x: 7,
         y: 4,

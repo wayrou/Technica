@@ -12,6 +12,7 @@ export interface NpcRoutePoint {
 
 export interface NpcPresentationDocument {
   mode: NpcPresentationMode;
+  assetPresetId?: string;
   modelKey: string;
   modelAssetPath: string;
   materialKey: string;

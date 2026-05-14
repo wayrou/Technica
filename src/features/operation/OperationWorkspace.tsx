@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChaosCoreDatabasePanel } from "../../components/ChaosCoreDatabasePanel";
 import { useChaosCoreDatabase } from "../../hooks/useChaosCoreDatabase";
 import { Panel } from "../../components/Panel";
@@ -66,6 +66,85 @@ interface OperationMapSummary {
   height: number;
   spawnAnchors: OperationMapSummaryAnchor[];
   encounterVolumes: OperationMapSummaryEncounter[];
+}
+
+function parseJsonRecord(value: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function readStringProperty(value: unknown, key: string) {
+  if (!value || typeof value !== "object" || !(key in value)) {
+    return "";
+  }
+
+  const property = (value as Record<string, unknown>)[key];
+  return typeof property === "string" ? property.trim() : "";
+}
+
+function describeOperationRoomPublishContract(room: OperationRoomDocument, options: {
+  selectedFieldMapSummary: OperationMapSummary | null;
+  selectedEncounterSummary: OperationMapSummaryEncounter | null;
+  effectiveEntryAnchorId: string;
+}) {
+  const targetMapId = room.fieldMapId?.trim() || "";
+  const source = room.fieldMapRouteSource;
+  const sourceId =
+    source === "door"
+      ? room.fieldMapDoorId?.trim() || ""
+      : source === "portal"
+        ? room.fieldMapPortalId?.trim() || ""
+        : source === "floor_region"
+          ? room.id
+          : room.id;
+  const returnAnchorId =
+    room.fieldMapReturnAnchorId?.trim() || options.selectedEncounterSummary?.fallbackReturnAnchorId || "";
+  const extractionAnchorId =
+    room.fieldMapExtractionAnchorId?.trim() || options.selectedEncounterSummary?.extractionAnchorId || "";
+  const routeReady =
+    Boolean(targetMapId) &&
+    Boolean(options.effectiveEntryAnchorId.trim()) &&
+    (source !== "door" || Boolean(room.fieldMapDoorId?.trim())) &&
+    (source !== "portal" || Boolean(room.fieldMapPortalId?.trim()));
+  const headline = [
+    `room ${runtimeId(room.id)}`,
+    targetMapId ? `map ${runtimeId(targetMapId)}` : "missing target map",
+    source === "atlas_theater"
+      ? `theater ${runtimeId(room.id)}`
+      : source === "floor_region"
+        ? `floor region ${runtimeId(room.id)}`
+        : `${source} ${sourceId || "missing id"}`,
+    `spawn ${runtimeId(options.effectiveEntryAnchorId, "spawn")}`
+  ].join(" -> ");
+
+  const detailParts = [
+    options.selectedEncounterSummary
+      ? `encounter ${runtimeId(options.selectedEncounterSummary.id, "encounter")}`
+      : "no staged encounter",
+    returnAnchorId ? `return ${runtimeId(returnAnchorId, "spawn")}` : "no explicit return anchor",
+    extractionAnchorId ? `extract ${runtimeId(extractionAnchorId, "spawn")}` : "no explicit extraction anchor"
+  ];
+
+  let detail = detailParts.join(" | ");
+  if (!targetMapId) {
+    detail = "Choose a target field map so Chaos Core has a bespoke destination to open.";
+  } else if (source === "door" && !room.fieldMapDoorId?.trim()) {
+    detail = "Add a door id so Chaos Core can match this room handoff to a specific authored door.";
+  } else if (source === "portal" && !room.fieldMapPortalId?.trim()) {
+    detail = "Add a portal id so Chaos Core can match this room handoff to a specific authored portal.";
+  } else if (!options.effectiveEntryAnchorId.trim()) {
+    detail = "Pick an entry anchor so the field handoff has a reliable spawn destination.";
+  }
+
+  return {
+    ready: routeReady,
+    headline,
+    detail
+  };
 }
 
 function normalizeSummaryString(value: unknown) {
@@ -188,6 +267,75 @@ function formatFieldRouteHintText(operation: OperationDocument, floor: Operation
     .join("\n");
 }
 
+function describeOperationRuntimeRoomProof(room: unknown): string | null {
+  if (!room || typeof room !== "object") {
+    return null;
+  }
+
+  const roomRecord = room as Record<string, unknown>;
+  const targetMapId = readStringProperty(roomRecord, "fieldMapId");
+  if (!targetMapId) {
+    return null;
+  }
+
+  const roomId = readStringProperty(roomRecord, "id") || "room";
+  const source = readStringProperty(roomRecord, "fieldMapRouteSource") || "atlas_theater";
+  const sourceId =
+    source === "door"
+      ? readStringProperty(roomRecord, "fieldMapDoorId") || "missing id"
+      : source === "portal"
+        ? readStringProperty(roomRecord, "fieldMapPortalId") || "missing id"
+        : roomId;
+  const encounterId = readStringProperty(roomRecord, "fieldMapEncounterVolumeId");
+  const entryAnchorId = readStringProperty(roomRecord, "fieldMapEntryPointId") || "player_start";
+  const returnAnchorId = readStringProperty(roomRecord, "fieldMapReturnAnchorId");
+  const extractionAnchorId = readStringProperty(roomRecord, "fieldMapExtractionAnchorId");
+
+  return [
+    `room ${roomId}`,
+    `map ${targetMapId}`,
+    source === "atlas_theater" ? `theater ${roomId}` : `${source} ${sourceId}`,
+    `spawn ${entryAnchorId}`,
+    encounterId ? `encounter ${encounterId}` : "",
+    returnAnchorId ? `return ${returnAnchorId}` : "",
+    extractionAnchorId ? `extract ${extractionAnchorId}` : ""
+  ].filter(Boolean).join(" -> ");
+}
+
+function describeOperationPublishReceipt(context: {
+  bundle: Awaited<ReturnType<typeof buildOperationBundleForTarget>>;
+  loadedEntry: LoadedChaosCoreDatabaseEntry | null;
+}) {
+  const runtimeContent =
+    context.loadedEntry?.runtimeContent ??
+    context.bundle.files.find((file) => file.name === context.bundle.manifest.entryFile)?.content ??
+    "";
+  const runtimeOperation = parseJsonRecord(runtimeContent);
+  if (!runtimeOperation) {
+    return ["Runtime operation JSON could not be parsed for receipt details."];
+  }
+
+  const floors = Array.isArray(runtimeOperation.floors) ? runtimeOperation.floors : [];
+  const rooms = floors.flatMap((floor) =>
+    floor && typeof floor === "object" && Array.isArray((floor as Record<string, unknown>).rooms)
+      ? ((floor as Record<string, unknown>).rooms as unknown[])
+      : []
+  );
+  const roomProofs = rooms
+    .map((room) => describeOperationRuntimeRoomProof(room))
+    .filter((proof): proof is string => Boolean(proof));
+
+  return [
+    `Operation id: ${typeof runtimeOperation.id === "string" ? runtimeOperation.id : context.bundle.manifest.contentId}`,
+    `Floors: ${floors.length}`,
+    `Rooms: ${rooms.length}`,
+    `Field map handoffs: ${roomProofs.length}`,
+    ...(roomProofs.length > 0
+      ? roomProofs.slice(0, 6).map((proof) => `Handoff preview: ${proof}`)
+      : ["Handoff preview: no bespoke field map theater routes configured"])
+  ];
+}
+
 export function OperationWorkspace({
   document,
   setDocument,
@@ -206,6 +354,14 @@ export function OperationWorkspace({
   const normalizedDocument = useMemo(() => normalizeOperationDocument(document), [document]);
   const [selectedFloorId, setSelectedFloorId] = useState(normalizedDocument.floors[0]?.id ?? "");
   const [selectedRoomId, setSelectedRoomId] = useState(normalizedDocument.floors[0]?.rooms[0]?.id ?? "");
+  const [draggingRoomId, setDraggingRoomId] = useState<string | null>(null);
+  const previewSvgRef = useRef<SVGSVGElement | null>(null);
+  const dragStateRef = useRef<{
+    roomId: string;
+    pointerId: number;
+    offsetX: number;
+    offsetY: number;
+  } | null>(null);
 
   useEffect(() => {
     if (!desktopEnabled || !repoPath.trim()) {
@@ -260,6 +416,13 @@ export function OperationWorkspace({
     selectedRoom?.fieldMapEntryPointId?.trim()
     || selectedEncounterSummary?.playerEntryAnchorId
     || "player_start";
+  const selectedRoomFieldRouteContract = selectedRoom
+    ? describeOperationRoomPublishContract(selectedRoom, {
+        selectedFieldMapSummary,
+        selectedEncounterSummary,
+        effectiveEntryAnchorId: selectedRoomFieldRouteEffectiveEntryAnchorId
+      })
+    : null;
   const selectedRoomFieldRouteProofRows = selectedRoom
     ? [
         ["Route room", runtimeId(selectedRoom.id)],
@@ -277,6 +440,27 @@ export function OperationWorkspace({
     Boolean(selectedRoomFieldRouteEffectiveEntryAnchorId.trim()) &&
     (!selectedRoom || selectedRoom.fieldMapRouteSource !== "door" || Boolean(selectedRoom.fieldMapDoorId?.trim())) &&
     (!selectedRoom || selectedRoom.fieldMapRouteSource !== "portal" || Boolean(selectedRoom.fieldMapPortalId?.trim()));
+  const selectedFieldMapDefaultEncounter =
+    selectedFieldMapSummary?.encounterVolumes.find((encounter) => encounter.playerEntryAnchorId)
+    ?? selectedFieldMapSummary?.encounterVolumes[0]
+    ?? null;
+  const selectedFieldMapDefaultPlayerAnchor =
+    selectedFieldMapSummary?.spawnAnchors.find((anchor) => anchor.kind === "player")?.id
+    ?? selectedFieldMapDefaultEncounter?.playerEntryAnchorId
+    ?? selectedFieldMapSummary?.spawnAnchors[0]?.id
+    ?? "";
+  const selectedRoomAlignmentSummary = selectedFieldMapSummary
+    ? [
+        selectedFieldMapDefaultPlayerAnchor ? `entry ${runtimeId(selectedFieldMapDefaultPlayerAnchor, "spawn")}` : "no default entry anchor",
+        selectedFieldMapDefaultEncounter ? `encounter ${runtimeId(selectedFieldMapDefaultEncounter.id, "encounter")}` : "no default encounter",
+        selectedFieldMapDefaultEncounter?.fallbackReturnAnchorId
+          ? `return ${runtimeId(selectedFieldMapDefaultEncounter.fallbackReturnAnchorId, "spawn")}`
+          : "no default return anchor",
+        selectedFieldMapDefaultEncounter?.extractionAnchorId
+          ? `extract ${runtimeId(selectedFieldMapDefaultEncounter.extractionAnchorId, "spawn")}`
+          : "no default extraction anchor"
+      ].join(" | ")
+    : "Choose a published field map to align this room automatically.";
 
   function updateOperation(updater: (current: OperationDocument) => OperationDocument) {
     patchDocument((current) => updater(normalizeOperationDocument(current)));
@@ -310,6 +494,101 @@ export function OperationWorkspace({
       )
     }));
   }
+
+  function updateRoomPosition(roomId: string, x: number, y: number) {
+    if (!selectedFloor) {
+      return;
+    }
+
+    const roundedX = Math.round(x * 100) / 100;
+    const roundedY = Math.round(y * 100) / 100;
+    updateSelectedFloor((floor) => ({
+      ...floor,
+      rooms: floor.rooms.map((room) => (room.id === roomId ? { ...room, x: roundedX, y: roundedY } : room))
+    }));
+  }
+
+  function projectPointerToRoomCoordinates(clientX: number, clientY: number) {
+    const svg = previewSvgRef.current;
+    if (!svg) {
+      return null;
+    }
+
+    const rect = svg.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return null;
+    }
+
+    const viewX = ((clientX - rect.left) / rect.width) * previewGeometry.width;
+    const viewY = ((clientY - rect.top) / rect.height) * previewGeometry.height;
+    return {
+      x: ((viewX - previewGeometry.padding) / previewGeometry.scale) + previewGeometry.minX,
+      y: ((viewY - previewGeometry.padding) / previewGeometry.scale) + previewGeometry.minY
+    };
+  }
+
+  function handlePreviewRoomPointerDown(
+    event: React.PointerEvent<SVGGElement>,
+    node: (typeof previewGeometry.nodes)[number]
+  ) {
+    const pointerPosition = projectPointerToRoomCoordinates(event.clientX, event.clientY);
+    if (!pointerPosition) {
+      return;
+    }
+
+    dragStateRef.current = {
+      roomId: node.room.id,
+      pointerId: event.pointerId,
+      offsetX: pointerPosition.x - node.room.x,
+      offsetY: pointerPosition.y - node.room.y
+    };
+    setDraggingRoomId(node.room.id);
+    setSelectedRoomId(node.room.id);
+    event.preventDefault();
+  }
+
+  useEffect(() => {
+    if (!draggingRoomId) {
+      return;
+    }
+
+    function handlePointerMove(event: PointerEvent) {
+      const dragState = dragStateRef.current;
+      if (!dragState || dragState.pointerId !== event.pointerId) {
+        return;
+      }
+
+      const projected = projectPointerToRoomCoordinates(event.clientX, event.clientY);
+      if (!projected) {
+        return;
+      }
+
+      updateRoomPosition(
+        dragState.roomId,
+        projected.x - dragState.offsetX,
+        projected.y - dragState.offsetY
+      );
+    }
+
+    function handlePointerUp(event: PointerEvent) {
+      const dragState = dragStateRef.current;
+      if (!dragState || dragState.pointerId !== event.pointerId) {
+        return;
+      }
+
+      dragStateRef.current = null;
+      setDraggingRoomId(null);
+    }
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+    };
+  }, [draggingRoomId, previewGeometry.height, previewGeometry.minX, previewGeometry.minY, previewGeometry.padding, previewGeometry.scale, previewGeometry.width, selectedFloor]);
 
   function setSelectedRoomFieldMapId(fieldMapId: string) {
     const nextMapSummary = mapSummaries.find((mapSummary) => mapSummary.id === fieldMapId) ?? null;
@@ -351,6 +630,39 @@ export function OperationWorkspace({
       fieldMapReturnAnchorId: encounter?.fallbackReturnAnchorId || room.fieldMapReturnAnchorId,
       fieldMapExtractionAnchorId: encounter?.extractionAnchorId || room.fieldMapExtractionAnchorId
     }));
+  }
+
+  function alignSelectedRoomToFieldMapDefaults() {
+    if (!selectedFieldMapSummary) {
+      notify("Choose a published field map first.");
+      return;
+    }
+
+    const defaultEncounter = selectedFieldMapDefaultEncounter;
+    updateSelectedRoom((room) => ({
+      ...room,
+      fieldMapEncounterVolumeId: defaultEncounter?.id || "",
+      fieldMapEntryPointId: defaultEncounter?.playerEntryAnchorId || selectedFieldMapDefaultPlayerAnchor || room.fieldMapEntryPointId,
+      fieldMapReturnAnchorId: defaultEncounter?.fallbackReturnAnchorId || "",
+      fieldMapExtractionAnchorId: defaultEncounter?.extractionAnchorId || "",
+      fieldMapLabel: room.fieldMapLabel || getOperationRoomFieldRouteLabel(room)
+    }));
+    notify("Aligned this room to the selected field map defaults.");
+  }
+
+  function alignSelectedRoomAnchorsToEncounter() {
+    if (!selectedEncounterSummary) {
+      notify("Pick an encounter volume first.");
+      return;
+    }
+
+    updateSelectedRoom((room) => ({
+      ...room,
+      fieldMapEntryPointId: selectedEncounterSummary.playerEntryAnchorId || room.fieldMapEntryPointId,
+      fieldMapReturnAnchorId: selectedEncounterSummary.fallbackReturnAnchorId || room.fieldMapReturnAnchorId,
+      fieldMapExtractionAnchorId: selectedEncounterSummary.extractionAnchorId || room.fieldMapExtractionAnchorId
+    }));
+    notify("Aligned entry, return, and extraction anchors to the selected encounter.");
   }
 
   function markSelectedRoomAsFieldMapRoute() {
@@ -757,7 +1069,12 @@ export function OperationWorkspace({
                   </div>
 
                   <div className="operation-preview-stage">
-                    <svg className="operation-preview-svg" viewBox={`0 0 ${previewGeometry.width} ${previewGeometry.height}`} preserveAspectRatio="xMidYMid meet">
+                    <svg
+                      ref={previewSvgRef}
+                      className={draggingRoomId ? "operation-preview-svg dragging" : "operation-preview-svg"}
+                      viewBox={`0 0 ${previewGeometry.width} ${previewGeometry.height}`}
+                      preserveAspectRatio="xMidYMid meet"
+                    >
                       {previewGeometry.edges.map((edge) => (
                         <line key={edge.id} x1={edge.from.x} y1={edge.from.y} x2={edge.to.x} y2={edge.to.y} className="operation-preview-edge" />
                       ))}
@@ -766,7 +1083,12 @@ export function OperationWorkspace({
                         const isSelected = node.room.id === selectedRoom?.id;
                         const radius = node.room.roomClass === "mega" ? 34 : 24;
                         return (
-                          <g key={node.room.id} className={`operation-preview-node${isSelected ? " selected" : ""}`} onClick={() => setSelectedRoomId(node.room.id)}>
+                          <g
+                            key={node.room.id}
+                            className={`operation-preview-node${isSelected ? " selected" : ""}${draggingRoomId === node.room.id ? " dragging" : ""}`}
+                            onClick={() => setSelectedRoomId(node.room.id)}
+                            onPointerDown={(event) => handlePreviewRoomPointerDown(event, node)}
+                          >
                             <circle cx={node.x} cy={node.y} r={radius} fill={roomRoleColors[node.room.role]} opacity={isSelected ? 0.95 : 0.82} />
                             <circle cx={node.x} cy={node.y} r={radius + 10} className="operation-preview-node-ring" />
                             <text x={node.x} y={node.y + 5} textAnchor="middle" className="operation-preview-node-label">
@@ -951,8 +1273,9 @@ export function OperationWorkspace({
                     <div className="operation-field-route-card__header">
                       <div>
                         <span>Technica field map entrance</span>
-                        <p>Use this room as an Atlas theater door into a published 2D or 3D field map.</p>
-                      </div>
+                      <p>Use this room as an Atlas theater door into a published 2D or 3D field map.</p>
+                      <small>Drag room nodes in the planner above to arrange the theater route visually.</small>
+                    </div>
                       <span className={`pill ${selectedRoomFieldRouteReady ? "accent" : "warning"}`}>
                         {selectedRoomFieldRouteReady ? "Handshake ready" : "Needs route data"}
                       </span>
@@ -1097,6 +1420,7 @@ export function OperationWorkspace({
                     <div className="operation-field-route-contract">
                       <div className="operation-field-route-contract__header">
                         <strong>Publish proof</strong>
+                        <span className="pill">{selectedFieldMapSummary ? "Map defaults available" : "Select field map"}</span>
                       </div>
                       <div className="operation-field-route-contract__grid">
                         {selectedRoomFieldRouteProofRows.map(([label, value]) => (
@@ -1106,10 +1430,31 @@ export function OperationWorkspace({
                           </div>
                         ))}
                       </div>
+                      <small>{selectedRoomAlignmentSummary}</small>
                     </div>
+                    {selectedRoomFieldRouteContract ? (
+                      <div className={selectedRoomFieldRouteContract.ready ? "publish-receipt" : "publish-receipt warning"}>
+                        <div className="publish-receipt-header">
+                          <strong>Chaos Core Handoff Contract</strong>
+                          <span>{selectedRoomFieldRouteContract.ready ? "Ready for publish" : "Needs authoring fix"}</span>
+                        </div>
+                        <div className="publish-receipt-details">
+                          <span>{selectedRoomFieldRouteContract.headline}</span>
+                          <span>{selectedRoomFieldRouteContract.detail}</span>
+                        </div>
+                      </div>
+                    ) : null}
                     <div className="toolbar">
                       <button type="button" className="ghost-button" onClick={markSelectedRoomAsFieldMapRoute}>
                         Use this room as theater route
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        onClick={alignSelectedRoomToFieldMapDefaults}
+                        disabled={!selectedFieldMapSummary}
+                      >
+                        Align to map defaults
                       </button>
                       <button
                         type="button"
@@ -1118,6 +1463,14 @@ export function OperationWorkspace({
                         disabled={!selectedEncounterSummary}
                       >
                         Apply encounter staging
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        onClick={alignSelectedRoomAnchorsToEncounter}
+                        disabled={!selectedEncounterSummary}
+                      >
+                        Align anchors to encounter
                       </button>
                       <button type="button" className="ghost-button" onClick={() => setSelectedRoomFieldRoutePreset("floor_region")}>
                         Floor route preset
@@ -1212,6 +1565,7 @@ export function OperationWorkspace({
         buildBundle={(current) => buildOperationBundleForTarget(normalizeOperationDocument(current), "chaos-core")}
         onLoadEntry={(entry: LoadedChaosCoreDatabaseEntry) => loadDatabaseEntry(entry, setDocument)}
         subtitle="Publish operations into the Chaos Core repo and reopen those stored records here for theater layout, route, and balance revisions."
+        describePublishReceipt={({ bundle, loadedEntry }) => describeOperationPublishReceipt({ bundle, loadedEntry })}
       />
     </>
   );

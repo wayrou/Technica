@@ -3,6 +3,12 @@ import { ChaosCoreDatabasePanel } from "../../components/ChaosCoreDatabasePanel"
 import { ImageAssetField } from "../../components/ImageAssetField";
 import { Panel } from "../../components/Panel";
 import { createBlankNpc, createSampleNpc } from "../../data/sampleNpc";
+import {
+  applyNpcPresentationPreset,
+  findNpcPresentationPreset,
+  getActorMaterialSuggestions,
+  NPC_PRESENTATION_PRESETS
+} from "../presentation/actorPresentationCatalog";
 import { useChaosCoreDatabase } from "../../hooks/useChaosCoreDatabase";
 import { StructuredDocumentStudio } from "../content/StructuredDocumentStudio";
 import { mergeFactionOptions } from "../../types/faction";
@@ -112,6 +118,7 @@ function normalizeNpcDocument(value: unknown): NpcDocument {
         presentation?.mode === "model_3d" || presentation?.mode === "billboard_sprite"
           ? presentation.mode
           : fallback.presentation?.mode ?? "billboard_sprite",
+      assetPresetId: readString(presentation?.assetPresetId, fallback.presentation?.assetPresetId ?? ""),
       modelKey: readString(presentation?.modelKey, fallback.presentation?.modelKey ?? ""),
       modelAssetPath: readString(presentation?.modelAssetPath, fallback.presentation?.modelAssetPath ?? ""),
       materialKey: readString(presentation?.materialKey, fallback.presentation?.materialKey ?? ""),
@@ -218,6 +225,27 @@ export function NpcEditor() {
         const hasSpriteSource = Boolean(npc.spriteAsset?.dataUrl || npc.spriteKey.trim() || spriteMetadataPath);
         const hasModelSource = Boolean(presentation.modelKey.trim() || presentation.modelAssetPath.trim());
         const presentationReady = presentation.mode === "model_3d" ? hasModelSource : hasSpriteSource;
+        const presentationPreset = findNpcPresentationPreset(presentation.assetPresetId);
+        const materialSuggestions = getActorMaterialSuggestions(
+          NPC_PRESENTATION_PRESETS,
+          presentation.assetPresetId,
+          presentation.modelKey,
+          presentation.materialKey
+        );
+        const modelSuggestions = Array.from(
+          new Set(NPC_PRESENTATION_PRESETS.map((preset) => preset.modelKey.trim()).filter(Boolean))
+        );
+        const presentationSummary = presentationPreset
+          ? presentationPreset.summary
+          : presentation.mode === "model_3d"
+            ? presentation.modelKey.trim()
+              ? `Manual model '${presentation.modelKey.trim()}'`
+              : presentation.modelAssetPath.trim()
+                ? `Manual asset path '${presentation.modelAssetPath.trim()}'`
+                : "No model source selected yet."
+            : hasSpriteSource
+              ? "Billboard sprite presentation uses the NPC sprite source."
+              : "Billboard sprite presentation still needs a sprite source.";
         const previewScale = Math.max(0.35, Math.min(2.25, Number.isFinite(presentation.scale) ? presentation.scale : 1));
         const previewWidth = Math.max(34, Math.min(132, 52 * previewScale));
         const previewHeight = Math.max(34, Math.min(132, 72 * previewScale));
@@ -517,6 +545,10 @@ export function NpcEditor() {
                       <strong>Conversation hook</strong>
                       <span>{npc.dialogueId.trim() || "No dialogue id assigned yet."}</span>
                     </div>
+                    <div className="field-enemy-preview-summary">
+                      <strong>Asset workflow</strong>
+                      <span>{presentationSummary}</span>
+                    </div>
                     <div className="toolbar">
                       <button
                         type="button"
@@ -551,6 +583,81 @@ export function NpcEditor() {
                     </div>
                   </div>
                 </div>
+                <div className="map-route-proof-card">
+                  <div className="map-route-proof-card__header">
+                    <div>
+                      <h4>Presentation Kit</h4>
+                      <small>Apply curated 3D or billboard defaults, then fine-tune the authored presentation.</small>
+                    </div>
+                    <span className={presentationReady ? "pill accent" : "pill warning"}>
+                      {presentationReady ? "Ready" : "Needs source"}
+                    </span>
+                  </div>
+                  <div className="form-grid compact">
+                    <label className="field">
+                      <span>Preset</span>
+                      <select
+                        value={presentation.assetPresetId ?? ""}
+                        onChange={(event) =>
+                          patchPresentation((current) => ({
+                            ...current,
+                            assetPresetId: event.target.value
+                          }))
+                        }
+                      >
+                        <option value="">Custom / manual</option>
+                        {presentation.assetPresetId &&
+                        !NPC_PRESENTATION_PRESETS.some((preset) => preset.id === presentation.assetPresetId) ? (
+                          <option value={presentation.assetPresetId}>{presentation.assetPresetId}</option>
+                        ) : null}
+                        {NPC_PRESENTATION_PRESETS.map((preset) => (
+                          <option key={preset.id} value={preset.id}>
+                            {preset.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>Suggested material</span>
+                      <input
+                        list="npc-presentation-materials"
+                        value={presentation.materialKey}
+                        onChange={(event) =>
+                          patchPresentation((current) => ({ ...current, materialKey: event.target.value }))
+                        }
+                        placeholder="Pick or type a material key"
+                      />
+                    </label>
+                    <div className="field full">
+                      <span>Kit summary</span>
+                      <div className="map-zone-route-proof">
+                        <strong>{presentationPreset ? presentationPreset.label : "Manual custom presentation"}</strong>
+                        <small>{presentationSummary}</small>
+                      </div>
+                    </div>
+                    <div className="toolbar full">
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        disabled={!presentation.assetPresetId}
+                        onClick={() => {
+                          const preset = findNpcPresentationPreset(presentation.assetPresetId);
+                          if (!preset) {
+                            return;
+                          }
+                          patchPresentation((current) => applyNpcPresentationPreset(current, preset));
+                        }}
+                      >
+                        Apply preset values
+                      </button>
+                    </div>
+                  </div>
+                  <datalist id="npc-presentation-materials">
+                    {materialSuggestions.map((materialKey) => (
+                      <option key={materialKey} value={materialKey} />
+                    ))}
+                  </datalist>
+                </div>
                 <div className="form-grid">
                   <label className="field">
                     <span>Presentation mode</span>
@@ -570,6 +677,7 @@ export function NpcEditor() {
                   <label className="field">
                     <span>Model key</span>
                     <input
+                      list="npc-presentation-models"
                       value={presentation.modelKey}
                       onChange={(event) => patchPresentation((current) => ({ ...current, modelKey: event.target.value }))}
                     />
@@ -586,12 +694,18 @@ export function NpcEditor() {
                   <label className="field">
                     <span>Material key</span>
                     <input
+                      list="npc-presentation-materials"
                       value={presentation.materialKey}
                       onChange={(event) =>
                         patchPresentation((current) => ({ ...current, materialKey: event.target.value }))
                       }
                     />
                   </label>
+                  <datalist id="npc-presentation-models">
+                    {modelSuggestions.map((modelKey) => (
+                      <option key={modelKey} value={modelKey} />
+                    ))}
+                  </datalist>
                   <label className="field">
                     <span>Scale</span>
                     <input

@@ -1193,7 +1193,13 @@ export function buildChaosCoreFieldEnemyBundle(document: FieldEnemyDocument): Ex
           heightOffset: document.presentation.heightOffset,
           facingMode: document.presentation.facingMode,
           previewPose: document.presentation.previewPose || undefined,
-          metadata: coerceRecord(document.presentation.metadata)
+          aggression: document.presentation.aggression,
+          discipline: document.presentation.discipline,
+          metadata: coerceRecord({
+            ...document.presentation.metadata,
+            aggression: document.presentation.aggression,
+            discipline: document.presentation.discipline
+          })
         })
       : undefined,
     stats: {

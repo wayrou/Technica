@@ -130,6 +130,10 @@ export function buildPreviewGeometry(floor: OperationFloorDocument) {
     return {
       width: 640,
       height: 360,
+      scale: 180,
+      padding: 120,
+      minX: 0,
+      minY: 0,
       nodes: [] as Array<{ room: OperationRoomDocument; x: number; y: number }>,
       edges: [] as Array<{ id: string; from: { x: number; y: number }; to: { x: number; y: number } }>
     };
@@ -174,7 +178,64 @@ export function buildPreviewGeometry(floor: OperationFloorDocument) {
     });
   });
 
-  return { width, height, nodes, edges };
+  return { width, height, scale, padding, minX, minY, nodes, edges };
+}
+
+function isCoordinateOccupied(
+  rooms: OperationFloorDocument["rooms"],
+  x: number,
+  y: number,
+  threshold = 0.65
+) {
+  return rooms.some((room) => Math.abs(room.x - x) < threshold && Math.abs(room.y - y) < threshold);
+}
+
+function findNextRoomPlacement(floor: OperationFloorDocument, anchorRoom: OperationRoomDocument | null) {
+  const baseX = anchorRoom?.x ?? 0;
+  const baseY = anchorRoom?.y ?? 0;
+  const candidateOffsets: Array<[number, number]> = [
+    [1.2, 0],
+    [0.95, 0.8],
+    [0, 1.2],
+    [-0.95, 0.8],
+    [-1.2, 0],
+    [-0.95, -0.8],
+    [0, -1.2],
+    [0.95, -0.8],
+    [2.2, 0.2],
+    [1.8, 1.4],
+    [0.4, 2.1],
+    [-1.4, 1.8],
+    [-2, 0.4],
+    [-1.6, -1.4],
+    [0.2, -2.1],
+    [1.7, -1.5]
+  ];
+
+  for (const [offsetX, offsetY] of candidateOffsets) {
+    const candidateX = Math.round((baseX + offsetX) * 100) / 100;
+    const candidateY = Math.round((baseY + offsetY) * 100) / 100;
+    if (!isCoordinateOccupied(floor.rooms, candidateX, candidateY)) {
+      return { x: candidateX, y: candidateY };
+    }
+  }
+
+  for (let radius = 2; radius <= 8; radius += 1) {
+    const samples = Math.max(8, radius * 8);
+    for (let step = 0; step < samples; step += 1) {
+      const angle = (Math.PI * 2 * step) / samples;
+      const candidateX = Math.round((baseX + Math.cos(angle) * radius) * 100) / 100;
+      const candidateY = Math.round((baseY + Math.sin(angle) * radius * 0.8) * 100) / 100;
+      if (!isCoordinateOccupied(floor.rooms, candidateX, candidateY)) {
+        return { x: candidateX, y: candidateY };
+      }
+    }
+  }
+
+  return {
+    x: Math.round((baseX + 1.2) * 100) / 100,
+    y: Math.round(baseY * 100) / 100
+  };
 }
 
 export function applyRoomRolePreset(room: OperationRoomDocument, role: OperationTheaterRoomRole): OperationRoomDocument {
@@ -212,14 +273,15 @@ export function createConnectedRoom(
 ) {
   const nextRoomIndex = floor.rooms.length;
   const nextRoomId = `${floor.id}_room_${nextRoomIndex + 1}`;
+  const placement = findNextRoomPlacement(floor, anchorRoom);
   return {
     room: createOperationRoomDocument(
       {
         id: nextRoomId,
         label: humanizeOperationIdentifier(nextRoomId),
         role,
-        x: (anchorRoom?.x ?? 0) + 1.2,
-        y: anchorRoom?.y ?? 0,
+        x: placement.x,
+        y: placement.y,
         depthFromUplink: Math.max(0, (anchorRoom?.depthFromUplink ?? 0) + 1),
         connections: anchorRoom ? [anchorRoom.id] : []
       },
